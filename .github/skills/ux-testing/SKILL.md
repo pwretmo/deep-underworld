@@ -149,6 +149,8 @@ mcp_io_github_chr_lighthouse_audit
 - Growing memory usage over time (dispose missing)
 - Long frame times during scene transitions
 
+> **Note**: For performance issues that need architectural changes (e.g., InstancedMesh, code-splitting), dispatch a worker to implement the most impactful incremental improvement — don't skip them just because the full solution is large.
+
 ### Accessibility Issues
 
 - No keyboard controls for menus
@@ -182,7 +184,7 @@ Subagent calls are blocking, so dispatch workers one at a time. Include in each 
 4. Affected file path
 5. Suggested fix
 
-Fix ALL issues — not just major ones. Minor polish matters for UX quality.
+Fix ALL issues — critical, major, AND minor. Never defer issues as "known issues" or "lower priority". If an issue requires significant refactoring, break it into the smallest meaningful first step a single worker can implement. Every issue found MUST result in a dispatched worker.
 
 ## Reviewing PRs
 
