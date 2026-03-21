@@ -99,6 +99,12 @@ export class Game {
       if (e.code === 'KeyC') this.hud.toggleLocator();
       if (e.code === 'Digit0') this.hud.stopTracking();
       if (this.hud.locatorVisible) {
+        if (this.hud.handleLocatorNavigation(e.code)) {
+          if (e.code === 'ArrowUp' || e.code === 'ArrowDown' || e.code === 'Enter') {
+            e.preventDefault();
+          }
+          return;
+        }
         const num = parseInt(e.key);
         if (num >= 1 && num <= 9) this.hud.trackCreature(num - 1);
       }

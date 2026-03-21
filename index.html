@@ -188,6 +188,11 @@
       font-size: 0.75rem;
     }
     .creature-entry:hover { background: #ffffff08; }
+    .creature-entry.selected {
+      background: #22ffcc1f;
+      border-left: 2px solid #22ffcc;
+      box-shadow: inset 0 0 0 1px #22ffcc44;
+    }
     .creature-entry.tracked { background: #22aaff15; border-left: 2px solid #22aaff; }
     .creature-key {
       width: 16px; height: 16px; display: flex; align-items: center;
@@ -305,7 +310,7 @@
     <div id="creature-locator">
       <h3>Creature Locator [C]</h3>
       <div id="creature-list"></div>
-      <div class="hint">Press 1-5 to track &bull; 0 to stop</div>
+      <div class="hint">Arrow keys select &bull; Enter tracks &bull; 1-9 quick track &bull; 0 stops</div>
     </div>
     <div id="track-indicator">
       <div id="track-arrow"><svg width="16" height="20" viewBox="0 0 16 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M8 0L15 13H10V20H6V13H1L8 0Z"/></svg></div>
@@ -335,6 +340,8 @@
         <h3>Interface</h3>
         <div class="help-row"><span class="help-key"><kbd>C</kbd></span><span class="help-desc">Creature locator</span></div>
         <div class="help-row"><span class="help-key"><kbd>1</kbd>-<kbd>9</kbd></span><span class="help-desc">Track creature</span></div>
+        <div class="help-row"><span class="help-key"><kbd>Up</kbd>/<kbd>Down</kbd></span><span class="help-desc">Select locator row</span></div>
+        <div class="help-row"><span class="help-key"><kbd>Enter</kbd></span><span class="help-desc">Track selected row</span></div>
         <div class="help-row"><span class="help-key"><kbd>0</kbd></span><span class="help-desc">Stop tracking</span></div>
         <div class="help-row"><span class="help-key"><kbd>H</kbd></span><span class="help-desc">Toggle this help</span></div>
         <div class="help-row"><span class="help-key"><kbd>Esc</kbd></span><span class="help-desc">Release mouse / Pause</span></div>
