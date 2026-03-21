@@ -1,9 +1,14 @@
 ---
 name: ux-testing
-description: "Browser-based UX testing for Three.js games using Chrome DevTools MCP — screenshots, keyboard input, console monitoring, performance tracing, memory analysis, Lighthouse audits, and dispatching fix workers."
+description: "Browser-based UX testing for Three.js games using Chrome DevTools MCP — screenshots, keyboard input, console monitoring, performance tracing, memory analysis, Lighthouse audits, and dispatching fix workers. Always use ?autoplay query parameter for headless testing."
 ---
 
 # UX Testing Skill
+
+⚠️ **CRITICAL: Always use `?autoplay` query parameter when testing automatically.**
+- **Autoplay URL**: `http://localhost:5173?autoplay`
+- **Effect**: Skips menu, starts game immediately, disables pointer lock (required for browser automation)
+- **Manual testing**: Use `http://localhost:5173` and click "Begin Descent" manually
 
 How to play-test the deep-underworld game in a browser, find UX issues, and dispatch fixes.
 

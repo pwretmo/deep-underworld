@@ -7,6 +7,8 @@
 - **Origin**: `https://github.com/pwretmo/deep-underworld`
 - **Default branch**: `main`
 - **Local path** (VS Code only): `F:\repos\deep-underworld`
+- **Game Test URL (headless)**: `http://localhost:5173?autoplay` — always use for automated testing
+- **Game Test URL (manual)**: `http://localhost:5173` — use for interactive play-testing
 
 When any agent or skill needs the repo owner, name, or URL — use the values above.
 Never prompt the user for repository identity information.

@@ -1,7 +1,7 @@
 ---
 name: UX Tester
 description: >
-  Video game UX orchestrator. Launches the game in a browser, plays it to
+  Video game UX orchestrator. Launches the game with ?autoplay in a browser, plays it to
   find visual, performance, accessibility, and usability issues, dispatches
   Local Workers to fix them, dispatches Reviewers for each PR, merges
   approved PRs, and re-tests to verify fixes. Runs the full loop
