@@ -206,10 +206,10 @@
     }
     #track-indicator.visible { display: flex; }
     #track-arrow {
-      width: 28px; height: 28px; border: 1px solid #22aaff55;
+      width: 32px; height: 32px; border: 1px solid #22aaff55;
       border-radius: 50%; display: flex; align-items: center;
-      justify-content: center; font-size: 1rem;
-      text-shadow: 0 0 8px #22aaff88;
+      justify-content: center; color: #22aaff;
+      filter: drop-shadow(0 0 6px #22aaff88);
     }
     #track-info { display: flex; flex-direction: column; gap: 1px; }
     #track-name { color: #88ccff; font-size: 0.7rem; }
@@ -311,7 +311,7 @@
       <div class="hint">Press 1-5 to track &bull; 0 to stop</div>
     </div>
     <div id="track-indicator">
-      <div id="track-arrow">&#x25B2;</div>
+      <div id="track-arrow"><svg width="16" height="20" viewBox="0 0 16 20" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M8 0L15 13H10V20H6V13H1L8 0Z"/></svg></div>
       <div id="track-info">
         <span id="track-name"></span>
         <span id="track-dist"></span>
