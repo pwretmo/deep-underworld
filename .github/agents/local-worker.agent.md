@@ -42,12 +42,13 @@ Read the worktree-workflow skill before starting:
 When re-dispatched with review comments:
 
 1. **Navigate** to your existing worktree: `cd <worktree-path>`
-2. **Read** the review comments provided inline in your prompt
-3. **Fix** each issue
-4. **Validate**: run `npm run build`
-5. **Commit** with a message like `fix: address review comments`
-6. **Push**: `git push`
-7. **Report back** with a summary of what was fixed — do NOT create a new PR
+2. **Sync with latest main** before fixing: `git fetch origin main` then `git rebase origin/main`
+3. **Read** the review comments provided inline in your prompt
+4. **Fix** each issue
+5. **Validate**: run `npm run build`
+6. **Commit** with a message like `fix: address review comments`
+7. **Push**: `git push --force-with-lease` (required after rebase)
+8. **Report back** with a summary of what was fixed — do NOT create a new PR
 
 ## Rules
 

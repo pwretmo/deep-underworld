@@ -118,6 +118,26 @@ git worktree add F:\repos\deep-underworld-<slug> agent/<slug>
 
 The worker then continues with `cd`, edit, build, commit, `git push` — no new PR needed.
 
+Before implementing review fix-ups, rebase onto the latest `origin/main` to reduce merge conflicts at merge time:
+
+```powershell
+cd F:\repos\deep-underworld-<slug>
+git fetch origin main
+git rebase origin/main
+```
+
+If conflicts occur, resolve them and continue with:
+
+```powershell
+git rebase --continue
+```
+
+After committing review fixes, push with lease protection because history changed during rebase:
+
+```powershell
+git push --force-with-lease
+```
+
 ## Cleaning Up Stale Worktrees
 
 If a PR is closed without merging, or the process is interrupted, worktrees may be left behind. Periodically clean them up:
