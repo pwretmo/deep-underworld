@@ -255,7 +255,7 @@ export class Player {
 
     // Update volumetric beam shader uniforms
     if (this.flashlight.visible && this._volumetricEnabled && this._beamMaterial.uniforms) {
-      this._beamMaterial.uniforms.time.value = performance.now() * 0.001;
+      this._beamMaterial.uniforms.time.value = time;
     }
   }
 

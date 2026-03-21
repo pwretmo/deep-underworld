@@ -212,6 +212,7 @@ const VolumetricDustShader = {
     varying float vAxialT;
     varying float vRadialT;
     varying float vPhase;
+    varying float vViewDist;
 
     void main() {
       // Axial: 0 at source, 1 at tip
@@ -230,6 +231,7 @@ const VolumetricDustShader = {
       float pulse = 1.0 + 0.15 * sin(time * 1.5 + phase * 6.28);
 
       vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+      vViewDist = -mvPosition.z;
       gl_PointSize = size * baseSize * depthScale * pulse * (300.0 / -mvPosition.z);
       gl_PointSize = clamp(gl_PointSize, 0.5, 16.0);
       gl_Position = projectionMatrix * mvPosition;
@@ -246,6 +248,7 @@ const VolumetricDustShader = {
     varying float vAxialT;
     varying float vRadialT;
     varying float vPhase;
+    varying float vViewDist;
 
     void main() {
       vec4 texColor = texture2D(dustMap, gl_PointCoord);
@@ -265,9 +268,8 @@ const VolumetricDustShader = {
 
       float alpha = texColor.a * baseOpacity * radialBrightness * depthDim;
 
-      // Fog attenuation (use gl_FragCoord.z for depth)
-      float fragDepth = gl_FragCoord.z / gl_FragCoord.w;
-      float fogFactor = smoothstep(fogNear, fogFar, fragDepth);
+      // Fog attenuation (linear view-space distance from vertex shader)
+      float fogFactor = smoothstep(fogNear, fogFar, vViewDist);
       particleColor = mix(particleColor, fogColor, fogFactor * 0.4);
       alpha *= (1.0 - fogFactor * 0.5);
 
