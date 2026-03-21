@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Deep Underworld - Ocean Horror</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+    canvas { display: block; }
+
+    #menu {
+      position: fixed; inset: 0; z-index: 100;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: radial-gradient(ellipse at center, #0a1628 0%, #020408 70%, #000 100%);
+      color: #88ccff; font-family: 'Segoe UI', sans-serif;
+      transition: opacity 1s;
+    }
+    #menu.hidden { opacity: 0; pointer-events: none; }
+    #menu h1 {
+      font-size: 4rem; text-transform: uppercase; letter-spacing: 0.3em;
+      text-shadow: 0 0 40px #0066ff88, 0 0 80px #0044aa44;
+      animation: pulse 3s ease-in-out infinite;
+    }
+    #menu h2 {
+      font-size: 1.2rem; color: #4488aa; margin-top: 0.5em;
+      letter-spacing: 0.15em; font-weight: normal;
+    }
+    #menu .start-btn {
+      margin-top: 3rem; padding: 1rem 3rem;
+      background: transparent; border: 1px solid #4488aa;
+      color: #88ccff; font-size: 1.2rem; letter-spacing: 0.2em;
+      cursor: pointer; transition: all 0.3s; text-transform: uppercase;
+    }
+    #menu .start-btn:hover {
+      background: #0066ff22; border-color: #88ccff;
+      box-shadow: 0 0 30px #0066ff44;
+    }
+    #menu .controls-info {
+      margin-top: 2rem; color: #335577; font-size: 0.85rem;
+      text-align: center; line-height: 1.8;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+
+    #hud {
+      position: fixed; inset: 0; z-index: 50; pointer-events: none;
+      font-family: 'Courier New', monospace; color: #88ccff;
+    }
+    #depth-display {
+      position: absolute; top: 30px; left: 30px;
+      font-size: 1.8rem; text-shadow: 0 0 10px #0066ff88;
+    }
+    #depth-zone {
+      position: absolute; top: 70px; left: 30px;
+      font-size: 0.9rem; color: #4488aa; letter-spacing: 0.1em;
+    }
+    #bars {
+      position: absolute; bottom: 30px; left: 30px;
+    }
+    .bar-container {
+      margin-bottom: 8px; display: flex; align-items: center; gap: 10px;
+    }
+    .bar-label {
+      font-size: 0.75rem; width: 70px; color: #4488aa; text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+    .bar-track {
+      width: 200px; height: 6px; background: #ffffff10; border-radius: 3px;
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%; border-radius: 3px; transition: width 0.3s;
+    }
+    #oxygen-bar { background: #22aaff; box-shadow: 0 0 8px #22aaff88; }
+    #battery-bar { background: #ffaa22; box-shadow: 0 0 8px #ffaa2288; }
+
+    #warning-text {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      font-size: 2rem; color: #ff4444; text-shadow: 0 0 20px #ff000088;
+      opacity: 0; transition: opacity 0.5s; text-transform: uppercase;
+      letter-spacing: 0.2em;
+    }
+    #warning-text.visible { opacity: 1; }
+
+    #sonar {
+      position: absolute; bottom: 30px; right: 30px;
+      width: 150px; height: 150px;
+    }
+
+    #crosshair {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      width: 20px; height: 20px;
+    }
+    #crosshair::before, #crosshair::after {
+      content: ''; position: absolute; background: #88ccff44;
+    }
+    #crosshair::before { width: 1px; height: 100%; left: 50%; }
+    #crosshair::after { height: 1px; width: 100%; top: 50%; }
+
+    #speed-display {
+      position: absolute; top: 30px; right: 30px;
+      font-size: 0.9rem; color: #4488aa; text-align: right;
+    }
+
+    #paused {
+      position: fixed; inset: 0; z-index: 90;
+      display: none; flex-direction: column; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.7); color: #88ccff;
+      font-family: 'Segoe UI', sans-serif; cursor: pointer;
+    }
+    #paused.visible { display: flex; }
+    #paused h1 { font-size: 2.5rem; letter-spacing: 0.3em; text-shadow: 0 0 30px #0066ff88; }
+    #paused p { color: #4488aa; margin-top: 1rem; }
+
+    #game-over {
+      position: fixed; inset: 0; z-index: 200;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.9); color: #ff4444;
+      font-family: 'Segoe UI', sans-serif; opacity: 0;
+      pointer-events: none; transition: opacity 1s;
+    }
+    #game-over.visible { opacity: 1; pointer-events: all; }
+    #game-over h1 { font-size: 3rem; letter-spacing: 0.3em; text-shadow: 0 0 40px #ff000088; }
+    #game-over p { color: #884444; margin-top: 1rem; }
+    #game-over .start-btn {
+      margin-top: 2rem; padding: 0.8rem 2rem;
+      background: transparent; border: 1px solid #884444;
+      color: #ff4444; font-size: 1rem; cursor: pointer;
+      letter-spacing: 0.2em; text-transform: uppercase;
+    }
+
+    #loading {
+      position: fixed; inset: 0; z-index: 300;
+      display: flex; align-items: center; justify-content: center;
+      background: #000; color: #335577;
+      font-family: 'Courier New', monospace; font-size: 1rem;
+      letter-spacing: 0.2em;
+    }
+    #loading.hidden { display: none; }
+
+    /* Creature Locator */
+    #creature-locator {
+      position: absolute; top: 110px; left: 30px;
+      display: none; pointer-events: auto;
+      background: rgba(0, 10, 20, 0.85); border: 1px solid #22445588;
+      border-radius: 4px; padding: 10px 14px; min-width: 220px;
+      backdrop-filter: blur(4px);
+    }
+    #creature-locator.visible { display: block; }
+    #creature-locator h3 {
+      font-size: 0.7rem; color: #4488aa; letter-spacing: 0.15em;
+      text-transform: uppercase; margin-bottom: 8px;
+      border-bottom: 1px solid #22445544; padding-bottom: 4px;
+    }
+    .creature-entry {
+      display: flex; align-items: center; gap: 8px;
+      padding: 4px 6px; margin-bottom: 2px; border-radius: 3px;
+      cursor: pointer; transition: background 0.15s;
+      font-size: 0.75rem;
+    }
+    .creature-entry:hover { background: #ffffff08; }
+    .creature-entry.tracked { background: #22aaff15; border-left: 2px solid #22aaff; }
+    .creature-key {
+      width: 16px; height: 16px; display: flex; align-items: center;
+      justify-content: center; background: #ffffff10; border-radius: 2px;
+      font-size: 0.65rem; color: #6688aa; flex-shrink: 0;
+    }
+    .creature-name { color: #88ccff; flex: 1; }
+    .creature-count { color: #4488aa; font-size: 0.65rem; }
+    .creature-dist { color: #448866; font-size: 0.65rem; min-width: 42px; text-align: right; }
+    #creature-locator .hint {
+      font-size: 0.6rem; color: #335566; margin-top: 6px;
+      letter-spacing: 0.05em;
+    }
+
+    /* Tracking indicator */
+    #track-indicator {
+      position: absolute; top: 85px; left: 50%; transform: translateX(-50%);
+      display: none; align-items: center; gap: 8px;
+      font-size: 0.75rem; color: #22aaff; text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+    #track-indicator.visible { display: flex; }
+    #track-arrow {
+      width: 28px; height: 28px; border: 1px solid #22aaff55;
+      border-radius: 50%; display: flex; align-items: center;
+      justify-content: center; font-size: 1rem;
+      text-shadow: 0 0 8px #22aaff88;
+    }
+    #track-info { display: flex; flex-direction: column; gap: 1px; }
+    #track-name { color: #88ccff; font-size: 0.7rem; }
+    #track-dist { color: #448866; font-size: 0.65rem; }
+  </style>
+</head>
+<body>
+  <div id="loading">INITIALIZING SYSTEMS...</div>
+
+  <div id="menu">
+    <h1>Deep Underworld</h1>
+    <h2>Explore the Abyss</h2>
+    <button class="start-btn" id="start-btn">Begin Descent</button>
+    <div class="controls-info">
+      WASD - Navigate &bull; Mouse - Look Around<br/>
+      SPACE - Ascend &bull; SHIFT - Descend<br/>
+      F - Flashlight &bull; E - Sonar Ping<br/>
+      C - Creature Locator &bull; ESC - Release Mouse
+    </div>
+  </div>
+
+  <div id="hud">
+    <div id="depth-display">0m</div>
+    <div id="depth-zone">SURFACE</div>
+    <div id="speed-display">
+      <div id="coords"></div>
+    </div>
+    <div id="bars">
+      <div class="bar-container">
+        <span class="bar-label">Oxygen</span>
+        <div class="bar-track"><div class="bar-fill" id="oxygen-bar" style="width:100%"></div></div>
+      </div>
+      <div class="bar-container">
+        <span class="bar-label">Battery</span>
+        <div class="bar-track"><div class="bar-fill" id="battery-bar" style="width:100%"></div></div>
+      </div>
+    </div>
+    <div id="warning-text"></div>
+    <div id="crosshair"></div>
+    <canvas id="sonar" width="150" height="150"></canvas>
+    <div id="creature-locator">
+      <h3>Creature Locator [C]</h3>
+      <div id="creature-list"></div>
+      <div class="hint">Press 1-5 to track &bull; 0 to stop</div>
+    </div>
+    <div id="track-indicator">
+      <div id="track-arrow">&#x25B2;</div>
+      <div id="track-info">
+        <span id="track-name"></span>
+        <span id="track-dist"></span>
+      </div>
+    </div>
+  </div>
+
+  <div id="paused">
+    <h1>PAUSED</h1>
+    <p>Click anywhere to resume</p>
+  </div>
+
+  <div id="game-over">
+    <h1>LOST AT SEA</h1>
+    <p>Your oxygen supply has been depleted</p>
+    <button class="start-btn" id="restart-btn">Try Again</button>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+import { Game } from './Game.js';
+
+const game = new Game();
+
+document.getElementById('loading').classList.add('hidden');
+
+document.getElementById('start-btn').addEventListener('click', () => {
+  game.start();
+  document.getElementById('menu').classList.add('hidden');
+});
+
+document.getElementById('restart-btn').addEventListener('click', () => {
+  document.getElementById('game-over').classList.remove('visible');
+  game.restart();
+});
