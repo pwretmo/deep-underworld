@@ -105,6 +105,7 @@ export class HUD {
       this.warningText.style.opacity = 0.5 + Math.sin(Date.now() * 0.005) * 0.5;
     } else if (this.warningTimer <= 0) {
       this.warningText.classList.remove('visible');
+      this.warningText.style.opacity = '';
     }
 
     // Update sonar display
