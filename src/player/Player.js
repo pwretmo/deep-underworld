@@ -37,7 +37,7 @@ export class Player {
 
     // Submarine flashlight
     this.flashlight = new THREE.Group();
-    const spotlight = new THREE.SpotLight(0xccddff, 50, 80, Math.PI / 7, 0.3, 1.8);
+    const spotlight = new THREE.SpotLight(0xccddff, 72, 108, Math.PI / 7, 0.3, 1.55);
     spotlight.position.set(0, 0, 0);
     spotlight.target.position.set(0, 0, -1);
     this.flashlight.add(spotlight);
@@ -52,7 +52,7 @@ export class Player {
     this.lightCone = new THREE.Mesh(coneGeo, new THREE.MeshBasicMaterial({
       color: 0x8899bb,
       transparent: true,
-      opacity: 0.018,
+      opacity: 0.022,
       blending: THREE.AdditiveBlending,
       side: THREE.DoubleSide,
       depthWrite: false,
@@ -95,7 +95,7 @@ export class Player {
     camera.add(this.flashlight);
 
     // Submarine ambient glow - dimmer for more contrast
-    this.subLight = new THREE.PointLight(0x112233, 0.2, 5);
+    this.subLight = new THREE.PointLight(0x112233, 0.32, 7);
     camera.add(this.subLight);
 
     /** Current depth (positive = deeper). Updated by Game._animate(). */
