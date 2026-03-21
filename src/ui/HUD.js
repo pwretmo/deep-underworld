@@ -56,6 +56,8 @@ export class HUD {
     this.locatorVisible = false;
     this.trackedType = null;
     this.creatureTypes = [];
+    this.selectedCreatureType = null;
+    this.selectedCreatureIndex = -1;
 
     // Pickup notification
     this.pickupEl = document.createElement('div');
@@ -70,6 +72,8 @@ export class HUD {
     this.creatureList.addEventListener('click', (e) => {
       const entry = e.target.closest('.creature-entry');
       if (!entry || !entry.dataset.creatureType) return;
+      this.selectedCreatureType = entry.dataset.creatureType;
+      this.selectedCreatureIndex = this.creatureTypes.indexOf(this.selectedCreatureType);
       this.trackCreatureByType(entry.dataset.creatureType);
     });
   }
@@ -218,6 +222,7 @@ export class HUD {
 
   toggleLocator() {
     this.locatorVisible = !this.locatorVisible;
+    this._syncLocatorSelection();
     this.locatorPanel.classList.toggle('visible', this.locatorVisible);
   }
 
@@ -226,8 +231,72 @@ export class HUD {
     this.locatorPanel.classList.remove('visible');
   }
 
+  handleLocatorNavigation(code) {
+    if (!this.locatorVisible) return false;
+
+    if (code === 'ArrowUp') {
+      this._moveLocatorSelection(-1);
+      return true;
+    }
+    if (code === 'ArrowDown') {
+      this._moveLocatorSelection(1);
+      return true;
+    }
+    if (code === 'Enter') {
+      if (this.selectedCreatureType) {
+        this.trackCreatureByType(this.selectedCreatureType);
+      }
+      return true;
+    }
+
+    return false;
+  }
+
+  _moveLocatorSelection(direction) {
+    const count = this.creatureTypes.length;
+    if (count === 0) {
+      this.selectedCreatureType = null;
+      this.selectedCreatureIndex = -1;
+      return;
+    }
+
+    this._syncLocatorSelection();
+    const current = this.selectedCreatureIndex >= 0 ? this.selectedCreatureIndex : 0;
+    const wrappedIndex = (current + direction + count) % count;
+    this.selectedCreatureIndex = wrappedIndex;
+    this.selectedCreatureType = this.creatureTypes[wrappedIndex];
+  }
+
+  _syncLocatorSelection() {
+    const count = this.creatureTypes.length;
+    if (count === 0) {
+      this.selectedCreatureType = null;
+      this.selectedCreatureIndex = -1;
+      return;
+    }
+
+    if (this.selectedCreatureType && this.creatureTypes.includes(this.selectedCreatureType)) {
+      this.selectedCreatureIndex = this.creatureTypes.indexOf(this.selectedCreatureType);
+      return;
+    }
+
+    if (this.trackedType && this.creatureTypes.includes(this.trackedType)) {
+      this.selectedCreatureType = this.trackedType;
+      this.selectedCreatureIndex = this.creatureTypes.indexOf(this.trackedType);
+      return;
+    }
+
+    const fallbackIndex = this.selectedCreatureIndex >= 0
+      ? Math.min(this.selectedCreatureIndex, count - 1)
+      : 0;
+    this.selectedCreatureIndex = fallbackIndex;
+    this.selectedCreatureType = this.creatureTypes[fallbackIndex];
+  }
+
   trackCreature(index) {
     if (index >= 0 && index < this.creatureTypes.length) {
+      this.selectedCreatureType = this.creatureTypes[index];
+      this.selectedCreatureIndex = index;
       this.trackCreatureByType(this.creatureTypes[index]);
     }
   }
@@ -262,12 +331,13 @@ export class HUD {
 
   _getLocatorHint() {
     return this.creatureTypes.length > 9
-      ? 'Press 1-9 to track the first nine. Click any row to track the rest. 0 stops tracking.'
-      : 'Press 1-9 to track. Click any row to track with the mouse. 0 stops tracking.';
+      ? 'Use Arrow keys to select and Enter to track. 1-9 track first nine, click any row to track the rest. 0 stops tracking.'
+      : 'Use Arrow keys to select and Enter to track. 1-9 track, click any row to track with the mouse. 0 stops tracking.';
   }
 
   updateLocator(creaturesByType, playerPos, camera) {
     this.creatureTypes = Object.keys(creaturesByType);
+    this._syncLocatorSelection();
     if (this.locatorHint) {
       this.locatorHint.textContent = this._getLocatorHint();
     }
@@ -280,7 +350,8 @@ export class HUD {
         const label = this._formatCreatureLabel(type);
         const dist = info.nearest < Infinity ? `${Math.floor(info.nearest)}m` : '---';
         const tracked = this.trackedType === type ? ' tracked' : '';
-        html += `<div class="creature-entry${tracked}" data-creature-type="${type}">` +
+        const selected = this.selectedCreatureType === type ? ' selected' : '';
+        html += `<div class="creature-entry${tracked}${selected}" data-creature-type="${type}">` +
           `<span class="creature-key">${i + 1}</span>` +
           `<span class="creature-name">${label}</span>` +
           `<span class="creature-count">x${info.count}</span>` +
