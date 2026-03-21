@@ -11,6 +11,15 @@ export class Terrain {
     this.lastChunkZ = null;
     this.viewDistance = 3; // chunks in each direction
     this._pendingChunks = []; // queue for staggered generation
+
+    // Shared geometry and material for rocks (avoids per-chunk allocation)
+    this._rockGeo = new THREE.DodecahedronGeometry(1, 1);
+    this._rockMat = new THREE.MeshStandardMaterial({
+      color: 0x333340,
+      roughness: 0.95,
+      metalness: 0.05,
+      flatShading: true,
+    });
   }
 
   _getChunkKey(cx, cz) {
@@ -93,14 +102,6 @@ export class Terrain {
   }
 
   _addRocks(parent, offsetX, offsetZ, size) {
-    const rockGeo = new THREE.DodecahedronGeometry(1, 1);
-    const rockMat = new THREE.MeshStandardMaterial({
-      color: 0x333340,
-      roughness: 0.95,
-      metalness: 0.05,
-      flatShading: true,
-    });
-
     const count = 8 + Math.floor(Math.random() * 8);
     for (let i = 0; i < count; i++) {
       const rx = (Math.random() - 0.5) * size * 0.8;
@@ -111,7 +112,7 @@ export class Terrain {
       const baseDepth = -80 - Math.abs(fbm2D(worldX * 0.001, worldZ * 0.001)) * 600;
 
       const scale = 1 + Math.random() * 4;
-      const rock = new THREE.Mesh(rockGeo, rockMat);
+      const rock = new THREE.Mesh(this._rockGeo, this._rockMat);
       rock.position.set(rx, baseDepth + h + scale * 0.3, rz);
       rock.scale.set(scale, scale * (0.5 + Math.random() * 0.8), scale);
       rock.rotation.set(Math.random(), Math.random(), Math.random());
@@ -151,6 +152,7 @@ export class Terrain {
       if (!needed.has(key)) {
         this.scene.remove(mesh);
         mesh.geometry.dispose();
+        mesh.material.dispose();
         this.chunks.delete(key);
       }
     }
