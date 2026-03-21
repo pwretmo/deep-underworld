@@ -1,6 +1,6 @@
 ---
 name: review-workflow
-description: 'Pull request code review using GitHub MCP tools — reading diffs, posting reviews with inline comments, managing agent-reviewed and agent-approved labels.'
+description: "Pull request code review using GitHub MCP tools — reading diffs, posting reviews with inline comments, managing agent-reviewed and agent-approved labels."
 ---
 
 # Review Workflow Skill

@@ -4,6 +4,15 @@ description: >
   Video game UX expert. Launches the game in a browser, plays it to find
   visual, performance, accessibility, and usability issues, then delegates
   fixes to Local Worker subagents.
+tools:
+  [
+    execute,
+    read,
+    search,
+    agent,
+    "io.github.ChromeDevTools/chrome-devtools-mcp/*",
+  ]
+user-invocable: false
 ---
 
 # UX Tester Agent

@@ -81,4 +81,6 @@ Agent definitions and skills live in `.github/`:
     review-workflow/SKILL.md       # PR review via GitHub MCP
     merge-workflow/SKILL.md        # Squash-merge pipeline
     ux-testing/SKILL.md            # Browser-based game testing
+.vscode/
+  mcp.json                         # MCP server declarations for agents
 ```

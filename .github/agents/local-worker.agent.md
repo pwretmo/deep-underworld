@@ -1,6 +1,8 @@
 ---
 name: Local Worker
 description: Implements code changes in a git worktree branch. Handles feature development, bug fixes, and review fix-ups. Pushes commits and creates PRs via MCP.
+tools: [execute, read, edit, search, "io.github.github/github-mcp-server/*"]
+user-invocable: false
 ---
 
 # Local Worker Agent
@@ -31,11 +33,8 @@ Read the worktree-workflow skill before starting:
 3. **Validate**: run `npm run build` — it must succeed
 4. **Commit** with a conventional commit message: `feat:`, `fix:`, `refactor:`, etc.
 5. **Push**: `git push -u origin <branch-name>`
-6. **Create PR** via MCP:
-   - Use `mcp_io_github_git_create_pull_request` with `owner: "pwretmo"`, `repo: "deep-underworld"`, `base: "main"`, `head: "<branch-name>"`
-   - Title should match the conventional commit message
-   - Body should describe what was changed and why
-7. **Add label** `agent-work` to the PR via `mcp_io_github_git_issue_write`
+6. **Create PR** via MCP targeting `main` — title matches the commit message, body describes the changes. See the worktree-workflow skill for MCP details.
+7. **Add label** `agent-work` to the PR via MCP
 8. **Report back** to the orchestrator with the PR number and a summary
 
 ### Fixing Review Comments

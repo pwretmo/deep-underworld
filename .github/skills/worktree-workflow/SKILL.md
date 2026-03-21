@@ -1,6 +1,6 @@
 ---
 name: worktree-workflow
-description: 'Git worktree creation, branch management, pushing, PR creation via MCP, and cleanup for isolated local agent work.'
+description: "Git worktree creation, branch management, pushing, PR creation via MCP, and cleanup for isolated local agent work."
 ---
 
 # Worktree Workflow Skill

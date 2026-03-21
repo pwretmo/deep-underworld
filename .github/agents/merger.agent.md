@@ -1,6 +1,8 @@
 ---
 name: Merger
 description: Squash-merges agent-approved PRs into main one at a time. Verifies builds after each merge and cleans up worktrees.
+tools: [execute, read, search, "io.github.github/github-mcp-server/*"]
+user-invocable: false
 ---
 
 # Merger Agent
@@ -21,35 +23,17 @@ You find all PRs that have been approved by the Reviewer agent (labeled `agent-a
 
 ### 1. Find Approved PRs
 
-Use `mcp_io_github_git_list_pull_requests` with:
-
-- `owner: "pwretmo"`, `repo: "deep-underworld"`, `state: "open"`
-
-Filter the results to only PRs that have the `agent-approved` label.
+List open PRs and filter for the `agent-approved` label. See the merge-workflow skill for MCP tool details.
 
 ### 2. Merge Each PR (One at a Time)
 
-For each approved PR:
+For each approved PR, follow the merge-workflow skill's procedure:
 
-1. **Squash merge** via `mcp_io_github_git_merge_pull_request` with:
-   - `owner: "pwretmo"`, `repo: "deep-underworld"`, `pullNumber: <number>`
-   - `merge_method: "squash"`
-   - `commit_title`: use the PR title
-2. **Pull locally**: `git pull origin main` (run in `F:\repos\deep-underworld`)
+1. **Squash merge** via MCP (use PR title as commit title)
+2. **Pull locally**: `git pull origin main` (in `F:\repos\deep-underworld`)
 3. **Verify build**: `npm run build`
-4. **If build fails**:
-   - Report the failure immediately
-   - Do NOT proceed with more merges
-   - The orchestrator will handle the rollback
-5. **If build succeeds**:
-   - Check if this was a local worker branch (`agent/` prefix)
-   - If yes, clean up the worktree:
-     ```
-     git worktree remove F:\repos\deep-underworld-<slug> --force
-     git worktree prune
-     git branch -d agent/<slug>
-     ```
-   - Continue to the next PR
+4. **If build fails** — stop immediately and report. Do NOT proceed with more merges.
+5. **If build succeeds** — clean up worktree for local `agent/` branches (see skill), then continue to next PR.
 
 ### 3. Report Results
 

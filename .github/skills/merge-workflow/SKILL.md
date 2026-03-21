@@ -1,6 +1,6 @@
 ---
 name: merge-workflow
-description: 'Squash-merge approved PRs using GitHub MCP tools — finding agent-approved PRs, merging, post-merge build verification, worktree cleanup, stop-on-failure.'
+description: "Squash-merge approved PRs using GitHub MCP tools — finding agent-approved PRs, merging, post-merge build verification, worktree cleanup, stop-on-failure."
 ---
 
 # Merge Workflow Skill
