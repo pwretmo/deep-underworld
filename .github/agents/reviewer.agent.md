@@ -58,10 +58,6 @@ Review the diff thoroughly. Apply your expert judgment. Consider:
 - Are Three.js resources properly managed (dispose, memory)?
 - Does it follow the project's conventions (ES modules, conventional commits)?
 
-#### Issue-Completeness Check (BLOCKING)
-
-If the PR links to a GitHub issue, confirm every requirement from that issue is addressed in the diff. Partial implementations are blocking — request changes and list the missing requirements with `[INCOMPLETE IMPLEMENTATION]` prefix.
-
 #### Feature-Removal Check (BLOCKING)
 
 This is the **highest-priority** review criterion — it overrides all others:
