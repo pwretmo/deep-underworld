@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { noise2D } from '../utils/noise.js';
+import { fbm2D } from '../utils/noise.js';
 
 const PICKUP_RADIUS = 5;
 const OXYGEN_RESTORE = 30;
@@ -47,7 +47,7 @@ export class SupplyCache {
         // Use terrain height to place on ocean floor
         const terrainY = this.terrain._getTerrainHeight(x, z);
         // Terrain positions follow: baseDepth + h pattern from Terrain.js
-        const baseDepth = -80 - Math.abs(noise2D(x * 0.001, z * 0.001)) * 600;
+        const baseDepth = -80 - Math.abs(fbm2D(x * 0.001, z * 0.001)) * 600;
         const y = baseDepth + terrainY + 0.5; // slightly above ground
 
         const mesh = new THREE.Mesh(geo, mat.clone());
