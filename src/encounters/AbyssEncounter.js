@@ -50,7 +50,7 @@ export class AbyssEncounter {
     this._entityDriftDir = new THREE.Vector3();
   }
 
-  update(delta, depth, player, scene, fog, ambientLight, hud) {
+  update(delta, depth, player, scene, fog, ambientLight, hud, audio) {
     if (this.completed) return;
 
     this.stateTime += delta;
@@ -68,16 +68,16 @@ export class AbyssEncounter {
         this._updateIdle(depth, player, scene, fog, ambientLight, hud);
         break;
       case State.TRIGGERED:
-        this._updateTriggered(delta, scene, fog, ambientLight, hud);
+        this._updateTriggered(delta, scene, fog, ambientLight, hud, audio);
         break;
       case State.FOG_CLOSING:
-        this._updateFogClosing(delta, fog, ambientLight, hud);
+        this._updateFogClosing(delta, fog, ambientLight, hud, audio);
         break;
       case State.REVEAL:
         this._updateReveal(delta, fog, ambientLight);
         break;
       case State.DRIFT:
-        this._updateDrift(delta, fog, ambientLight);
+        this._updateDrift(delta, fog, ambientLight, audio);
         break;
       case State.RETREAT:
         this._updateRetreat(delta, scene, fog, ambientLight);
@@ -106,15 +106,16 @@ export class AbyssEncounter {
     }
   }
 
-  _updateTriggered(delta, scene, fog, ambientLight, hud) {
+  _updateTriggered(delta, scene, fog, ambientLight, hud, audio) {
     // Immediate transition to fog closing — brief pause for dramatic effect
     if (this.stateTime > 0.5) {
       hud._showWarning('MASSIVE ENTITY DETECTED', 4000);
+      audio?.playEncounterDetected();
       this._transition(State.FOG_CLOSING);
     }
   }
 
-  _updateFogClosing(delta, fog, ambientLight, hud) {
+  _updateFogClosing(delta, fog, ambientLight, hud, audio) {
     const t = Math.min(this.stateTime / FOG_CLOSE_DURATION, 1);
     const ease = t * t; // ease-in
 
@@ -126,6 +127,7 @@ export class AbyssEncounter {
     ambientLight.intensity = THREE.MathUtils.lerp(this._savedAmbientIntensity, 0.001, ease);
 
     if (t >= 1) {
+      audio?.playEncounterReveal();
       this._transition(State.REVEAL);
     }
   }
@@ -149,7 +151,7 @@ export class AbyssEncounter {
     }
   }
 
-  _updateDrift(delta, fog, ambientLight) {
+  _updateDrift(delta, fog, ambientLight, audio) {
     const t = Math.min(this.stateTime / DRIFT_DURATION, 1);
     const ease = t * t * (3 - 2 * t);
 
@@ -167,6 +169,7 @@ export class AbyssEncounter {
     this._pulseBioluminescence(0.5 + t * 0.5);
 
     if (t >= 1) {
+      audio?.playEncounterRetreat();
       this._transition(State.RETREAT);
     }
   }
@@ -468,5 +471,28 @@ export class AbyssEncounter {
   _transition(newState) {
     this.state = newState;
     this.stateTime = 0;
+  }
+
+  getAudioState() {
+    switch (this.state) {
+      case State.TRIGGERED:
+        return { state: this.state, intensity: 0.35 };
+      case State.FOG_CLOSING:
+        return {
+          state: this.state,
+          intensity: THREE.MathUtils.lerp(0.45, 0.82, Math.min(this.stateTime / FOG_CLOSE_DURATION, 1)),
+        };
+      case State.REVEAL:
+        return { state: this.state, intensity: 1.0 };
+      case State.DRIFT:
+        return { state: this.state, intensity: 0.72 };
+      case State.RETREAT:
+        return {
+          state: this.state,
+          intensity: THREE.MathUtils.lerp(0.55, 0.12, Math.min(this.stateTime / RETREAT_DURATION, 1)),
+        };
+      default:
+        return { state: this.state, intensity: 0 };
+    }
   }
 }

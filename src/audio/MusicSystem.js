@@ -44,14 +44,17 @@ function pickIndex(len) {
 // MusicSystem
 // ---------------------------------------------------------------------------
 export class MusicSystem {
-  constructor(audioCtx, masterGain) {
+  constructor(audioCtx, outputBuses) {
     this.ctx = audioCtx;
-    this.master = masterGain;
+    this.outputBuses = outputBuses;
 
     // ---- mix bus ----
     this.musicGain = this.ctx.createGain();
     this.musicGain.gain.value = 0;            // fade in on start
-    this.musicGain.connect(this.master);
+    this.musicGain.connect(this.outputBuses.music);
+    this.threatMaster = this.ctx.createGain();
+    this.threatMaster.gain.value = 0;
+    this.threatMaster.connect(this.outputBuses.threat || this.outputBuses.music);
 
     // ---- shared reverb (convolution-free, delay-based) ----
     this.reverbSend = this.ctx.createGain();
@@ -69,6 +72,7 @@ export class MusicSystem {
     this.depth = 0;
     this.creatureProx = 0;       // 0 = far, 1 = touching
     this.oxygenStress = 0;       // 0 = full, 1 = empty
+    this.encounterIntensity = 0;
     this.time = 0;
     this.melodyTimer = 0;
     this.melodyInterval = 4;
@@ -108,10 +112,10 @@ export class MusicSystem {
   // =========================================================================
   _buildPadLayer() {
     this.padGain = this.ctx.createGain();
-    this.padGain.gain.value = 0.07;
+    this.padGain.gain.value = 0.045;
     this.padFilter = this.ctx.createBiquadFilter();
     this.padFilter.type = 'lowpass';
-    this.padFilter.frequency.value = 800;
+    this.padFilter.frequency.value = 520;
     this.padFilter.Q.value = 1;
     this.padFilter.connect(this.padGain);
     this.padGain.connect(this.musicGain);
@@ -126,19 +130,19 @@ export class MusicSystem {
       // Two oscillators slightly detuned for richness
       for (const detune of [-6, 6]) {
         const osc = this.ctx.createOscillator();
-        osc.type = 'sine';
+        osc.type = detune < 0 ? 'sine' : 'triangle';
         osc.frequency.value = freq;
         osc.detune.value = detune;
         // Slow LFO on volume for swelling
         const lfo = this.ctx.createOscillator();
         lfo.type = 'sine';
-        lfo.frequency.value = 0.05 + Math.random() * 0.08;
+        lfo.frequency.value = 0.025 + Math.random() * 0.045;
         const lfoDepth = this.ctx.createGain();
-        lfoDepth.gain.value = 0.3;
+        lfoDepth.gain.value = 0.18;
         lfo.connect(lfoDepth);
 
         const oscGain = this.ctx.createGain();
-        oscGain.gain.value = 0.5;
+        oscGain.gain.value = 0.42;
         lfoDepth.connect(oscGain.gain);
 
         osc.connect(oscGain);
@@ -155,10 +159,10 @@ export class MusicSystem {
   // =========================================================================
   _buildMelodyLayer() {
     this.melodyGain = this.ctx.createGain();
-    this.melodyGain.gain.value = 0.04;
+    this.melodyGain.gain.value = 0.018;
     this.melodyFilter = this.ctx.createBiquadFilter();
     this.melodyFilter.type = 'lowpass';
-    this.melodyFilter.frequency.value = 1200;
+    this.melodyFilter.frequency.value = 760;
     this.melodyFilter.connect(this.melodyGain);
     this.melodyGain.connect(this.musicGain);
     this.melodyGain.connect(this.reverbSend);
@@ -168,20 +172,20 @@ export class MusicSystem {
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
     const idx = pickIndex(scale.length);
-    const octave = Math.random() < 0.3 ? 12 : 0;
+    const octave = Math.random() < 0.14 ? 12 : 0;
     const midi = rootMidi + scale[idx] + octave;
     const freq = midiToFreq(midi);
 
     const osc = this.ctx.createOscillator();
-    osc.type = Math.random() < 0.5 ? 'sine' : 'triangle';
+    osc.type = Math.random() < 0.82 ? 'sine' : 'triangle';
     osc.frequency.value = freq;
 
     // Slow vibrato
     const vibrato = this.ctx.createOscillator();
     vibrato.type = 'sine';
-    vibrato.frequency.value = 4 + Math.random() * 2;
+    vibrato.frequency.value = 2.2 + Math.random() * 1.2;
     const vibratoD = this.ctx.createGain();
-    vibratoD.gain.value = freq * 0.008;
+    vibratoD.gain.value = freq * 0.0035;
     vibrato.connect(vibratoD);
     vibratoD.connect(osc.frequency);
     vibrato.start(now);
@@ -189,8 +193,8 @@ export class MusicSystem {
 
     const env = this.ctx.createGain();
     env.gain.setValueAtTime(0, now);
-    env.gain.linearRampToValueAtTime(1, now + 0.3);
-    env.gain.setValueAtTime(1, now + duration * 0.6);
+    env.gain.linearRampToValueAtTime(1, now + 0.45);
+    env.gain.setValueAtTime(1, now + duration * 0.55);
     env.gain.exponentialRampToValueAtTime(0.001, now + duration);
 
     osc.connect(env);
@@ -258,10 +262,9 @@ export class MusicSystem {
     this.tensionGain.gain.value = 0;
     this.tensionFilter = this.ctx.createBiquadFilter();
     this.tensionFilter.type = 'lowpass';
-    this.tensionFilter.frequency.value = 3000;
+    this.tensionFilter.frequency.value = 1800;
     this.tensionFilter.connect(this.tensionGain);
-    this.tensionGain.connect(this.musicGain);
-    this.tensionGain.connect(this.reverbSend);
+    this.tensionGain.connect(this.threatMaster);
   }
 
   _playTensionStinger(intensity) {
@@ -284,7 +287,7 @@ export class MusicSystem {
       osc.frequency.linearRampToValueAtTime(freq * (0.97 + Math.random() * 0.06), now + dur);
 
       const env = this.ctx.createGain();
-      const vol = 0.015 * intensity;
+      const vol = 0.01 * intensity;
       env.gain.setValueAtTime(0, now);
       env.gain.linearRampToValueAtTime(vol, now + 0.5);
       env.gain.setValueAtTime(vol, now + dur * 0.5);
@@ -326,7 +329,7 @@ export class MusicSystem {
     filter.Q.value = 8;
 
     const env = this.ctx.createGain();
-    const vol = 0.025 * intensity;
+    const vol = 0.014 * intensity;
     env.gain.setValueAtTime(0, now);
     env.gain.linearRampToValueAtTime(vol, now + 0.1);
     env.gain.exponentialRampToValueAtTime(0.001, now + dur);
@@ -344,7 +347,7 @@ export class MusicSystem {
   _buildStressLayer() {
     this.stressGain = this.ctx.createGain();
     this.stressGain.gain.value = 0;
-    this.stressGain.connect(this.musicGain);
+    this.stressGain.connect(this.threatMaster);
 
     // Continuous high-pitched oscillator that fades in under stress
     this.stressOsc = this.ctx.createOscillator();
@@ -402,12 +405,15 @@ export class MusicSystem {
     // Gentle fade in
     this.musicGain.gain.setValueAtTime(0, this.ctx.currentTime);
     this.musicGain.gain.linearRampToValueAtTime(1, this.ctx.currentTime + 4);
+    this.threatMaster.gain.setValueAtTime(0, this.ctx.currentTime);
+    this.threatMaster.gain.linearRampToValueAtTime(1, this.ctx.currentTime + 1.5);
     this.fadedIn = true;
   }
 
   stop() {
     if (!this.started) return;
     this.musicGain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 2);
+    this.threatMaster.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 1.5);
     this.started = false;
     this.fadedIn = false;
   }
@@ -415,46 +421,51 @@ export class MusicSystem {
   // =========================================================================
   //  UPDATE – called every frame from Game
   // =========================================================================
-  update(dt, depth, nearestCreatureDist) {
+  update(dt, stateOrDepth, nearestCreatureDist) {
     if (!this.started || !this.ctx) return;
 
+    const state = typeof stateOrDepth === 'object'
+      ? stateOrDepth
+      : { depth: stateOrDepth, nearestCreatureDist };
+
     this.time += dt;
-    this.depth = depth;
-    this.creatureProx = clamp01(1 - nearestCreatureDist / 60);
-    this.oxygenStress = 0;
+    this.depth = state.depth ?? 0;
+    this.creatureProx = clamp01(1 - (state.nearestCreatureDist ?? Number.POSITIVE_INFINITY) / 60);
+    this.oxygenStress = clamp01(state.oxygenStress ?? 0);
+    this.encounterIntensity = clamp01(state.encounterState?.intensity ?? 0);
 
     const now = this.ctx.currentTime;
 
     // ---- Determine current mood / scale ----
-    const threat = Math.max(this.creatureProx, this.oxygenStress * 0.6);
+    const threat = Math.max(this.creatureProx, this.oxygenStress * 0.6, this.encounterIntensity * 0.92);
     let scale, rootMidi;
 
     if (threat < 0.2) {
       scale = SCALES.dorian;
-      rootMidi = 48; // C3
+      rootMidi = 43; // G2
     } else if (threat < 0.5) {
       scale = SCALES.phrygian;
-      rootMidi = 47; // B2
+      rootMidi = 41; // F2
     } else if (threat < 0.75) {
       scale = SCALES.locrian;
-      rootMidi = 46; // Bb2
+      rootMidi = 39; // Eb2
     } else {
       scale = SCALES.chromatic;
-      rootMidi = 45; // A2
+      rootMidi = 37; // C#2
     }
 
     // Lower root further with depth
-    rootMidi -= Math.floor(depth / 200) * 2;
+    rootMidi -= Math.floor(this.depth / 220) * 2;
     rootMidi = Math.max(30, rootMidi);
 
     // ---- PAD LAYER ----
-    const padCutoff = lerp(800, 250, clamp01(depth / 400)) * lerp(1, 0.5, threat);
+    const padCutoff = lerp(520, 180, clamp01(this.depth / 450)) * lerp(1, 0.42, threat);
     this.padFilter.frequency.setTargetAtTime(padCutoff, now, 1);
 
     // Shift pad chord to match mood
     const chordOffsets = threat < 0.5
-      ? [0, 7, 12, 19]      // power chord (5ths)
-      : [0, 3, 6, 12];      // diminished
+      ? [0, 7, 10, 17]
+      : [0, 5, 10, 12];
     for (let i = 0; i < this.padOscillators.length; i++) {
       const po = this.padOscillators[i];
       const chordIdx = Math.floor(i / 2);
@@ -463,24 +474,25 @@ export class MusicSystem {
       po.osc.frequency.setTargetAtTime(targetFreq + (i % 2 === 0 ? -0.5 : 0.5), now, 2);
     }
 
-    const padVol = lerp(0.06, 0.10, clamp01(depth / 300));
+    const padVol = lerp(0.04, 0.07, clamp01(this.depth / 400));
     this.padGain.gain.setTargetAtTime(padVol, now, 1);
 
     // ---- MELODY LAYER ----
     this.melodyTimer += dt;
-    const melInterval = lerp(5, 1.5, threat);
+    const melInterval = lerp(7.5, 3.25, threat);
     if (this.melodyTimer > melInterval) {
       this.melodyTimer = 0;
-      const dur = lerp(3, 1, threat);
+      const dur = lerp(4.2, 1.4, threat);
       this._playMelodyNote(scale, rootMidi, dur);
-      // Sometimes play a second note for richer texture
-      if (Math.random() < 0.3 + threat * 0.3) {
+      // Occasionally answer the note with a quieter second tone.
+      if (Math.random() < 0.12 + threat * 0.2) {
         setTimeout(() => this._playMelodyNote(scale, rootMidi, dur * 0.7), (0.2 + Math.random() * 0.5) * 1000);
       }
     }
 
-    const melVol = lerp(0.03, 0.06, clamp01(depth / 200));
+    const melVol = lerp(0.014, 0.028, clamp01(this.depth / 280));
     this.melodyGain.gain.setTargetAtTime(melVol, now, 0.5);
+    this.melodyFilter.frequency.setTargetAtTime(lerp(760, 420, threat), now, 0.8);
 
     // ---- PULSE LAYER (oxygen stress) ----
     const pulseActive = this.oxygenStress > 0.1;
@@ -501,14 +513,14 @@ export class MusicSystem {
 
     if (tensionActive) {
       this.tensionTimer += dt;
-      const tensionInt = lerp(10, 2, this.creatureProx);
+      const tensionInt = lerp(12, 3.5, Math.max(this.creatureProx, this.encounterIntensity));
       if (this.tensionTimer > tensionInt) {
         this.tensionTimer = 0;
-        this._playTensionStinger(this.creatureProx);
+        this._playTensionStinger(Math.max(this.creatureProx, this.encounterIntensity * 0.85));
       }
 
       // Creature very close – play warning sounds
-      if (this.creatureProx > 0.6 && Math.random() < dt * this.creatureProx * 1.5) {
+      if (this.creatureProx > 0.65 && Math.random() < dt * this.creatureProx * 0.9) {
         this._playCreatureWarning(this.creatureProx);
       }
     } else {
@@ -536,7 +548,7 @@ export class MusicSystem {
     }
 
     // ---- REVERB wetness with depth ----
-    const reverbWet = lerp(0.25, 0.55, clamp01(depth / 500));
+    const reverbWet = lerp(0.18, 0.38, clamp01(this.depth / 500));
     this.reverbSend.gain.setTargetAtTime(reverbWet, now, 1);
   }
 
