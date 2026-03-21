@@ -59,7 +59,30 @@ Verify that key tools appear in the results:
 - `mcp_io_github_chr_press_key` (keyboard input)
 - `mcp_io_github_git_pull_request_read` (PR polling)
 
-**If tools are not found**: STOP and report to the orchestrator that the Chrome DevTools MCP server is unavailable. Do NOT silently fall back to code-based analysis — browser-based testing is the core purpose of this agent.
+**If tools are not found or the liveness check fails**: You MUST output the following message verbatim and stop immediately — do nothing else:
+
+> **UX TEST ABORTED — Chrome DevTools MCP unavailable.**
+> Phase 0 tool discovery failed: `mcp_io_github_chr_new_page` was not found (or liveness check failed).
+> **Action required**: Ensure the Chrome DevTools MCP server is running. Check `.vscode/mcp.json` and restart the VS Code MCP session, then retry.
+
+After outputting that message, call `task_complete` with that message as the summary and return. Under no circumstances should you:
+- Fall back to searching source files or reading code
+- Attempt to infer issues from static analysis
+- "Take over directly" and substitute code analysis for browser testing
+- Produce a partial UX report without live browser data
+
+Browser-based testing is the **only** acceptable mode for this agent. A UX report without screenshots and live telemetry is worse than no report.
+
+#### Liveness check
+
+After confirming tools are listed, verify the browser actually works before proceeding:
+
+```
+mcp_io_github_chr_new_page
+  url: "about:blank"
+```
+
+If this call throws an error or times out, treat it as a failed liveness check and apply the same hard-stop rule above.
 
 ### Phase 1 — Launch
 

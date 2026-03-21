@@ -12,6 +12,7 @@
     "three": "^0.170.0"
   },
   "devDependencies": {
+    "chrome-devtools-mcp": "^0.20.3",
     "vite": "^6.0.0"
   }
 }

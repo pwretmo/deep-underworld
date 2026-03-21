@@ -17,7 +17,22 @@ tool_search_tool_regex  pattern: "mcp_io_github_chr"
 
 This loads all Chrome DevTools tools (screenshots, clicks, keyboard, console, performance, Lighthouse, etc.). Verify that `mcp_io_github_chr_new_page` appears in the results before proceeding.
 
-If the search returns no matching tools, the Chrome DevTools MCP server is not running. **STOP and report this** — do not fall back to code-based analysis.
+After completing discovery, do a quick liveness check — open `about:blank` to confirm the browser is reachable:
+
+```
+mcp_io_github_chr_new_page
+  url: "about:blank"
+```
+
+If this fails, apply the same STOP rule.
+
+If the search returns no matching tools, the Chrome DevTools MCP server is not running or not configured. **STOP immediately** — output the following and call `task_complete`:
+
+> **UX TEST ABORTED — Chrome DevTools MCP unavailable.**
+> `tool_search_tool_regex` returned no results for `mcp_io_github_chr`.
+> Check `.vscode/mcp.json` and restart the VS Code MCP session, then retry.
+
+Do NOT fall back to code-based analysis, file searching, or any substitute for live browser testing.
 
 If you also need GitHub MCP tools (for PR polling), load them too:
 
