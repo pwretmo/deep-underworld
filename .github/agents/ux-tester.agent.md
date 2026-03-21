@@ -82,17 +82,20 @@ After confirming tools are listed, verify the browser actually works before proc
 - If `open_browser_page` is available: open `about:blank`, then read the page with `read_page`.
 - Else if `mcp_io_github_chr_new_page` is available: open `about:blank`, then take a snapshot with `mcp_io_github_chr_take_snapshot`.
 
+If the liveness check succeeds, close that temporary `about:blank` page immediately before moving on.
+
 If the open/read path throws an error or times out, treat it as a failed liveness check and apply the same hard-stop rule above.
 
 ### Phase 1 — Launch
 
 1. Start the dev server in a background terminal: `npm run dev`
-2. Open the game with whichever opener exists:
+2. Reuse an existing `http://localhost:5173?autoplay` page if one is already open for this run; otherwise open exactly one gameplay page with whichever opener exists:
 
 - `open_browser_page` → `http://localhost:5173?autoplay`, or
 - `mcp_io_github_chr_new_page` → `http://localhost:5173?autoplay`
 
-3. Wait for load, capture initial evidence using `read_page`, `screenshot_page`, or `mcp_io_github_chr_take_snapshot`
+3. Record that page as the primary gameplay page for the session.
+4. Wait for load, capture initial evidence using `read_page`, `screenshot_page`, or `mcp_io_github_chr_take_snapshot`
 
 ### Phase 2 — Play & Observe
 
@@ -272,7 +275,7 @@ If the Merger reports a build failure, stop the merge pipeline and report the fa
 After all merges complete:
 
 1. Restart the dev server (kill and re-run `npm run dev`)
-2. Reload the game page
+2. Reload or re-navigate the existing primary gameplay page; do not open another gameplay tab for verification
 3. Re-test the specific areas where issues were found
 4. Confirm each fix is working
 5. Note any regressions
@@ -320,3 +323,4 @@ Return a structured report to the orchestrator:
 - Always poll for external GitHub Copilot reviews before and after each review round — don't ignore external feedback
 - Use `mcp_io_github_chr_evaluate_script` to access game internals rather than guessing
 - Each dispatched worker gets a unique slug: `ux-fix-<N>`
+- Keep browser usage tight: reuse one primary gameplay page, close temporary probe pages immediately, and close every page you opened before `task_complete`, even on abort/error paths

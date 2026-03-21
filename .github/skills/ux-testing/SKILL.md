@@ -40,6 +40,8 @@ Once ready, do a liveness check by opening `about:blank` and reading a snapshot:
 - `open_browser_page` + `read_page`, or
 - `mcp_io_github_chr_new_page` + `mcp_io_github_chr_take_snapshot`
 
+After a successful liveness check, close the temporary `about:blank` page immediately. Do not keep probe tabs open for the rest of the session.
+
 If this fails or times out, **STOP immediately** with the same abort message above.
 
 ## Starting the Dev Server
@@ -53,14 +55,23 @@ npm run dev
 
 Wait ~3 seconds, then open the game.
 
+## Browser Session Hygiene
+
+- Keep exactly one gameplay page open for `http://localhost:5173?autoplay` during a UX run.
+- Before opening a new game page, inspect existing pages/tabs when listing tools are available and reuse an existing autoplay page if one is already open.
+- Treat the first gameplay page you open as the primary page for the whole run. Reuse that page ID/tab for screenshots, console checks, audits, and re-tests.
+- If you must open a temporary second page for a probe or isolated check, close it immediately after that step completes.
+- After restarting the dev server or re-testing fixes, reload or re-navigate the existing gameplay page instead of opening a fresh tab.
+- Keep a short list of every page/tab you opened during the session and close all of them before `task_complete`, including abort and error exits.
+
 ## Browser Interaction Patterns
 
 Prefer high-level browser tools (`open_browser_page`, `read_page`, `click_element`, `type_in_page`, `screenshot_page`) and Chrome MCP tools when available.
 
 ### Opening the game
 
-- Preferred: `open_browser_page` with `http://localhost:5173?autoplay`
-- Alternate: `mcp_io_github_chr_new_page` with `http://localhost:5173?autoplay`
+- Preferred: reuse an existing autoplay page; otherwise call `open_browser_page` once with `http://localhost:5173?autoplay`
+- Alternate: reuse an existing autoplay tab; otherwise call `mcp_io_github_chr_new_page` once with `http://localhost:5173?autoplay`
 
 Always use `?autoplay` for automated UX testing.
 
@@ -332,7 +343,7 @@ After merges are done:
 
 ## Cleanup: Closing Browser Windows
 
-When testing is complete (all issues found, fixed, reviewed, merged, and re-tested), close all browser tabs and windows opened during the session:
+Cleanup is mandatory on every exit path. When testing is complete, or if you abort early because tooling/server setup fails, close all browser tabs and windows opened during the session:
 
 ```javascript
 // Close the current page
