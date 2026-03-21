@@ -10,6 +10,7 @@ export class Terrain {
     this.lastChunkX = null;
     this.lastChunkZ = null;
     this.viewDistance = 3; // chunks in each direction
+    this._pendingChunks = []; // queue for staggered generation
   }
 
   _getChunkKey(cx, cz) {
@@ -124,6 +125,16 @@ export class Terrain {
     const cx = Math.round(playerPos.x / this.chunkSize);
     const cz = Math.round(playerPos.z / this.chunkSize);
 
+    // Build at most 1 pending chunk per frame to avoid frame spikes
+    if (this._pendingChunks.length > 0) {
+      const { key, x, z } = this._pendingChunks.shift();
+      if (!this.chunks.has(key)) {
+        const chunk = this._createChunk(x, z);
+        this.scene.add(chunk);
+        this.chunks.set(key, chunk);
+      }
+    }
+
     if (cx === this.lastChunkX && cz === this.lastChunkZ) return;
     this.lastChunkX = cx;
     this.lastChunkZ = cz;
@@ -144,13 +155,12 @@ export class Terrain {
       }
     }
 
-    // Create new chunks
+    // Queue new chunks for staggered creation (1 per frame)
+    this._pendingChunks = [];
     for (const key of needed) {
       if (!this.chunks.has(key)) {
         const [x, z] = key.split(',').map(Number);
-        const chunk = this._createChunk(x, z);
-        this.scene.add(chunk);
-        this.chunks.set(key, chunk);
+        this._pendingChunks.push({ key, x, z });
       }
     }
   }

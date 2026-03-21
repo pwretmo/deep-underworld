@@ -10,6 +10,7 @@ export class Flora {
     this.lastChunkZ = null;
     this.time = 0;
     this.kelps = [];
+    this._pendingChunks = []; // queue for staggered generation
   }
 
   _getChunkKey(cx, cz) { return `${cx},${cz}`; }
@@ -193,6 +194,16 @@ export class Flora {
   update(dt, playerPos) {
     this.time += dt;
 
+    // Build at most 1 pending flora chunk per frame to avoid frame spikes
+    if (this._pendingChunks.length > 0) {
+      const { key, x, z } = this._pendingChunks.shift();
+      if (!this.groups.has(key)) {
+        const chunk = this._createFloraChunk(x, z);
+        this.scene.add(chunk);
+        this.groups.set(key, chunk);
+      }
+    }
+
     // Chunk management
     const cx = Math.round(playerPos.x / this.chunkSize);
     const cz = Math.round(playerPos.z / this.chunkSize);
@@ -217,12 +228,12 @@ export class Flora {
         }
       }
 
+      // Queue new chunks for staggered creation (1 per frame)
+      this._pendingChunks = [];
       for (const key of needed) {
         if (!this.groups.has(key)) {
           const [x, z] = key.split(',').map(Number);
-          const chunk = this._createFloraChunk(x, z);
-          this.scene.add(chunk);
-          this.groups.set(key, chunk);
+          this._pendingChunks.push({ key, x, z });
         }
       }
     }

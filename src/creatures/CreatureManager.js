@@ -30,6 +30,13 @@ import { IronWhale } from './IronWhale.js';
 import { MechOctopus } from './MechOctopus.js';
 import { Parasite } from './Parasite.js';
 
+// Distance beyond which creatures are removed entirely
+const DESPAWN_DISTANCE = 250;
+// Distance beyond which creature updates are skipped (cheaper than despawn)
+const CULL_DISTANCE = 180;
+// Hard cap on total alive creatures to bound per-frame work
+const MAX_CREATURES = 60;
+
 export class CreatureManager {
   constructor(scene) {
     this.scene = scene;
@@ -238,8 +245,20 @@ export class CreatureManager {
       this._dynamicSpawn(playerPos, depth);
     }
 
-    // Update all creatures
+    // Remove creatures that have drifted far away (bounds total count)
+    for (let i = this.creatures.length - 1; i >= 0; i--) {
+      const c = this.creatures[i];
+      const pos = c.instance.getPosition ? c.instance.getPosition() : null;
+      if (pos && pos.distanceTo(playerPos) > DESPAWN_DISTANCE) {
+        c.instance.dispose();
+        this.creatures.splice(i, 1);
+      }
+    }
+
+    // Update creatures with distance culling — skip far-away updates
     for (const creature of this.creatures) {
+      const pos = creature.instance.getPosition ? creature.instance.getPosition() : null;
+      if (pos && pos.distanceTo(playerPos) > CULL_DISTANCE) continue;
       creature.instance.update(dt, playerPos);
     }
   }
@@ -249,6 +268,7 @@ export class CreatureManager {
   }
 
   _trySpawn(type, Cls, depth, depthMin, depthMax, cap, playerPos, hRange, yOff, yRange, extra) {
+    if (this.creatures.length >= MAX_CREATURES) return;
     if (depth > depthMin && this._count(type) < cap) {
       const pos = this._rndPos(playerPos, hRange, playerPos.y + yOff, yRange);
       this._add(type, extra
@@ -263,7 +283,7 @@ export class CreatureManager {
     this._trySpawn('anglerfish', Anglerfish, depth, 150, 800, 5, playerPos, 80, -10, 30);
     this._trySpawn('ghostshark', GhostShark, depth, 50, 600, 4, playerPos, 100, 0, 30);
 
-    if (depth > 30 && depth < 400 && this._count('jellyfish') < 3) {
+    if (this.creatures.length < MAX_CREATURES && depth > 30 && depth < 400 && this._count('jellyfish') < 3) {
       this._add('jellyfish',
         new Jellyfish(this.scene,
           this._rndPos(playerPos, 60, playerPos.y, 20),
@@ -271,13 +291,13 @@ export class CreatureManager {
         30, 400);
     }
 
-    if (depth > 500 && this._count('leviathan') < 3) {
+    if (this.creatures.length < MAX_CREATURES && depth > 500 && this._count('leviathan') < 3) {
       this._add('leviathan',
         new Leviathan(this.scene, this._rndPos(playerPos, 200, playerPos.y - 30, 50)),
         400, 2000);
     }
 
-    if (depth > 300 && this._count('deepone') < 2) {
+    if (this.creatures.length < MAX_CREATURES && depth > 300 && this._count('deepone') < 2) {
       this._add('deepone',
         new DeepOne(this.scene, this._angledPos(playerPos, 80 + Math.random() * 60, playerPos.y - 20 - Math.random() * 40)),
         250, 2000);
@@ -307,17 +327,17 @@ export class CreatureManager {
     this._trySpawn('ironwhale', IronWhale, depth, 500, 2000, 1, playerPos, 150, -30, 60);
 
     // Stationary creatures spawn more rarely
-    if (depth > 200 && this._count('pipeorgan') < 4 && Math.random() < 0.3) {
+    if (this.creatures.length < MAX_CREATURES && depth > 200 && this._count('pipeorgan') < 4 && Math.random() < 0.3) {
       this._add('pipeorgan',
         new PipeOrgan(this.scene, this._rndPos(playerPos, 80, playerPos.y - 15, 30)),
         200, 1500);
     }
-    if (depth > 150 && this._count('tubecluster') < 6 && Math.random() < 0.3) {
+    if (this.creatures.length < MAX_CREATURES && depth > 150 && this._count('tubecluster') < 6 && Math.random() < 0.3) {
       this._add('tubecluster',
         new TubeCluster(this.scene, this._rndPos(playerPos, 70, playerPos.y - 10, 25)),
         150, 1200);
     }
-    if (depth > 280 && this._count('ribcage') < 3 && Math.random() < 0.25) {
+    if (this.creatures.length < MAX_CREATURES && depth > 280 && this._count('ribcage') < 3 && Math.random() < 0.25) {
       this._add('ribcage',
         new RibCage(this.scene, this._rndPos(playerPos, 70, playerPos.y - 15, 30)),
         280, 1500);

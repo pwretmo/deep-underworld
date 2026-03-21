@@ -14,13 +14,13 @@ export class Ocean {
     this.sunLight = new THREE.DirectionalLight(0x6699aa, 0.4);
     this.sunLight.position.set(50, 100, 30);
     this.sunLight.castShadow = true;
-    this.sunLight.shadow.mapSize.set(2048, 2048);
+    this.sunLight.shadow.mapSize.set(1024, 1024);
     this.sunLight.shadow.camera.near = 10;
-    this.sunLight.shadow.camera.far = 200;
-    this.sunLight.shadow.camera.left = -80;
-    this.sunLight.shadow.camera.right = 80;
-    this.sunLight.shadow.camera.top = 80;
-    this.sunLight.shadow.camera.bottom = -80;
+    this.sunLight.shadow.camera.far = 150;
+    this.sunLight.shadow.camera.left = -60;
+    this.sunLight.shadow.camera.right = 60;
+    this.sunLight.shadow.camera.top = 60;
+    this.sunLight.shadow.camera.bottom = -60;
     scene.add(this.sunLight);
     scene.add(this.sunLight.target);
 
@@ -209,9 +209,11 @@ export class Ocean {
       r.mesh.position.z = playerPos.z + Math.cos(r.phase) * 40;
     }
 
-    // Sun light follows player but fades with depth
+    // Sun light follows player but fades with depth; disable shadows when too deep
     this.sunLight.position.set(playerPos.x + 50, 100, playerPos.z + 30);
     this.sunLight.target.position.set(playerPos.x, playerPos.y, playerPos.z);
-    this.sunLight.intensity = depth < 100 ? 0.6 * (1 - depth / 100) : 0;
+    const sunFade = depth < 100 ? 0.6 * (1 - depth / 100) : 0;
+    this.sunLight.intensity = sunFade;
+    this.sunLight.castShadow = depth < 120;
   }
 }

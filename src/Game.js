@@ -20,7 +20,7 @@ export class Game {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.8;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -53,6 +53,7 @@ export class Game {
     this.controlsHelpOverlay = document.getElementById('controls-help');
     this.controlsHelpVisible = false;
 
+    this._initEnvironmentColors();
     this._setupEvents();
     this._animate();
   }
@@ -220,50 +221,61 @@ export class Game {
     this.underwaterEffect.render(depth);
   }
 
+  _initEnvironmentColors() {
+    // Pre-allocate reusable Color objects to avoid per-frame GC pressure
+    this._fogColor = new THREE.Color();
+    this._envColorA = new THREE.Color();
+    this._envColorB = new THREE.Color();
+    this._fog = new THREE.Fog(0x006994, 5, 300);
+    this.scene.fog = this._fog;
+  }
+
   _updateEnvironmentForDepth(depth) {
     // Fog and ambient light changes with depth
-    let fogColor, fogNear, fogFar, ambientIntensity;
+    let fogNear, fogFar, ambientIntensity;
 
     if (depth < 50) {
       // Sunlit zone
       const t = depth / 50;
-      fogColor = new THREE.Color().lerpColors(
-        new THREE.Color(0x004466), new THREE.Color(0x002233), t
-      );
+      this._envColorA.set(0x004466);
+      this._envColorB.set(0x002233);
+      this._fogColor.lerpColors(this._envColorA, this._envColorB, t);
       fogNear = 5;
       fogFar = THREE.MathUtils.lerp(200, 100, t);
       ambientIntensity = THREE.MathUtils.lerp(0.25, 0.1, t);
     } else if (depth < 200) {
       // Twilight zone
       const t = (depth - 50) / 150;
-      fogColor = new THREE.Color().lerpColors(
-        new THREE.Color(0x002233), new THREE.Color(0x000811), t
-      );
+      this._envColorA.set(0x002233);
+      this._envColorB.set(0x000811);
+      this._fogColor.lerpColors(this._envColorA, this._envColorB, t);
       fogNear = 2;
       fogFar = THREE.MathUtils.lerp(100, 45, t);
       ambientIntensity = THREE.MathUtils.lerp(0.1, 0.015, t);
     } else if (depth < 500) {
       // Dark zone - nearly pitch black
       const t = (depth - 200) / 300;
-      fogColor = new THREE.Color().lerpColors(
-        new THREE.Color(0x000811), new THREE.Color(0x010104), t
-      );
+      this._envColorA.set(0x000811);
+      this._envColorB.set(0x010104);
+      this._fogColor.lerpColors(this._envColorA, this._envColorB, t);
       fogNear = 0.5;
       fogFar = THREE.MathUtils.lerp(45, 22, t);
       ambientIntensity = THREE.MathUtils.lerp(0.015, 0.002, t);
     } else {
       // Abyss - total darkness, only flashlight illuminates
       const t = Math.min(1, (depth - 500) / 300);
-      fogColor = new THREE.Color().lerpColors(
-        new THREE.Color(0x010104), new THREE.Color(0x000001), t
-      );
+      this._envColorA.set(0x010104);
+      this._envColorB.set(0x000001);
+      this._fogColor.lerpColors(this._envColorA, this._envColorB, t);
       fogNear = 0.1;
       fogFar = THREE.MathUtils.lerp(22, 14, t);
       ambientIntensity = THREE.MathUtils.lerp(0.002, 0.0003, t);
     }
 
-    this.scene.fog = new THREE.Fog(fogColor, fogNear, fogFar);
-    this.scene.background = fogColor;
+    this._fog.color.copy(this._fogColor);
+    this._fog.near = fogNear;
+    this._fog.far = fogFar;
+    this.scene.background.copy(this._fogColor);
     this.ocean.ambientLight.intensity = ambientIntensity;
   }
 }
