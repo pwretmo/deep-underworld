@@ -218,6 +218,11 @@ export class HUD {
     this.locatorPanel.classList.toggle('visible', this.locatorVisible);
   }
 
+  closeLocator() {
+    this.locatorVisible = false;
+    this.locatorPanel.classList.remove('visible');
+  }
+
   trackCreature(index) {
     if (index >= 0 && index < this.creatureTypes.length) {
       this.trackCreatureByType(this.creatureTypes[index]);
