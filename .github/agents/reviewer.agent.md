@@ -25,6 +25,14 @@ You are a senior engineer reviewing code. Use your expert judgment — not a rig
 
 You review **all PRs equally** — both local worker PRs (`agent/` branches) and cloud agent PRs (`copilot/` branches).
 
+## Available Tools
+
+You have access to local dev tools pre-installed in the repo:
+
+- **eslint** — run `npx eslint src/` to check code style before reviewing
+- **typescript** — run `npx tsc --noEmit` to check for type errors
+- **lighthouse** — run `npx lighthouse http://localhost:5173` to catch performance issues (if game is running)
+
 ## Workflow
 
 ### 1. Read the PR

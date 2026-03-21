@@ -43,6 +43,14 @@ Read these skills before starting:
 - `.github/skills/review-workflow/SKILL.md`
 - `.github/skills/merge-workflow/SKILL.md`
 
+## Available Tools
+
+You have access to local dev tools pre-installed in the repo:
+
+- **lighthouse** — run `npx lighthouse http://localhost:5173` to detect performance regressions, Core Web Vitals issues, accessibility problems
+- **eslint** — run `npx eslint src/` to check code quality in fixes before review
+- **chrome-devtools-mcp** — browser automation for gameplay testing, screenshots, console monitoring
+
 ## Workflow
 
 ### Phase 0 — Discover Tools
@@ -66,6 +74,7 @@ Verify that key tools appear in the results:
 > **Action required**: Ensure the Chrome DevTools MCP server is running. Check `.vscode/mcp.json` and restart the VS Code MCP session, then retry.
 
 After outputting that message, call `task_complete` with that message as the summary and return. Under no circumstances should you:
+
 - Fall back to searching source files or reading code
 - Attempt to infer issues from static analysis
 - "Take over directly" and substitute code analysis for browser testing

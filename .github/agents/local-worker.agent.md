@@ -24,6 +24,13 @@ Read the worktree-workflow skill before starting:
 
 - `.github/skills/worktree-workflow/SKILL.md`
 
+## Available Tools
+
+You have access to local dev tools pre-installed in the repo:
+
+- **eslint** — run `npx eslint --fix src/` to auto-fix style issues before committing
+- **typescript** — run `npx tsc --noEmit` to type-check JavaScript (JSDoc types)
+
 ## Workflow
 
 ### New Task (no review comments)
