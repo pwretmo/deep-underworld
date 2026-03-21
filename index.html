@@ -244,12 +244,12 @@
   </style>
 </head>
 <body>
-  <div id="loading">INITIALIZING SYSTEMS...</div>
+  <div id="loading" role="status" aria-label="Loading">INITIALIZING SYSTEMS...</div>
 
-  <div id="menu">
+  <div id="menu" role="dialog" aria-label="Main menu">
     <h1>Deep Underworld</h1>
     <h2>Explore the Abyss</h2>
-    <button class="start-btn" id="start-btn">Begin Descent</button>
+    <button class="start-btn" id="start-btn" data-testid="start-btn">Begin Descent</button>
     <div class="controls-info">
       WASD - Navigate &bull; Mouse - Look Around<br/>
       SPACE - Ascend &bull; SHIFT - Descend<br/>
@@ -258,9 +258,9 @@
     </div>
   </div>
 
-  <div id="hud">
-    <div id="depth-display">0m</div>
-    <div id="depth-zone">SURFACE</div>
+  <div id="hud" role="status" aria-label="HUD">
+    <div id="depth-display" aria-label="Depth">0m</div>
+    <div id="depth-zone" aria-label="Depth zone">SURFACE</div>
     <div id="bars">
       <div class="bar-container">
         <span class="bar-label">Oxygen</span>
@@ -316,15 +316,15 @@
     </div>
   </div>
 
-  <div id="paused">
+  <div id="paused" role="dialog" aria-label="Paused">
     <h1>PAUSED</h1>
     <p>Click anywhere to resume</p>
   </div>
 
-  <div id="game-over">
+  <div id="game-over" role="dialog" aria-label="Game over">
     <h1>LOST AT SEA</h1>
     <p>Your oxygen supply has been depleted</p>
-    <button class="start-btn" id="restart-btn">Try Again</button>
+    <button class="start-btn" id="restart-btn" data-testid="restart-btn">Try Again</button>
   </div>
 
   <script type="module" src="/src/main.js"></script>

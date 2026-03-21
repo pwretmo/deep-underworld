@@ -34,11 +34,20 @@ cd F:\repos\deep-underworld
 npm run dev
 ```
 
-Wait ~3 seconds, then open `http://localhost:5173`.
+Wait ~3 seconds, then open the game.
 
 ## Browser Interaction Patterns
 
 ### Opening the game
+
+Use `?autoplay` to skip the menu and bypass pointer lock — the game starts immediately and accepts keyboard input from Chrome DevTools without needing a real user click:
+
+```
+mcp_io_github_chr_new_page
+  url: "http://localhost:5173?autoplay"
+```
+
+Without `?autoplay`, you must click the Start button and handle pointer lock manually:
 
 ```
 mcp_io_github_chr_new_page
@@ -62,8 +71,8 @@ Returns the accessibility tree with element references for clickable elements.
 ### Playing the game
 
 ```
-# Click the canvas to capture pointer lock
-mcp_io_github_chr_click  element: "canvas"
+# Click the canvas to capture pointer lock (not needed in autoplay mode)
+mcp_io_github_chr_click  element: "#game-canvas"
 
 # Move forward
 mcp_io_github_chr_press_key  key: "w"
@@ -77,6 +86,17 @@ mcp_io_github_chr_press_key  key: "Escape"
 
 ### Querying game state via JavaScript
 
+The `Game` instance is exposed on `window.game`. Key properties:
+
+- `game.player.position` — THREE.Vector3
+- `game.player.depth` — current depth (positive = deeper)
+- `game.depth` — same as above
+- `game.fps` — frames per second (updated every ~1 s)
+- `game.creatureManager.creatures.length` — number of active creatures
+- `game.oxygen` / `game.battery` — resource levels (0-100)
+- `game.running` / `game.gameOver` — game state flags
+- `game.autoplay` — true when in autoplay mode
+
 ```
 mcp_io_github_chr_evaluate_script
   expression: "(() => {
@@ -84,23 +104,27 @@ mcp_io_github_chr_evaluate_script
     if (!game) return { error: 'game not found on window' };
     return {
       playerPos: game.player?.position,
+      depth: game.depth,
       fps: game.fps,
       creatureCount: game.creatureManager?.creatures?.length,
-      depth: game.player?.depth
+      oxygen: game.oxygen,
+      battery: game.battery,
+      running: game.running,
+      gameOver: game.gameOver
     };
   })()"
 ```
 
-> **Tip**: If `window.game` isn't exposed, search the source for how the
-> Game instance is created and find the right global reference.
+> **Tip**: If `window.game` isn't responding, check that the page has
+> finished loading. In autoplay mode the game starts immediately.
 
 ### Checking console errors
+
+The game logs state changes with a `[deep-underworld]` prefix. Filter for these to track game events (start, game over, depth zone changes), and filter for errors/warnings to catch runtime issues.
 
 ```
 mcp_io_github_chr_list_console_messages
 ```
-
-Filter for errors and warnings in the results.
 
 ### Performance trace
 
