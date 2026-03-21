@@ -6,6 +6,7 @@ description: "Browser-based UX testing for Three.js games using Chrome DevTools 
 # UX Testing Skill
 
 ⚠️ **CRITICAL: Always use `?autoplay` query parameter when testing automatically.**
+
 - **Autoplay URL**: `http://localhost:5173?autoplay`
 - **Effect**: Skips menu, starts game immediately, disables pointer lock (required for browser automation)
 - **Manual testing**: Use `http://localhost:5173` and click "Begin Descent" manually
@@ -361,3 +362,28 @@ After merges are done:
 2. Reload the game in the browser
 3. Re-test the specific areas where fixes were applied
 4. Confirm each fix is working and note any regressions
+
+## Cleanup: Closing Browser Windows
+
+When testing is complete (all issues found, fixed, reviewed, merged, and re-tested), close all browser tabs and windows opened during the session:
+
+```javascript
+// Close the current page
+async (page) => {
+  await page.close();
+  return "Browser page closed";
+};
+```
+
+Or close the entire browser context if multiple tabs were opened for different test phases:
+
+```javascript
+// Close browser context (all tabs/windows)
+async (page) => {
+  const browser = page.context().browser();
+  await browser.close();
+  return "Browser closed";
+};
+```
+
+This cleanup ensures Chrome DevTools MCP doesn't leave orphaned browser processes. Always perform cleanup before final `task_complete` call.
