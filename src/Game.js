@@ -66,13 +66,13 @@ export class Game {
     this._pointLightBudget = {
       shallowMax: 10,
       deepMax: 6,
-      transitionBand: 2,
+      transitionBand: 3,
       scanInterval: 0.35,
       scanElapsed: 1,
       retargetInterval: 0.22,
       retargetElapsed: 1,
       fadeInRate: 8,
-      fadeOutRate: 18,
+      fadeOutRate: 6,
       managedLights: [],
       tempWorldPos: new THREE.Vector3(),
     };
@@ -535,7 +535,10 @@ export class Game {
       const baseIntensity = light.userData.duwBaseIntensity ?? light.intensity;
       const worldPos = light.getWorldPosition(budget.tempWorldPos);
       const distanceSq = worldPos.distanceToSquared(playerPos);
-      const score = (baseIntensity + 0.001) / (distanceSq + 1);
+      // Hysteresis: boost score for currently-active lights to prevent flip-flopping
+      const isActive = (light.userData.duwTargetIntensity ?? 0) > 0.01;
+      const hysteresis = isActive ? 1.2 : 1.0;
+      const score = ((baseIntensity + 0.001) / (distanceSq + 1)) * hysteresis;
       candidates.push({ light, score });
       light.userData.duwTargetIntensity = 0;
     }

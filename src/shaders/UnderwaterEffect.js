@@ -34,7 +34,7 @@ const RENDER_PIPELINE_TUNING = Object.freeze({
     maxScale: 1.0,
     degradeThresholdMs: 28,
     severeThresholdMs: 45,
-    recoveryThresholdMs: 16,
+    recoveryThresholdMs: 22,
     degradeStep: 0.05,
     severeDegradeStep: 0.09,
     recoveryStep: 0.02,
