@@ -61,6 +61,7 @@ export class MusicSystem {
     this.encounterIntensity = 0;
     this.time = 0;
     this.melodyTimer = 0;
+    this.melodyRetryTimer = 0;
     this.pulseTimer = 0;
     this.tensionTimer = 0;
     this.stressTimer = 0;
@@ -573,16 +574,21 @@ export class MusicSystem {
     this.undertowGain.gain.setTargetAtTime(lerp(0.012, 0.036, Math.max(depthNorm * 0.55, threat, this.encounterIntensity)), now, 0.9);
 
     this.melodyTimer += dt;
+    this.melodyRetryTimer = Math.max(0, this.melodyRetryTimer - dt);
     const melInterval = lerp(7.2, 4.8, depthNorm) + threat * 2.8 + this.encounterIntensity * 5.2;
-    if (this.melodyTimer > melInterval) {
+    const melRetryInterval = 0.9 + depthNorm * 0.35 + threat * 0.25 + this.encounterIntensity * 0.4;
+    if (this.melodyTimer > melInterval && this.melodyRetryTimer === 0) {
       if (Math.random() < 0.72 - this.encounterIntensity * 0.45) {
         this.melodyTimer = 0;
+        this.melodyRetryTimer = 0;
         const dur = lerp(5, 2.4, threat + this.encounterIntensity * 0.3);
         this._playMelodyNote(scale, rootMidi, dur, threat);
         if (Math.random() < 0.16 - threat * 0.08) {
           const answerDelay = 0.45 + Math.random() * 0.5;
           this._playMelodyNote(scale, rootMidi, dur * 0.68, threat, now + answerDelay);
         }
+      } else {
+        this.melodyRetryTimer = melRetryInterval;
       }
     }
 
