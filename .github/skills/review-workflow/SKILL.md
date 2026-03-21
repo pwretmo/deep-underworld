@@ -1,11 +1,11 @@
+---
+name: review-workflow
+description: 'Pull request code review using GitHub MCP tools — reading diffs, posting reviews with inline comments, managing agent-reviewed and agent-approved labels.'
+---
+
 # Review Workflow Skill
 
 Step-by-step instructions for reviewing PRs using GitHub MCP tools.
-
-## Repository Facts
-
-- **Owner**: `pwretmo`
-- **Repo**: `deep-underworld`
 
 ## Reading a PR
 

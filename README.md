@@ -71,7 +71,6 @@ Agent definitions and skills live in `.github/`:
 ```text
 .github/
   copilot-instructions.md          # Repo-wide conventions and dispatch templates
-  AGENTS.md                        # Agent index
   agents/
     local-worker.agent.md          # Local Worker agent
     reviewer.agent.md              # Reviewer agent

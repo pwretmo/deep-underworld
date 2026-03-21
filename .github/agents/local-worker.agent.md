@@ -1,6 +1,6 @@
 ---
 name: Local Worker
-description: Implements changes in a dedicated git worktree, pushes, and creates a PR.
+description: Implements code changes in a git worktree branch. Handles feature development, bug fixes, and review fix-ups. Pushes commits and creates PRs via MCP.
 ---
 
 # Local Worker Agent
@@ -21,17 +21,6 @@ The orchestrator provides these in your dispatch prompt:
 Read the worktree-workflow skill before starting:
 
 - `.github/skills/worktree-workflow/SKILL.md`
-
-## Repository Facts
-
-- **Owner**: `pwretmo`
-- **Repo**: `deep-underworld`
-- **Origin**: `https://github.com/pwretmo/deep-underworld`
-- **Default branch**: `main`
-- **Build command**: `npm run build`
-- **Language**: JavaScript (ES modules), Three.js + Vite
-
-Never prompt for repository identity information — use the values above.
 
 ## Workflow
 
@@ -65,7 +54,6 @@ When re-dispatched with review comments:
 
 - **Never** work directly on `main`
 - **Never** touch files outside your worktree
-- **Never** use the `gh` CLI — use GitHub MCP tools (`mcp_io_github_git_*`) for all GitHub operations
 - Use `git push` in terminal for pushing commits
 - Use conventional commit messages
 - If the build fails, fix the issue before committing

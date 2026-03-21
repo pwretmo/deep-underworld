@@ -28,17 +28,6 @@ Read these skills before starting:
 - `.github/skills/ux-testing/SKILL.md`
 - `.github/skills/worktree-workflow/SKILL.md`
 
-## Repository Facts
-
-- **Owner**: `pwretmo`
-- **Repo**: `deep-underworld`
-- **Origin**: `https://github.com/pwretmo/deep-underworld`
-- **Default branch**: `main`
-- **Dev server**: `npm run dev` (Vite, serves on `http://localhost:5173`)
-- **Language**: JavaScript (ES modules), Three.js + Vite
-
-Never prompt for repository identity information — use the values above.
-
 ## Workflow
 
 ### Phase 1 — Launch
@@ -49,37 +38,15 @@ Never prompt for repository identity information — use the values above.
 
 ### Phase 2 — Play & Observe
 
-Cycle through these activities, spending real time in each area:
+Cycle through these activities, spending real time in each area. Refer to the **ux-testing skill** for specific browser commands and MCP tool usage.
 
-1. **Visual inspection** — screenshot each major scene/state. Look for:
-   - Rendering glitches, z-fighting, missing textures
-   - UI elements that are hard to read or poorly positioned
-   - Inconsistent visual style
-
-2. **Interaction testing** — use keyboard (WASD, mouse clicks, Escape) to play:
-   - Does the player move? Are controls responsive?
-   - Do creatures behave as expected?
-   - Are there invisible walls or collision bugs?
-
-3. **Console monitoring** — check `mcp_io_github_chr_list_console_messages` for:
-   - JavaScript errors, Three.js warnings
-   - WebGL context lost events
-   - Deprecation warnings
-
-4. **Performance profiling** — run `mcp_io_github_chr_performance_start_trace`:
-   - Frame rate drops below 30fps
-   - Long tasks blocking the main thread
-
-5. **Memory analysis** — take memory snapshots at intervals:
-   - Growing heap = likely leak (dispose missing?)
-
-6. **Accessibility audit** — run `mcp_io_github_chr_lighthouse_audit`:
-   - Missing ARIA labels, poor contrast, keyboard traps
-
-7. **Game state inspection** — use `mcp_io_github_chr_evaluate_script` to query:
-   - Player position, camera state
-   - Creature spawn counts, active entities
-   - FPS counter, depth value
+1. **Visual inspection** — screenshot each major scene/state. Look for rendering glitches, z-fighting, missing textures, UI readability issues, inconsistent visual style
+2. **Interaction testing** — use keyboard (WASD, mouse clicks, Escape) to play. Check controls, creature behavior, collision, invisible walls
+3. **Console monitoring** — check for JavaScript errors, Three.js warnings, WebGL context loss, deprecation warnings
+4. **Performance profiling** — trace for frame rate drops below 30fps and long main-thread tasks
+5. **Memory analysis** — take snapshots at intervals to detect growing heap (likely dispose leak)
+6. **Accessibility audit** — run Lighthouse for ARIA labels, contrast, keyboard traps
+7. **Game state inspection** — query player position, camera state, creature counts, FPS, depth via script evaluation
 
 ### Phase 3 — Compile Issues
 

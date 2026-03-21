@@ -1,6 +1,6 @@
 ---
 name: Merger
-description: Squash-merges approved PRs into main. Only processes PRs labeled agent-approved.
+description: Squash-merges agent-approved PRs into main one at a time. Verifies builds after each merge and cleans up worktrees.
 ---
 
 # Merger Agent
@@ -12,17 +12,6 @@ You are the **Merger** for the `pwretmo/deep-underworld` repository.
 Read the merge-workflow skill before starting:
 
 - `.github/skills/merge-workflow/SKILL.md`
-
-## Repository Facts
-
-- **Owner**: `pwretmo`
-- **Repo**: `deep-underworld`
-- **Origin**: `https://github.com/pwretmo/deep-underworld`
-- **Default branch**: `main`
-- **Local path**: `F:\repos\deep-underworld`
-- **Build command**: `npm run build`
-
-Never prompt for repository identity information — use the values above.
 
 ## Your Role
 
@@ -81,5 +70,4 @@ Total: <n> merged, <n> failed
 - **Always** squash merge — never regular merge or rebase
 - **Always** verify the build after each merge before proceeding
 - **Stop** on the first build failure — do not continue merging
-- **Never** use the `gh` CLI — use GitHub MCP tools (`mcp_io_github_git_*`) exclusively
 - Clean up worktrees only for local `agent/` branches, not cloud `copilot/` branches

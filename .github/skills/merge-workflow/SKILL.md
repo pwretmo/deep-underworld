@@ -1,13 +1,11 @@
+---
+name: merge-workflow
+description: 'Squash-merge approved PRs using GitHub MCP tools — finding agent-approved PRs, merging, post-merge build verification, worktree cleanup, stop-on-failure.'
+---
+
 # Merge Workflow Skill
 
 Step-by-step instructions for finding approved PRs, squash-merging, verifying builds, and cleaning up.
-
-## Repository Facts
-
-- **Owner**: `pwretmo`
-- **Repo**: `deep-underworld`
-- **Local path**: `F:\repos\deep-underworld`
-- **Build command**: `npm run build`
 
 ## Finding Approved PRs
 
