@@ -34,6 +34,7 @@ const UnderwaterShader = {
       uv.y += cos(uv.x * 12.0 + time * 0.8) * distortStr * 0.6;
 
       vec4 color = texture2D(tDiffuse, uv);
+      vec2 fragCoord = uv * resolution;
 
       // Chromatic aberration (increases with depth)
       float caStr = 0.0015 + depth * 0.000005;
@@ -42,20 +43,19 @@ const UnderwaterShader = {
       color.r = r;
       color.b = b;
 
-      // Heavy vignette - pitch black edges in deep water
-      float vigBase = 0.4 + depth * 0.002;
-      float vigStr = min(vigBase, 2.5);
+      // Heavy vignette, but avoid crushing edge details into pure black.
+      float vigBase = 0.35 + depth * 0.0011;
+      float vigStr = min(vigBase, 0.82);
       vec2 center = uv - 0.5;
       float vigDist = dot(center, center);
-      float vignette = 1.0 - vigDist * vigStr;
-      vignette = smoothstep(0.0, 0.7, vignette);
-      color.rgb *= vignette;
+      float vignette = 1.0 - smoothstep(0.12, 0.42, vigDist) * vigStr;
+      color.rgb *= max(vignette, 0.22);
 
       // Color grading - deep ocean tint
       float depthT = clamp(depth / 400.0, 0.0, 1.0);
       vec3 shallowTint = vec3(0.65, 0.8, 1.0);
-      vec3 deepTint = vec3(0.15, 0.1, 0.25);
-      vec3 abyssTint = vec3(0.05, 0.03, 0.08);
+      vec3 deepTint = vec3(0.14, 0.21, 0.29);
+      vec3 abyssTint = vec3(0.045, 0.08, 0.11);
       vec3 tint = depthT < 0.5
         ? mix(shallowTint, deepTint, depthT * 2.0)
         : mix(deepTint, abyssTint, (depthT - 0.5) * 2.0);
@@ -65,15 +65,28 @@ const UnderwaterShader = {
       float darkening = 1.0 - clamp(depth / 600.0, 0.0, 0.6);
       color.rgb *= darkening;
 
+      // Preserve faint hero silhouettes in abyss by gently lifting midtones.
+      float abyssBlend = smoothstep(220.0, 760.0, depth);
+      float luma = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
+      float silhouetteLift = smoothstep(0.04, 0.32, luma) * 0.025 * abyssBlend;
+      color.rgb += silhouetteLift;
+
       // Film grain - heavier for oppressive atmosphere
       float grainStr = 0.025 + depth * 0.00005;
       float grain = fract(sin(dot(uv * time * 0.01, vec2(12.9898, 78.233))) * 43758.5453);
       color.rgb += (grain - 0.5) * grainStr;
 
+      // Ordered dither in darker gradients helps break visible color banding.
+      float dither = fract(52.9829189 * fract(dot(fragCoord, vec2(0.06711056, 0.00583715)) + time * 0.003));
+      float ditherStrength = mix(0.0018, 0.008, abyssBlend);
+      color.rgb += (dither - 0.5) * ditherStrength;
+
       // Slight scanline effect for deep water dread
       float scanline = 0.97 + 0.03 * sin(uv.y * resolution.y * 1.5);
       float scanlineStr = clamp(depth / 500.0, 0.0, 1.0) * 0.4;
       color.rgb *= mix(1.0, scanline, scanlineStr);
+
+      color.rgb = clamp(color.rgb, 0.0, 1.0);
 
       gl_FragColor = color;
     }

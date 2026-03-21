@@ -28,6 +28,8 @@ export class Ocean {
     this._createWaterSurface();
 
     // Floating particles (marine snow, plankton)
+    this.particleBaseSize = 0.15;
+    this.particleBaseOpacity = 0.35;
     this._createParticles();
 
     // Caustics light cookies near surface
@@ -97,11 +99,11 @@ export class Ocean {
     const snowTexture = new THREE.CanvasTexture(canvas);
 
     const mat = new THREE.PointsMaterial({
-      size: 0.15,
+      size: this.particleBaseSize,
       map: snowTexture,
       vertexColors: true,
       transparent: true,
-      opacity: 0.35,
+      opacity: this.particleBaseOpacity,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       sizeAttenuation: true,
@@ -157,6 +159,8 @@ export class Ocean {
 
   update(dt, depth, playerPos) {
     this.time += dt;
+    const depthBlend = THREE.MathUtils.smoothstep(depth, 45, 320);
+    const abyssBlend = THREE.MathUtils.smoothstep(depth, 380, 760);
 
     // Animate water surface
     const posAttr = this.waterSurface.geometry.attributes.position;
@@ -183,12 +187,24 @@ export class Ocean {
       const dy = ppos[i + 1] - playerPos.y;
       const dz = ppos[i + 2] - playerPos.z;
       if (dx * dx + dy * dy + dz * dz > 10000 || ppos[i + 1] > 0) {
-        ppos[i] = playerPos.x + (Math.random() - 0.5) * 150;
-        ppos[i + 1] = playerPos.y - Math.random() * 100 - 10;
-        ppos[i + 2] = playerPos.z + (Math.random() - 0.5) * 150;
+        const horizontalRadius = THREE.MathUtils.lerp(140, 85, depthBlend);
+        const verticalSpan = THREE.MathUtils.lerp(95, 180, depthBlend);
+        const abyssOffset = THREE.MathUtils.lerp(8, 30, abyssBlend);
+        ppos[i] = playerPos.x + (Math.random() - 0.5) * horizontalRadius;
+        ppos[i + 1] = playerPos.y - Math.random() * verticalSpan - abyssOffset;
+        ppos[i + 2] = playerPos.z + (Math.random() - 0.5) * horizontalRadius;
       }
     }
     this.particleSystem.geometry.attributes.position.needsUpdate = true;
+
+    // Denser, slightly larger snow in mid/deep water, then tighten in abyss for readability.
+    const deepOpacity = THREE.MathUtils.lerp(this.particleBaseOpacity * 0.68, this.particleBaseOpacity * 1.55, depthBlend);
+    const abyssFade = THREE.MathUtils.lerp(1.0, 0.86, abyssBlend);
+    this.particleSystem.material.opacity = deepOpacity * abyssFade;
+
+    const deepSize = THREE.MathUtils.lerp(this.particleBaseSize * 0.9, this.particleBaseSize * 1.45, depthBlend);
+    const abyssSizeClamp = THREE.MathUtils.lerp(1.0, 0.9, abyssBlend);
+    this.particleSystem.material.size = deepSize * abyssSizeClamp;
 
     // Animate caustic lights (only near surface)
     for (const c of this.causticLights) {
