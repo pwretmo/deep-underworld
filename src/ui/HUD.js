@@ -52,6 +52,7 @@ export class HUD {
     this.trackArrow = document.getElementById('track-arrow');
     this.trackName = document.getElementById('track-name');
     this.trackDist = document.getElementById('track-dist');
+    this.trackElev = document.getElementById('track-elev');
     this.locatorHint = this.locatorPanel.querySelector('.hint');
     this.locatorVisible = false;
     this.trackedType = null;
@@ -375,8 +376,17 @@ export class HUD {
         camera.getWorldDirection(forward);
 
         // Horizontal angle between camera forward and creature direction
-        const angle = Math.atan2(dir.x, dir.z) - Math.atan2(forward.x, forward.z);
+        const angle = Math.atan2(forward.x, forward.z) - Math.atan2(dir.x, dir.z);
         this.trackArrow.style.transform = `rotate(${angle}rad)`;
+
+        // Vertical elevation indicator
+        const dy = dir.y;
+        if (Math.abs(dy) >= 3) {
+          const sym = dy > 0 ? '▲' : '▼';
+          this.trackElev.textContent = `${sym} ${Math.floor(Math.abs(dy))}m`;
+        } else {
+          this.trackElev.textContent = '';
+        }
       } else {
         this.trackedType = null;
         this.trackIndicator.classList.remove('visible');
