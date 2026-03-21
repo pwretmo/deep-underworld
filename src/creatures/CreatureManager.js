@@ -36,6 +36,7 @@ const DESPAWN_DISTANCE = 250;
 const CULL_DISTANCE = 180;
 // Hard cap on total alive creatures to bound per-frame work
 const MAX_CREATURES = 60;
+const QUEUE_DRAIN_PER_FRAME = 1;
 
 export class CreatureManager {
   constructor(scene) {
@@ -62,7 +63,9 @@ export class CreatureManager {
       if (cancelToken?.cancelled) break;
       const entry = this._spawnQueue.shift();
       this._add(entry.type, entry.createFn(), entry.depthMin, entry.depthMax);
-      this._spawnedCount++;
+      if (entry.countsTowardLoad !== false) {
+        this._spawnedCount++;
+      }
       drained++;
     }
     return drained;
@@ -94,7 +97,11 @@ export class CreatureManager {
   }
 
   _queueAdd(type, createFn, depthMin, depthMax) {
-    this._spawnQueue.push({ type, createFn, depthMin, depthMax });
+    this._spawnQueue.push({ type, createFn, depthMin, depthMax, countsTowardLoad: true });
+  }
+
+  _queueDynamicAdd(type, createFn, depthMin, depthMax) {
+    this._spawnQueue.push({ type, createFn, depthMin, depthMax, countsTowardLoad: false });
   }
 
   _spawnInitialCreatures(playerPos) {
@@ -301,9 +308,9 @@ export class CreatureManager {
   update(dt, playerPos, depth) {
     this.prepareInitialQueue(playerPos);
 
-    // Drain spawn queue: 3 creatures per frame
+    // Drain queued spawns gradually so dynamic creature bursts do not hitch descent.
     if (this._spawnQueue.length > 0) {
-      this.preloadDrain(3);
+      this.preloadDrain(QUEUE_DRAIN_PER_FRAME);
     }
 
     this.lastDepth = depth;
@@ -337,14 +344,24 @@ export class CreatureManager {
     return this.creatures.filter(c => c.type === type).length;
   }
 
+  _countQueued(type) {
+    return this._spawnQueue.filter(entry => entry.type === type).length;
+  }
+
+  _countWithQueued(type) {
+    return this._count(type) + this._countQueued(type);
+  }
+
   _trySpawn(type, Cls, depth, depthMin, depthMax, cap, playerPos, hRange, yOff, yRange, extra) {
     if (this.creatures.length >= MAX_CREATURES) return;
-    if (depth > depthMin && this._count(type) < cap) {
+    if (depth > depthMin && this._countWithQueued(type) < cap) {
       const pos = this._rndPos(playerPos, hRange, playerPos.y + yOff, yRange);
-      this._add(type, extra
-        ? new Cls(this.scene, pos, extra)
-        : new Cls(this.scene, pos),
-        depthMin, depthMax);
+      this._queueDynamicAdd(
+        type,
+        () => (extra ? new Cls(this.scene, pos, extra) : new Cls(this.scene, pos)),
+        depthMin,
+        depthMax
+      );
     }
   }
 
@@ -353,23 +370,25 @@ export class CreatureManager {
     this._trySpawn('anglerfish', Anglerfish, depth, 150, 800, 5, playerPos, 80, -10, 30);
     this._trySpawn('ghostshark', GhostShark, depth, 50, 600, 4, playerPos, 100, 0, 30);
 
-    if (this.creatures.length < MAX_CREATURES && depth > 30 && depth < 400 && this._count('jellyfish') < 3) {
-      this._add('jellyfish',
-        new Jellyfish(this.scene,
-          this._rndPos(playerPos, 60, playerPos.y, 20),
-          4 + Math.floor(Math.random() * 4)),
+    if (this.creatures.length < MAX_CREATURES && depth > 30 && depth < 400 && this._countWithQueued('jellyfish') < 3) {
+      const pos = this._rndPos(playerPos, 60, playerPos.y, 20);
+      const count = 4 + Math.floor(Math.random() * 4);
+      this._queueDynamicAdd('jellyfish',
+        () => new Jellyfish(this.scene, pos, count),
         30, 400);
     }
 
-    if (this.creatures.length < MAX_CREATURES && depth > 500 && this._count('leviathan') < 3) {
-      this._add('leviathan',
-        new Leviathan(this.scene, this._rndPos(playerPos, 200, playerPos.y - 30, 50)),
+    if (this.creatures.length < MAX_CREATURES && depth > 500 && this._countWithQueued('leviathan') < 3) {
+      const pos = this._rndPos(playerPos, 200, playerPos.y - 30, 50);
+      this._queueDynamicAdd('leviathan',
+        () => new Leviathan(this.scene, pos),
         400, 2000);
     }
 
-    if (this.creatures.length < MAX_CREATURES && depth > 300 && this._count('deepone') < 2) {
-      this._add('deepone',
-        new DeepOne(this.scene, this._angledPos(playerPos, 80 + Math.random() * 60, playerPos.y - 20 - Math.random() * 40)),
+    if (this.creatures.length < MAX_CREATURES && depth > 300 && this._countWithQueued('deepone') < 2) {
+      const pos = this._angledPos(playerPos, 80 + Math.random() * 60, playerPos.y - 20 - Math.random() * 40);
+      this._queueDynamicAdd('deepone',
+        () => new DeepOne(this.scene, pos),
         250, 2000);
     }
 
@@ -397,19 +416,22 @@ export class CreatureManager {
     this._trySpawn('ironwhale', IronWhale, depth, 500, 2000, 1, playerPos, 150, -30, 60);
 
     // Stationary creatures spawn more rarely
-    if (this.creatures.length < MAX_CREATURES && depth > 200 && this._count('pipeorgan') < 4 && Math.random() < 0.3) {
-      this._add('pipeorgan',
-        new PipeOrgan(this.scene, this._rndPos(playerPos, 80, playerPos.y - 15, 30)),
+    if (this.creatures.length < MAX_CREATURES && depth > 200 && this._countWithQueued('pipeorgan') < 4 && Math.random() < 0.3) {
+      const pos = this._rndPos(playerPos, 80, playerPos.y - 15, 30);
+      this._queueDynamicAdd('pipeorgan',
+        () => new PipeOrgan(this.scene, pos),
         200, 1500);
     }
-    if (this.creatures.length < MAX_CREATURES && depth > 150 && this._count('tubecluster') < 6 && Math.random() < 0.3) {
-      this._add('tubecluster',
-        new TubeCluster(this.scene, this._rndPos(playerPos, 70, playerPos.y - 10, 25)),
+    if (this.creatures.length < MAX_CREATURES && depth > 150 && this._countWithQueued('tubecluster') < 6 && Math.random() < 0.3) {
+      const pos = this._rndPos(playerPos, 70, playerPos.y - 10, 25);
+      this._queueDynamicAdd('tubecluster',
+        () => new TubeCluster(this.scene, pos),
         150, 1200);
     }
-    if (this.creatures.length < MAX_CREATURES && depth > 280 && this._count('ribcage') < 3 && Math.random() < 0.25) {
-      this._add('ribcage',
-        new RibCage(this.scene, this._rndPos(playerPos, 70, playerPos.y - 15, 30)),
+    if (this.creatures.length < MAX_CREATURES && depth > 280 && this._countWithQueued('ribcage') < 3 && Math.random() < 0.25) {
+      const pos = this._rndPos(playerPos, 70, playerPos.y - 15, 30);
+      this._queueDynamicAdd('ribcage',
+        () => new RibCage(this.scene, pos),
         280, 1500);
     }
   }

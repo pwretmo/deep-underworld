@@ -178,9 +178,15 @@ export class Jellyfish {
       group.add(arm);
       oralArms.push({
         mesh: arm,
-        basePoints: points.map((p) => p.clone()),
         angle,
         segs: profile.oralArmSegments,
+        basePosition: arm.position.clone(),
+        baseRotation: arm.rotation.clone(),
+        baseScale: arm.scale.clone(),
+        phaseOffset: Math.random() * Math.PI * 2,
+        swayAmount: 0.025 + Math.random() * 0.035,
+        twistAmount: 0.02 + Math.random() * 0.03,
+        liftAmount: 0.03 + Math.random() * 0.03,
       });
     }
 
@@ -222,10 +228,16 @@ export class Jellyfish {
       group.add(tentacle);
       tentacles.push({
         mesh: tentacle,
-        basePoints: points.map((p) => p.clone()),
         segs: profile.tentacleSegments,
+        basePosition: tentacle.position.clone(),
+        baseRotation: tentacle.rotation.clone(),
+        baseScale: tentacle.scale.clone(),
         phaseOffset: Math.random() * Math.PI * 2,
         swaySpeed: 0.5 + Math.random() * 0.5,
+        swayAmount: 0.04 + Math.random() * 0.04,
+        twistAmount: 0.03 + Math.random() * 0.03,
+        trailFactor: 0.4 + Math.random() * 0.4,
+        liftAmount: 0.05 + Math.random() * 0.05,
       });
     }
 
@@ -382,56 +394,33 @@ export class Jellyfish {
     const contraction = Math.max(0, pulse);
     const relaxed = Math.max(0, -pulse);
     for (const tent of tier.tentacles) {
-      const newPoints = [];
-      for (let s = 0; s <= tent.segs; s++) {
-        const frac = s / tent.segs;
-        const base = tent.basePoints[s];
-        const swayX = Math.sin(t * tent.swaySpeed + frac * 4.5 + tent.phaseOffset) * (0.2 + relaxed * 0.14) * frac;
-        const swayZ = Math.cos(t * tent.swaySpeed * 0.84 + frac * 3.2 + tent.phaseOffset) * (0.18 + relaxed * 0.12) * frac;
-        const pulseDrag = contraction * 0.16 * frac * frac;
-        const fluidTrailX = jelly.driftX * 0.75 * frac * frac;
-        const fluidTrailZ = jelly.driftZ * 0.75 * frac * frac;
-        newPoints.push(new THREE.Vector3(
-          base.x + (swayX - fluidTrailX) * jelly.size,
-          base.y + pulseDrag * jelly.size,
-          base.z + (swayZ - fluidTrailZ) * jelly.size
-        ));
-      }
-      const newCurve = new THREE.CatmullRomCurve3(newPoints);
-      const newGeo = new THREE.TubeGeometry(
-        newCurve,
-        tent.segs,
-        (0.015 * jelly.size + 0.005) * tier.profile.tentacleRadiusScale,
-        tier.profile.tentacleRadialSegments,
-        false
+      const relaxedMotion = 0.45 + relaxed * 0.75;
+      tent.mesh.position.x = tent.basePosition.x + jelly.driftX * tent.trailFactor * 0.2;
+      tent.mesh.position.y = tent.basePosition.y + contraction * jelly.size * tent.liftAmount;
+      tent.mesh.position.z = tent.basePosition.z + jelly.driftZ * tent.trailFactor * 0.2;
+      tent.mesh.rotation.x = tent.baseRotation.x + Math.cos(t * tent.swaySpeed * 0.84 + tent.phaseOffset) * tent.twistAmount * relaxedMotion;
+      tent.mesh.rotation.y = tent.baseRotation.y + Math.sin(t * tent.swaySpeed * 0.45 + tent.phaseOffset) * 0.06 * relaxedMotion;
+      tent.mesh.rotation.z = tent.baseRotation.z + Math.sin(t * tent.swaySpeed + tent.phaseOffset) * tent.swayAmount * relaxedMotion;
+      tent.mesh.scale.set(
+        tent.baseScale.x * (1 - contraction * 0.05),
+        tent.baseScale.y * (1 + contraction * 0.12 - relaxed * 0.03),
+        tent.baseScale.z * (1 - contraction * 0.05)
       );
-      tent.mesh.geometry.dispose();
-      tent.mesh.geometry = newGeo;
     }
 
     for (const arm of tier.oralArms) {
-      const newPoints = [];
-      for (let s = 0; s <= arm.segs; s++) {
-        const frac = s / arm.segs;
-        const base = arm.basePoints[s];
-        const sway = Math.sin(t * 0.58 + frac * 2.6 + arm.angle) * (0.1 + 0.08 * relaxed) * frac;
-        const drift = contraction * 0.13 * frac * frac;
-        newPoints.push(new THREE.Vector3(
-          base.x + sway * jelly.size,
-          base.y + drift * jelly.size,
-          base.z + Math.cos(t * 0.5 + frac * 2 + arm.angle) * 0.1 * frac * jelly.size
-        ));
-      }
-      const newCurve = new THREE.CatmullRomCurve3(newPoints);
-      const newGeo = new THREE.TubeGeometry(
-        newCurve,
-        arm.segs,
-        (0.04 * jelly.size + 0.01) * tier.profile.oralArmRadiusScale,
-        tier.profile.oralArmRadialSegments,
-        false
+      const relaxedMotion = 0.35 + relaxed * 0.55;
+      arm.mesh.position.x = arm.basePosition.x + jelly.driftX * 0.12;
+      arm.mesh.position.y = arm.basePosition.y + contraction * jelly.size * arm.liftAmount;
+      arm.mesh.position.z = arm.basePosition.z + jelly.driftZ * 0.12;
+      arm.mesh.rotation.x = arm.baseRotation.x + Math.cos(t * 0.54 + arm.phaseOffset) * arm.twistAmount * relaxedMotion;
+      arm.mesh.rotation.y = arm.baseRotation.y + Math.sin(t * 0.42 + arm.angle + arm.phaseOffset) * 0.05 * relaxedMotion;
+      arm.mesh.rotation.z = arm.baseRotation.z + Math.sin(t * 0.6 + arm.angle + arm.phaseOffset) * arm.swayAmount * relaxedMotion;
+      arm.mesh.scale.set(
+        arm.baseScale.x * (1 - contraction * 0.04),
+        arm.baseScale.y * (1 + contraction * 0.08 - relaxed * 0.02),
+        arm.baseScale.z * (1 - contraction * 0.04)
       );
-      arm.mesh.geometry.dispose();
-      arm.mesh.geometry = newGeo;
     }
   }
 

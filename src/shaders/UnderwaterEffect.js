@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
-import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 
 const RENDER_PIPELINE_TUNING = Object.freeze({
   depthThresholds: {
@@ -29,6 +28,17 @@ const RENDER_PIPELINE_TUNING = Object.freeze({
     deepThreshold: 0.44,
     radius: 0.62,
   },
+  performance: {
+    baseScale: 0.72,
+    minScale: 0.55,
+    maxScale: 0.82,
+    degradeThresholdMs: 28,
+    severeThresholdMs: 45,
+    recoveryThresholdMs: 16,
+    degradeStep: 0.05,
+    severeDegradeStep: 0.09,
+    recoveryStep: 0.02,
+  },
 });
 
 const UnderwaterShader = {
@@ -42,6 +52,7 @@ const UnderwaterShader = {
     grading: { value: new THREE.Vector4(1.2, 0.88, 0.018, 0.24) },
     darkening: { value: 0.68 },
     highlightRoll: { value: new THREE.Vector3(0.62, 0.34, 0.62) },
+    bloomParams: { value: new THREE.Vector3(0.28, 0.78, 1.6) },
   },
   vertexShader: `
     varying vec2 vUv;
@@ -60,6 +71,7 @@ const UnderwaterShader = {
     uniform vec4 grading;
     uniform float darkening;
     uniform vec3 highlightRoll;
+    uniform vec3 bloomParams;
     varying vec2 vUv;
 
     void main() {
@@ -125,6 +137,34 @@ const UnderwaterShader = {
       float ditherStrength = mix(0.0016, 0.0065, abyssBlend);
       color.rgb += (dither - 0.5) * ditherStrength;
 
+      // Lightweight highlight spill keeps bioluminescent creatures glowing without
+      // the multi-pass cost of full bloom.
+      vec2 texel = vec2(1.0) / resolution;
+      vec2 bloomStep = texel * bloomParams.z;
+      vec3 bloomAccum = vec3(0.0);
+
+      vec3 bloomSampleA = texture2D(tDiffuse, uv + vec2(bloomStep.x, 0.0)).rgb;
+      vec3 bloomSampleB = texture2D(tDiffuse, uv + vec2(-bloomStep.x, 0.0)).rgb;
+      vec3 bloomSampleC = texture2D(tDiffuse, uv + vec2(0.0, bloomStep.y)).rgb;
+      vec3 bloomSampleD = texture2D(tDiffuse, uv + vec2(0.0, -bloomStep.y)).rgb;
+      vec3 bloomSampleE = texture2D(tDiffuse, uv + bloomStep).rgb;
+      vec3 bloomSampleF = texture2D(tDiffuse, uv - bloomStep).rgb;
+
+      float maskA = smoothstep(bloomParams.y, 1.0, max(max(bloomSampleA.r, bloomSampleA.g), bloomSampleA.b));
+      float maskB = smoothstep(bloomParams.y, 1.0, max(max(bloomSampleB.r, bloomSampleB.g), bloomSampleB.b));
+      float maskC = smoothstep(bloomParams.y, 1.0, max(max(bloomSampleC.r, bloomSampleC.g), bloomSampleC.b));
+      float maskD = smoothstep(bloomParams.y, 1.0, max(max(bloomSampleD.r, bloomSampleD.g), bloomSampleD.b));
+      float maskE = smoothstep(bloomParams.y, 1.0, max(max(bloomSampleE.r, bloomSampleE.g), bloomSampleE.b));
+      float maskF = smoothstep(bloomParams.y, 1.0, max(max(bloomSampleF.r, bloomSampleF.g), bloomSampleF.b));
+
+      bloomAccum += bloomSampleA * maskA;
+      bloomAccum += bloomSampleB * maskB;
+      bloomAccum += bloomSampleC * maskC;
+      bloomAccum += bloomSampleD * maskD;
+      bloomAccum += bloomSampleE * maskE;
+      bloomAccum += bloomSampleF * maskF;
+      color.rgb += bloomAccum * (bloomParams.x / 6.0);
+
       // Slight scanline effect for deep water dread
       float scanline = 0.97 + 0.03 * sin(uv.y * resolution.y * 1.5);
       float scanlineStr = clamp(depthBlend, 0.0, 1.0) * grading.w;
@@ -154,19 +194,12 @@ export class UnderwaterEffect {
     // Composer
     this.composer = new EffectComposer(renderer);
     this.tuning = RENDER_PIPELINE_TUNING;
+    this._composerScale = this.tuning.performance.baseScale;
+    this._appliedComposerScale = 0;
 
     // Render pass
     const renderPass = new RenderPass(scene, camera);
     this.composer.addPass(renderPass);
-
-    // Bloom for bioluminescent glow
-    this.bloomPass = new UnrealBloomPass(
-      new THREE.Vector2(window.innerWidth, window.innerHeight),
-      this.tuning.bloom.surfaceStrength,
-      this.tuning.bloom.radius,
-      this.tuning.bloom.surfaceThreshold
-    );
-    this.composer.addPass(this.bloomPass);
 
     // Underwater shader
     this.underwaterPass = new ShaderPass(UnderwaterShader);
@@ -188,17 +221,41 @@ export class UnderwaterEffect {
       this.tuning.highlightRoll.range,
       this.tuning.highlightRoll.strength
     );
+    this.underwaterPass.uniforms.bloomParams.value.set(
+      this.tuning.bloom.surfaceStrength,
+      this.tuning.bloom.surfaceThreshold,
+      this.tuning.bloom.radius * 2.4
+    );
     this.composer.addPass(this.underwaterPass);
 
-    // Adaptive bloom guard:
+    // Adaptive render guard:
     // creature-dense scenes can cause heavy post-processing stalls on some GPUs.
     this._renderEmaMs = 16;
-    this._bloomSuppressedUntil = 0;
+    this._applyComposerScale(true);
   }
 
   resize() {
+    this._applyComposerScale(true);
+  }
+
+  _applyComposerScale(force = false) {
+    const nextScale = THREE.MathUtils.clamp(
+      this._composerScale,
+      this.tuning.performance.minScale,
+      this.tuning.performance.maxScale
+    );
+
+    if (!force && Math.abs(nextScale - this._appliedComposerScale) < 0.01) {
+      return;
+    }
+
+    this._appliedComposerScale = nextScale;
+    this.composer.setPixelRatio(nextScale);
     this.composer.setSize(window.innerWidth, window.innerHeight);
-    this.underwaterPass.uniforms.resolution.value.set(window.innerWidth, window.innerHeight);
+    this.underwaterPass.uniforms.resolution.value.set(
+      window.innerWidth * nextScale,
+      window.innerHeight * nextScale
+    );
   }
 
   render(depth, { flashlightOn = false, exposure = 0.76 } = {}) {
@@ -226,20 +283,31 @@ export class UnderwaterEffect {
       depthNorm
     ) + (flashlightOn ? 0.08 : 0.0);
 
-    this.bloomPass.strength = THREE.MathUtils.lerp(this.bloomPass.strength, targetStrength, 0.09);
-    this.bloomPass.threshold = THREE.MathUtils.lerp(this.bloomPass.threshold, targetThreshold, 0.09);
+    const targetRadius = THREE.MathUtils.lerp(
+      this.tuning.bloom.radius * 2.0,
+      this.tuning.bloom.radius * 2.8,
+      depthNorm
+    );
 
-    const now = performance.now();
-    this.bloomPass.enabled = now >= this._bloomSuppressedUntil;
+    const bloomParams = this.underwaterPass.uniforms.bloomParams.value;
+    bloomParams.x = THREE.MathUtils.lerp(bloomParams.x, targetStrength, 0.09);
+    bloomParams.y = THREE.MathUtils.lerp(bloomParams.y, targetThreshold, 0.09);
+    bloomParams.z = THREE.MathUtils.lerp(bloomParams.z, targetRadius, 0.09);
 
     this.composer.render();
 
     const renderMs = performance.now() - frameStart;
     this._renderEmaMs = this._renderEmaMs * 0.92 + renderMs * 0.08;
 
-    // If a render spike occurs, temporarily disable bloom to prevent repeated freezes.
-    if (renderMs > 100 || this._renderEmaMs > 28) {
-      this._bloomSuppressedUntil = performance.now() + 3500;
+    if (renderMs > this.tuning.performance.severeThresholdMs || this._renderEmaMs > this.tuning.performance.degradeThresholdMs) {
+      const degradeStep = renderMs > this.tuning.performance.severeThresholdMs
+        ? this.tuning.performance.severeDegradeStep
+        : this.tuning.performance.degradeStep;
+      this._composerScale = Math.max(this.tuning.performance.minScale, this._composerScale - degradeStep);
+      this._applyComposerScale();
+    } else if (this._renderEmaMs < this.tuning.performance.recoveryThresholdMs) {
+      this._composerScale = Math.min(this.tuning.performance.maxScale, this._composerScale + this.tuning.performance.recoveryStep);
+      this._applyComposerScale();
     }
   }
 }
