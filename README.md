@@ -47,6 +47,13 @@ These are prompts you type into the VS Code Copilot chat. The orchestrator will 
 
 - *"Merge all approved PRs."*
 
+#### Ship it (full workflow)
+
+Use `#prompt:ship-it` to run the entire pipeline — implement, review, fix, and merge — in one shot:
+
+- *`#prompt:ship-it` Add bioluminescent particles that trail behind the player*
+- *`#prompt:ship-it` Fix the camera clipping through terrain*
+
 #### UX test the game
 
 - *"Play-test the game and find UX issues. Do a full sweep."*
