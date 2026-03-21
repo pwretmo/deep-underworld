@@ -31,6 +31,7 @@ const VolumetricBeamShader = {
   vertexShader: /* glsl */ `
     varying vec3 vLocalPos;
     varying vec3 vWorldPos;
+    varying vec3 vBeamDirWorld;
     varying float vAxialT;
     varying float vRadialT;
 
@@ -40,6 +41,8 @@ const VolumetricBeamShader = {
       vLocalPos = position;
       vec4 worldPos = modelMatrix * vec4(position, 1.0);
       vWorldPos = worldPos.xyz;
+      // Precompute beam forward direction in world space for fragment scattering.
+      vBeamDirWorld = normalize(mat3(modelMatrix) * vec3(0.0, 0.0, -1.0));
 
       // Axial parameter: 0 at source, 1 at tip (cone extends along -Z in local space)
       vAxialT = clamp(-position.z / beamLength, 0.0, 1.0);
@@ -67,6 +70,7 @@ const VolumetricBeamShader = {
 
     varying vec3 vLocalPos;
     varying vec3 vWorldPos;
+    varying vec3 vBeamDirWorld;
     varying float vAxialT;
     varying float vRadialT;
 
@@ -121,10 +125,7 @@ const VolumetricBeamShader = {
       // --- View-dependent anisotropic scattering ---
       // Approximate Henyey-Greenstein phase function
       vec3 viewDir = normalize(cameraPosition - vWorldPos);
-      vec3 beamDir = normalize(vec3(0.0, 0.0, -1.0));
-      // Transform beam direction to world space
-      // (beam forward is -Z in local, so we use modelMatrix)
-      float cosTheta = dot(viewDir, normalize((modelMatrix * vec4(beamDir, 0.0)).xyz));
+      float cosTheta = dot(viewDir, vBeamDirWorld);
       float g = anisotropy;
       float phase = (1.0 - g * g) / (4.0 * 3.14159 * pow(1.0 + g * g - 2.0 * g * cosTheta, 1.5));
       // Normalize to keep intensity manageable
