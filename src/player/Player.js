@@ -38,8 +38,6 @@ export class Player {
     // Submarine flashlight
     this.flashlight = new THREE.Group();
     const spotlight = new THREE.SpotLight(0xccddff, 50, 80, Math.PI / 7, 0.3, 1.8);
-    spotlight.castShadow = true;
-    spotlight.shadow.mapSize.set(1024, 1024);
     spotlight.position.set(0, 0, 0);
     spotlight.target.position.set(0, 0, -1);
     this.flashlight.add(spotlight);
