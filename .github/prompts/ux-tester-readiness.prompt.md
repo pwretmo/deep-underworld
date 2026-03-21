@@ -45,6 +45,7 @@ Start with a **narrow focus area** (e.g., "HUD readability" or "main menu perfor
 ## Success Criteria
 
 Agent successfully completes when:
+
 1. Launches game in Chrome via Chrome DevTools MCP
 2. Takes screenshots and logs console output
 3. Identifies at least one UX issue

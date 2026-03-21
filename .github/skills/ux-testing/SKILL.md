@@ -27,9 +27,9 @@ Once ready, do a liveness check — open `about:blank` to verify the browser is 
 ```javascript
 // Liveness check
 async (page) => {
-  await page.goto('about:blank');
-  return 'Browser is reachable';
-}
+  await page.goto("about:blank");
+  return "Browser is reachable";
+};
 ```
 
 If this fails or times out, **STOP immediately** — output the following and call `task_complete`:
@@ -58,9 +58,9 @@ All interactions use `run_playwright_code` tool with raw Playwright JavaScript.
 ```javascript
 // Without autoplay (requires manual Start button click)
 async (page) => {
-  await page.goto('http://localhost:5173');
-  return 'Game loaded';
-}
+  await page.goto("http://localhost:5173");
+  return "Game loaded";
+};
 ```
 
 Or with `?autoplay` to skip the menu:
@@ -68,10 +68,10 @@ Or with `?autoplay` to skip the menu:
 ```javascript
 // With autoplay — game starts immediately in headless mode
 async (page) => {
-  await page.goto('http://localhost:5173?autoplay');
+  await page.goto("http://localhost:5173?autoplay");
   await page.waitForTimeout(2000); // Game init + creature spawn
-  return 'Game running in autoplay mode';
-}
+  return "Game running in autoplay mode";
+};
 ```
 
 ### Taking a screenshot
@@ -80,8 +80,8 @@ async (page) => {
 async (page) => {
   const buffer = await page.screenshot();
   // Screenshot is captured; describe what you see
-  return 'Screenshot captured (binary data)';
-}
+  return "Screenshot captured (binary data)";
+};
 ```
 
 ### Reading console errors
@@ -89,14 +89,14 @@ async (page) => {
 ```javascript
 async (page) => {
   const logs = [];
-  page.on('console', msg => logs.push(`[${msg.type()}] ${msg.text()}`));
-  page.on('pageerror', err => logs.push(`[ERROR] ${err.message}`));
-  
+  page.on("console", (msg) => logs.push(`[${msg.type()}] ${msg.text()}`));
+  page.on("pageerror", (err) => logs.push(`[ERROR] ${err.message}`));
+
   // Keep page open and let errors accumulate for ~2 seconds
   await page.waitForTimeout(2000);
-  
-  return logs.join('\n');
-}
+
+  return logs.join("\n");
+};
 ```
 
 ### Playing the game
@@ -104,30 +104,30 @@ async (page) => {
 ```javascript
 async (page) => {
   // Move forward (W key)
-  await page.keyboard.press('w');
-  
+  await page.keyboard.press("w");
+
   // Look left/right (arrow keys)
-  await page.keyboard.press('arrowleft');
-  
+  await page.keyboard.press("arrowleft");
+
   // Wait a bit for movement animation
   await page.waitForTimeout(500);
-  
-  return 'Input sent to game';
-}
+
+  return "Input sent to game";
+};
 ```
 
 ### Clicking the canvas (if not autoplay)
 
 ```javascript
 async (page) => {
-  const canvas = await page.$('#game-canvas') || await page.$('canvas');
+  const canvas = (await page.$("#game-canvas")) || (await page.$("canvas"));
   if (canvas) {
     await canvas.click();
     await page.waitForTimeout(500);
-    return 'Canvas clicked (pointer lock acquired)';
+    return "Canvas clicked (pointer lock acquired)";
   }
-  return 'Canvas not found';
-}
+  return "Canvas not found";
+};
 ```
 
 ### Lighthouse performance audit
@@ -139,7 +139,9 @@ npx lighthouse http://localhost:5173?autoplay --view
 ```
 
 # Open menu
-mcp_io_github_chr_press_key  key: "Escape"
+
+mcp_io_github_chr_press_key key: "Escape"
+
 ```
 
 ### Querying game state via JavaScript
@@ -156,21 +158,23 @@ The `Game` instance is exposed on `window.game`. Key properties:
 - `game.autoplay` — true when in autoplay mode
 
 ```
+
 mcp_io_github_chr_evaluate_script
-  expression: "(() => {
-    const game = window.game;
-    if (!game) return { error: 'game not found on window' };
-    return {
-      playerPos: game.player?.position,
-      depth: game.depth,
-      fps: game.fps,
-      creatureCount: game.creatureManager?.creatures?.length,
-      oxygen: game.oxygen,
-      battery: game.battery,
-      running: game.running,
-      gameOver: game.gameOver
-    };
-  })()"
+expression: "(() => {
+const game = window.game;
+if (!game) return { error: 'game not found on window' };
+return {
+playerPos: game.player?.position,
+depth: game.depth,
+fps: game.fps,
+creatureCount: game.creatureManager?.creatures?.length,
+oxygen: game.oxygen,
+battery: game.battery,
+running: game.running,
+gameOver: game.gameOver
+};
+})()"
+
 ```
 
 > **Tip**: If `window.game` isn't responding, check that the page has
@@ -181,13 +185,17 @@ mcp_io_github_chr_evaluate_script
 The game logs state changes with a `[deep-underworld]` prefix. Filter for these to track game events (start, game over, depth zone changes), and filter for errors/warnings to catch runtime issues.
 
 ```
+
 mcp_io_github_chr_list_console_messages
+
 ```
 
 ### Performance trace
 
 ```
+
 mcp_io_github_chr_performance_start_trace
+
 ```
 
 Returns Core Web Vitals and performance summary.
@@ -195,15 +203,19 @@ Returns Core Web Vitals and performance summary.
 ### Memory snapshot
 
 ```
+
 mcp_io_github_chr_take_memory_snapshot
+
 ```
 
 ### Lighthouse audit
 
 ```
+
 mcp_io_github_chr_lighthouse_audit
-  categories: ["accessibility", "best-practices", "performance"]
-```
+categories: ["accessibility", "best-practices", "performance"]
+
+````
 
 ## What to Look For
 
@@ -254,7 +266,7 @@ git fetch origin main
 git worktree add -b agent/ux-fix-1 F:\repos\deep-underworld-ux-fix-1 origin/main
 git worktree add -b agent/ux-fix-2 F:\repos\deep-underworld-ux-fix-2 origin/main
 # ... one command per issue, run sequentially (shares .git state)
-```
+````
 
 ### Dispatch workers
 
