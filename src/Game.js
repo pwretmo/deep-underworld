@@ -3,7 +3,6 @@ import { Player } from './player/Player.js';
 import { Ocean } from './environment/Ocean.js';
 import { Terrain } from './environment/Terrain.js';
 import { Flora } from './environment/Flora.js';
-import { SupplyCache } from './environment/SupplyCache.js';
 import { CreatureManager } from './creatures/CreatureManager.js';
 import { HUD } from './ui/HUD.js';
 import { AudioManager } from './audio/AudioManager.js';
@@ -41,7 +40,6 @@ export class Game {
     this.ocean = new Ocean(this.scene);
     this.terrain = new Terrain(this.scene);
     this.flora = new Flora(this.scene);
-    this.supplyCache = new SupplyCache(this.scene, this.terrain);
     this.creatures = new CreatureManager(this.scene);
     this.hud = new HUD();
     this.audio = new AudioManager();
@@ -216,7 +214,6 @@ export class Game {
     this.gameOverOverlay.classList.add('visible');
     this.player.reset();
     this.creatures.reset();
-    this.supplyCache.reset();
     this.player.flashlight.visible = false;
     this.pauseOverlay.classList.remove('visible');
     this._descentActive = false;
@@ -303,12 +300,6 @@ export class Game {
     this.terrain.update(this.player.position);
     this.flora.update(dt, this.player.position);
     this.creatures.update(dt, this.player.position, depth);
-
-    const pickups = this.supplyCache.update(dt, this.player.position);
-    for (const pickup of pickups) {
-      this.hud.showPickup(`SUPPLY CACHE SECURED  +${pickup.oxygen} O2  +${pickup.battery} BAT`);
-      this.audio.playPickup(pickup);
-    }
 
     const nearestCreatureDist = this.creatures.getNearestCreatureDistance(this.player.position);
 

@@ -4,7 +4,7 @@
  * Generates layered music that responds in real-time to:
  *   - depth          → darker tones, lower pitch, heavier reverb
  *   - creature proximity → dissonance, tension stingers, scary harmonics
- *   - oxygen level   → tempo increase, rhythmic urgency, stress tones
+ *   - sustained danger → pulses, acceleration, pressure tones
  *
  * All audio is synthesized with the Web Audio API — no sample files needed.
  */
@@ -71,7 +71,7 @@ export class MusicSystem {
     // ---- state ----
     this.depth = 0;
     this.creatureProx = 0;       // 0 = far, 1 = touching
-    this.oxygenStress = 0;       // 0 = full, 1 = empty
+    this.dangerStress = 0;       // 0 = calm, 1 = immediate danger
     this.encounterIntensity = 0;
     this.time = 0;
     this.melodyTimer = 0;
@@ -204,7 +204,7 @@ export class MusicSystem {
   }
 
   // =========================================================================
-  //  PULSE LAYER – rhythmic heartbeat / clock that follows stress
+  //  PULSE LAYER – rhythmic pulse that follows sustained danger
   // =========================================================================
   _buildPulseLayer() {
     this.pulseGain = this.ctx.createGain();
@@ -232,7 +232,7 @@ export class MusicSystem {
     osc.start(now);
     osc.stop(now + 0.25);
 
-    // Noise burst for texture at high stress
+    // Noise burst for texture at high danger
     if (intensity > 0.5) {
       const bufSize = this.ctx.sampleRate * 0.05;
       const buf = this.ctx.createBuffer(1, bufSize, this.ctx.sampleRate);
@@ -342,7 +342,7 @@ export class MusicSystem {
   }
 
   // =========================================================================
-  //  STRESS LAYER – accelerating rhythmic alarm when oxygen is low
+  //  STRESS LAYER – accelerating pressure tone under extreme danger
   // =========================================================================
   _buildStressLayer() {
     this.stressGain = this.ctx.createGain();
@@ -431,13 +431,13 @@ export class MusicSystem {
     this.time += dt;
     this.depth = state.depth ?? 0;
     this.creatureProx = clamp01(1 - (state.nearestCreatureDist ?? Number.POSITIVE_INFINITY) / 60);
-    this.oxygenStress = clamp01(state.oxygenStress ?? 0);
     this.encounterIntensity = clamp01(state.encounterState?.intensity ?? 0);
+    this.dangerStress = clamp01(Math.max(this.encounterIntensity, (this.creatureProx - 0.35) / 0.65));
 
     const now = this.ctx.currentTime;
 
     // ---- Determine current mood / scale ----
-    const threat = Math.max(this.creatureProx, this.oxygenStress * 0.6, this.encounterIntensity * 0.92);
+    const threat = Math.max(this.creatureProx, this.dangerStress * 0.6, this.encounterIntensity * 0.92);
     let scale, rootMidi;
 
     if (threat < 0.2) {
@@ -494,16 +494,16 @@ export class MusicSystem {
     this.melodyGain.gain.setTargetAtTime(melVol, now, 0.5);
     this.melodyFilter.frequency.setTargetAtTime(lerp(760, 420, threat), now, 0.8);
 
-    // ---- PULSE LAYER (oxygen stress) ----
-    const pulseActive = this.oxygenStress > 0.1;
-    const pulseTempo = lerp(1.2, 0.25, this.oxygenStress); // seconds between beats
+    // ---- PULSE LAYER (danger pressure) ----
+    const pulseActive = this.dangerStress > 0.1;
+    const pulseTempo = lerp(1.2, 0.25, this.dangerStress); // seconds between beats
     this.pulseGain.gain.setTargetAtTime(pulseActive ? 1 : 0, now, 0.5);
 
     if (pulseActive) {
       this.pulseTimer += dt;
       if (this.pulseTimer > pulseTempo) {
         this.pulseTimer = 0;
-        this._playPulseBeat(pulseTempo, this.oxygenStress);
+        this._playPulseBeat(pulseTempo, this.dangerStress);
       }
     }
 
@@ -527,23 +527,23 @@ export class MusicSystem {
       this.tensionTimer = Math.max(0, this.tensionTimer - dt);
     }
 
-    // ---- STRESS LAYER (oxygen) ----
-    const stressActive = this.oxygenStress > 0.2;
+    // ---- STRESS LAYER (danger pressure) ----
+    const stressActive = this.dangerStress > 0.2;
     this.stressGain.gain.setTargetAtTime(stressActive ? 1 : 0, now, 0.5);
 
     // High tone tremolo
-    const stressToneVol = stressActive ? this.oxygenStress * 0.015 : 0;
+    const stressToneVol = stressActive ? this.dangerStress * 0.015 : 0;
     this.stressOscGain.gain.setTargetAtTime(stressToneVol, now, 0.3);
-    this.stressLfo.frequency.setTargetAtTime(lerp(2, 12, this.oxygenStress), now, 0.3);
+    this.stressLfo.frequency.setTargetAtTime(lerp(2, 12, this.dangerStress), now, 0.3);
     this.stressLfoGain.gain.setTargetAtTime(stressToneVol, now, 0.3);
-    this.stressOsc.frequency.setTargetAtTime(lerp(660, 1200, this.oxygenStress), now, 1);
+    this.stressOsc.frequency.setTargetAtTime(lerp(660, 1200, this.dangerStress), now, 1);
 
     if (stressActive) {
       this.stressTimer += dt;
-      const stressTickRate = lerp(1.5, 0.18, this.oxygenStress);
+      const stressTickRate = lerp(1.5, 0.18, this.dangerStress);
       if (this.stressTimer > stressTickRate) {
         this.stressTimer = 0;
-        this._playStressTick(this.oxygenStress);
+        this._playStressTick(this.dangerStress);
       }
     }
 

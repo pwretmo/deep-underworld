@@ -171,35 +171,6 @@ export class AudioManager {
     osc.stop(now + 4);
   }
 
-  playPickup() {
-    if (!this.ctx) return;
-    const now = this.ctx.currentTime;
-    this._duckBuses({ music: 0.72, ambience: 0.8, threat: 0.85 }, 0.35, 0.01, 0.4);
-
-    // Focused confirmation ping that cuts without sounding arcade-like.
-    for (const [freq, delay, type] of [[420, 0, 'triangle'], [620, 0.09, 'sine'], [880, 0.18, 'sine']]) {
-      const osc = this.ctx.createOscillator();
-      osc.type = type;
-      osc.frequency.setValueAtTime(freq, now + delay);
-      osc.frequency.exponentialRampToValueAtTime(freq * 1.18, now + delay + 0.22);
-
-      const gain = this.ctx.createGain();
-      gain.gain.setValueAtTime(0.07, now + delay);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + delay + 0.55);
-
-      const filter = this.ctx.createBiquadFilter();
-      filter.type = 'bandpass';
-      filter.frequency.value = freq * 1.6;
-      filter.Q.value = 2.5;
-
-      osc.connect(filter);
-      filter.connect(gain);
-      gain.connect(this.uiBus);
-      osc.start(now + delay);
-      osc.stop(now + delay + 0.65);
-    }
-  }
-
   playSonar() {
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
