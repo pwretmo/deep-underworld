@@ -1,11 +1,36 @@
 import * as THREE from 'three';
 
 const CREATURE_LABELS = {
-  jellyfish: 'Jellyfish',
+  abyssalmaw: 'Abyssal Maw',
+  abysswraith: 'Abyss Wraith',
+  amalgam: 'Amalgam',
   anglerfish: 'Anglerfish',
-  ghostshark: 'Ghost Shark',
-  leviathan: 'Leviathan',
+  bioMechCrab: 'Bio-Mech Crab',
+  biomechcrab: 'Bio-Mech Crab',
+  birthsac: 'Birth Sac',
+  boneworm: 'Bone Worm',
+  chaindragger: 'Chain Dragger',
   deepone: 'Deep One',
+  facelessone: 'Faceless One',
+  ghostshark: 'Ghost Shark',
+  harvester: 'Harvester',
+  husk: 'Husk',
+  ironwhale: 'Iron Whale',
+  jellyfish: 'Jellyfish',
+  lamprey: 'Lamprey',
+  leviathan: 'Leviathan',
+  mechoctopus: 'Mech Octopus',
+  needlefish: 'Needle Fish',
+  parasite: 'Parasite',
+  pipeorgan: 'Pipe Organ',
+  ribcage: 'Rib Cage',
+  sentinel: 'Sentinel',
+  sirenSkull: 'Siren Skull',
+  spinaleel: 'Spinal Eel',
+  sporecloud: 'Spore Cloud',
+  tendrilhunter: 'Tendril Hunter',
+  tubecluster: 'Tube Cluster',
+  voidjelly: 'Void Jelly',
 };
 
 export class HUD {
@@ -29,9 +54,16 @@ export class HUD {
     this.trackArrow = document.getElementById('track-arrow');
     this.trackName = document.getElementById('track-name');
     this.trackDist = document.getElementById('track-dist');
+    this.locatorHint = this.locatorPanel.querySelector('.hint');
     this.locatorVisible = false;
     this.trackedType = null;
     this.creatureTypes = [];
+
+    this.creatureList.addEventListener('click', (e) => {
+      const entry = e.target.closest('.creature-entry');
+      if (!entry || !entry.dataset.creatureType) return;
+      this.trackCreatureByType(entry.dataset.creatureType);
+    });
   }
 
   update(depth, oxygen, battery, flashlightOn) {
@@ -186,8 +218,13 @@ export class HUD {
 
   trackCreature(index) {
     if (index >= 0 && index < this.creatureTypes.length) {
-      this.trackedType = this.creatureTypes[index];
+      this.trackCreatureByType(this.creatureTypes[index]);
     }
+  }
+
+  trackCreatureByType(type) {
+    if (!type || !this.creatureTypes.includes(type)) return;
+    this.trackedType = type;
   }
 
   stopTracking() {
@@ -195,18 +232,45 @@ export class HUD {
     this.trackIndicator.classList.remove('visible');
   }
 
+  _formatCreatureLabel(type) {
+    const key = String(type || '').trim();
+    if (!key) return 'Unknown Creature';
+    if (CREATURE_LABELS[key]) return CREATURE_LABELS[key];
+
+    const spaced = key
+      .replace(/[_-]+/g, ' ')
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!spaced) return 'Unknown Creature';
+    return spaced
+      .split(' ')
+      .map(word => word ? word[0].toUpperCase() + word.slice(1) : word)
+      .join(' ');
+  }
+
+  _getLocatorHint() {
+    return this.creatureTypes.length > 9
+      ? 'Press 1-9 to track the first nine. Click any row to track the rest. 0 stops tracking.'
+      : 'Press 1-9 to track. Click any row to track with the mouse. 0 stops tracking.';
+  }
+
   updateLocator(creaturesByType, playerPos, camera) {
     this.creatureTypes = Object.keys(creaturesByType);
+    if (this.locatorHint) {
+      this.locatorHint.textContent = this._getLocatorHint();
+    }
 
     // Update the panel list
     if (this.locatorVisible) {
       let html = '';
       this.creatureTypes.forEach((type, i) => {
         const info = creaturesByType[type];
-        const label = CREATURE_LABELS[type] || type;
+        const label = this._formatCreatureLabel(type);
         const dist = info.nearest < Infinity ? `${Math.floor(info.nearest)}m` : '---';
         const tracked = this.trackedType === type ? ' tracked' : '';
-        html += `<div class="creature-entry${tracked}">` +
+        html += `<div class="creature-entry${tracked}" data-creature-type="${type}">` +
           `<span class="creature-key">${i + 1}</span>` +
           `<span class="creature-name">${label}</span>` +
           `<span class="creature-count">x${info.count}</span>` +
@@ -217,11 +281,11 @@ export class HUD {
     }
 
     // Update tracking indicator
-    if (this.trackedType && creaturesByType[this.trackedType]) {
+    if (this.trackedType) {
       const info = creaturesByType[this.trackedType];
-      if (info.nearestPos) {
+      if (info && info.nearestPos) {
         this.trackIndicator.classList.add('visible');
-        this.trackName.textContent = CREATURE_LABELS[this.trackedType] || this.trackedType;
+        this.trackName.textContent = this._formatCreatureLabel(this.trackedType);
         this.trackDist.textContent = `${Math.floor(info.nearest)}m`;
 
         // Calculate direction arrow
@@ -232,8 +296,11 @@ export class HUD {
         // Horizontal angle between camera forward and creature direction
         const angle = Math.atan2(dir.x, dir.z) - Math.atan2(forward.x, forward.z);
         this.trackArrow.style.transform = `rotate(${angle}rad)`;
+      } else {
+        this.trackedType = null;
+        this.trackIndicator.classList.remove('visible');
       }
-    } else if (!this.trackedType) {
+    } else {
       this.trackIndicator.classList.remove('visible');
     }
   }
