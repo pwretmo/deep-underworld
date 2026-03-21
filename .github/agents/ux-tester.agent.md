@@ -88,8 +88,10 @@ If the open/read path throws an error or times out, treat it as a failed livenes
 
 1. Start the dev server in a background terminal: `npm run dev`
 2. Open the game with whichever opener exists:
-  - `open_browser_page` → `http://localhost:5173?autoplay`, or
-  - `mcp_io_github_chr_new_page` → `http://localhost:5173?autoplay`
+
+- `open_browser_page` → `http://localhost:5173?autoplay`, or
+- `mcp_io_github_chr_new_page` → `http://localhost:5173?autoplay`
+
 3. Wait for load, capture initial evidence using `read_page`, `screenshot_page`, or `mcp_io_github_chr_take_snapshot`
 
 ### Phase 2 — Play & Observe
