@@ -93,6 +93,49 @@ Parameters:
   method: "update"
 ```
 
+## Re-entering an Existing Worktree (Review Fix-ups)
+
+When a worker is re-dispatched to fix review comments, the worktree and branch already exist. The **orchestrator** must verify this before dispatching.
+
+### Orchestrator: verify the worktree exists
+
+```powershell
+cd F:\repos\deep-underworld
+git worktree list
+```
+
+Look for the expected path in the output. Then:
+
+- **If the worktree exists** — pass the existing path and branch to the worker as usual.
+- **If the worktree is missing** — recreate it from the **remote branch** (not `origin/main`), so the worker gets the PR's existing commits:
+
+```powershell
+git fetch origin agent/<slug>
+git worktree add F:\repos\deep-underworld-<slug> agent/<slug>
+```
+
+> **Important**: Use `agent/<slug>` (the existing remote branch), not `-b agent/<slug> origin/main`. Using `origin/main` would discard all prior work on the PR.
+
+The worker then continues with `cd`, edit, build, commit, `git push` — no new PR needed.
+
+## Cleaning Up Stale Worktrees
+
+If a PR is closed without merging, or the process is interrupted, worktrees may be left behind. Periodically clean them up:
+
+```powershell
+cd F:\repos\deep-underworld
+
+# List all worktrees
+git worktree list
+
+# For each stale worktree (no matching open PR):
+git worktree remove F:\repos\deep-underworld-<slug> --force
+git worktree prune
+git branch -D agent/<slug>
+```
+
+The orchestrator or user should run this when starting a fresh session or after aborting a multi-PR workflow.
+
 ## Cleaning Up (After Merge)
 
 The **merger agent** handles cleanup after a PR is merged:

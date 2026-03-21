@@ -203,6 +203,8 @@ After a batch of fix pushes, re-poll ALL affected PRs in parallel before dispatc
 - If the external reviewer **approves** (or doesn't appear), dispatch the local Reviewer as normal.
 - After any fix push, poll again — the push may trigger a new external review round.
 
+> **Worktree reuse**: When re-dispatching a worker for review fixes, the worktree already exists from the initial dispatch. Verify with `git worktree list` before dispatching. If missing (e.g., after a restart), recreate from the remote branch — `git worktree add <path> agent/<slug>` — **not** from `origin/main`, which would lose the PR's commits. See the worktree-workflow skill for the full procedure.
+
 ### Dispatching the Local Reviewer
 
 ```

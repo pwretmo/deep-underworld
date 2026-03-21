@@ -141,6 +141,24 @@ After polling, sort PRs into groups:
 
 Process the "needs external fixes" group first (fixes unblock re-review), then the "ready for local review" group.
 
+#### Verify worktrees before re-dispatching workers
+
+Before re-dispatching a worker to fix review comments, confirm the worktree still exists:
+
+```bash
+git worktree list
+```
+
+- **If the worktree exists** — pass its path to the worker as usual.
+- **If the worktree is missing** — recreate it from the **remote branch** (not `origin/main`):
+
+```bash
+git fetch origin agent/ux-fix-<N>
+git worktree add F:\repos\deep-underworld-ux-fix-<N> agent/ux-fix-<N>
+```
+
+This preserves the PR's existing commits. See the worktree-workflow skill for details.
+
 #### Per-PR review flow
 
 For each PR:
