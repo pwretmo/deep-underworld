@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
-import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 
 const RENDER_PIPELINE_TUNING = Object.freeze({
   depthThresholds: {
@@ -29,6 +28,17 @@ const RENDER_PIPELINE_TUNING = Object.freeze({
     deepThreshold: 0.44,
     radius: 0.62,
   },
+  performance: {
+    baseScale: 1.0,
+    minScale: 0.6,
+    maxScale: 1.0,
+    degradeThresholdMs: 28,
+    severeThresholdMs: 45,
+    recoveryThresholdMs: 22,
+    degradeStep: 0.05,
+    severeDegradeStep: 0.09,
+    recoveryStep: 0.02,
+  },
 });
 
 const UnderwaterShader = {
@@ -42,6 +52,7 @@ const UnderwaterShader = {
     grading: { value: new THREE.Vector4(1.2, 0.88, 0.018, 0.24) },
     darkening: { value: 0.68 },
     highlightRoll: { value: new THREE.Vector3(0.62, 0.34, 0.62) },
+    bloomParams: { value: new THREE.Vector3(0.28, 0.78, 1.6) },
   },
   vertexShader: `
     varying vec2 vUv;
@@ -60,6 +71,7 @@ const UnderwaterShader = {
     uniform vec4 grading;
     uniform float darkening;
     uniform vec3 highlightRoll;
+    uniform vec3 bloomParams;
     varying vec2 vUv;
 
     void main() {
@@ -125,6 +137,13 @@ const UnderwaterShader = {
       float ditherStrength = mix(0.0016, 0.0065, abyssBlend);
       color.rgb += (dither - 0.5) * ditherStrength;
 
+      // A single-sample highlight spill is much cheaper than sampling neighboring
+      // texels for bloom, while still keeping bright bioluminescent accents lively.
+      float highlight = max(max(color.r, color.g), color.b);
+      float bloomMask = smoothstep(bloomParams.y, 1.0, highlight);
+      float bloomLift = bloomParams.x * (0.18 + depthBlend * 0.22);
+      color.rgb += color.rgb * bloomMask * bloomLift;
+
       // Slight scanline effect for deep water dread
       float scanline = 0.97 + 0.03 * sin(uv.y * resolution.y * 1.5);
       float scanlineStr = clamp(depthBlend, 0.0, 1.0) * grading.w;
@@ -154,19 +173,13 @@ export class UnderwaterEffect {
     // Composer
     this.composer = new EffectComposer(renderer);
     this.tuning = RENDER_PIPELINE_TUNING;
+    this._nativeComposerPixelRatio = Math.max(renderer.getPixelRatio(), 1);
+    this._composerScale = this.tuning.performance.baseScale;
+    this._appliedComposerScale = 0;
 
     // Render pass
     const renderPass = new RenderPass(scene, camera);
     this.composer.addPass(renderPass);
-
-    // Bloom for bioluminescent glow
-    this.bloomPass = new UnrealBloomPass(
-      new THREE.Vector2(window.innerWidth, window.innerHeight),
-      this.tuning.bloom.surfaceStrength,
-      this.tuning.bloom.radius,
-      this.tuning.bloom.surfaceThreshold
-    );
-    this.composer.addPass(this.bloomPass);
 
     // Underwater shader
     this.underwaterPass = new ShaderPass(UnderwaterShader);
@@ -188,17 +201,43 @@ export class UnderwaterEffect {
       this.tuning.highlightRoll.range,
       this.tuning.highlightRoll.strength
     );
+    this.underwaterPass.uniforms.bloomParams.value.set(
+      this.tuning.bloom.surfaceStrength,
+      this.tuning.bloom.surfaceThreshold,
+      this.tuning.bloom.radius * 2.4
+    );
     this.composer.addPass(this.underwaterPass);
 
-    // Adaptive bloom guard:
+    // Adaptive render guard:
     // creature-dense scenes can cause heavy post-processing stalls on some GPUs.
     this._renderEmaMs = 16;
-    this._bloomSuppressedUntil = 0;
+    this._applyComposerScale(true);
   }
 
   resize() {
+    this._applyComposerScale(true);
+  }
+
+  _applyComposerScale(force = false) {
+    this._nativeComposerPixelRatio = Math.max(this.renderer.getPixelRatio(), 1);
+    const nextScale = THREE.MathUtils.clamp(
+      this._composerScale,
+      this.tuning.performance.minScale,
+      this.tuning.performance.maxScale
+    );
+
+    if (!force && Math.abs(nextScale - this._appliedComposerScale) < 0.01) {
+      return;
+    }
+
+    this._appliedComposerScale = nextScale;
+    const pixelRatio = this._nativeComposerPixelRatio * nextScale;
+    this.composer.setPixelRatio(pixelRatio);
     this.composer.setSize(window.innerWidth, window.innerHeight);
-    this.underwaterPass.uniforms.resolution.value.set(window.innerWidth, window.innerHeight);
+    this.underwaterPass.uniforms.resolution.value.set(
+      window.innerWidth * pixelRatio,
+      window.innerHeight * pixelRatio
+    );
   }
 
   render(depth, { flashlightOn = false, exposure = 0.76 } = {}) {
@@ -226,20 +265,31 @@ export class UnderwaterEffect {
       depthNorm
     ) + (flashlightOn ? 0.08 : 0.0);
 
-    this.bloomPass.strength = THREE.MathUtils.lerp(this.bloomPass.strength, targetStrength, 0.09);
-    this.bloomPass.threshold = THREE.MathUtils.lerp(this.bloomPass.threshold, targetThreshold, 0.09);
+    const targetRadius = THREE.MathUtils.lerp(
+      this.tuning.bloom.radius * 2.0,
+      this.tuning.bloom.radius * 2.8,
+      depthNorm
+    );
 
-    const now = performance.now();
-    this.bloomPass.enabled = now >= this._bloomSuppressedUntil;
+    const bloomParams = this.underwaterPass.uniforms.bloomParams.value;
+    bloomParams.x = THREE.MathUtils.lerp(bloomParams.x, targetStrength, 0.09);
+    bloomParams.y = THREE.MathUtils.lerp(bloomParams.y, targetThreshold, 0.09);
+    bloomParams.z = THREE.MathUtils.lerp(bloomParams.z, targetRadius, 0.09);
 
     this.composer.render();
 
     const renderMs = performance.now() - frameStart;
     this._renderEmaMs = this._renderEmaMs * 0.92 + renderMs * 0.08;
 
-    // If a render spike occurs, temporarily disable bloom to prevent repeated freezes.
-    if (renderMs > 100 || this._renderEmaMs > 28) {
-      this._bloomSuppressedUntil = performance.now() + 3500;
+    if (renderMs > this.tuning.performance.severeThresholdMs || this._renderEmaMs > this.tuning.performance.degradeThresholdMs) {
+      const degradeStep = renderMs > this.tuning.performance.severeThresholdMs
+        ? this.tuning.performance.severeDegradeStep
+        : this.tuning.performance.degradeStep;
+      this._composerScale = Math.max(this.tuning.performance.minScale, this._composerScale - degradeStep);
+      this._applyComposerScale();
+    } else if (this._renderEmaMs < this.tuning.performance.recoveryThresholdMs) {
+      this._composerScale = Math.min(this.tuning.performance.maxScale, this._composerScale + this.tuning.performance.recoveryStep);
+      this._applyComposerScale();
     }
   }
 }

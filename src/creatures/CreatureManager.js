@@ -36,6 +36,9 @@ const DESPAWN_DISTANCE = 250;
 const CULL_DISTANCE = 180;
 // Hard cap on total alive creatures to bound per-frame work
 const MAX_CREATURES = 60;
+const QUEUE_DRAIN_PER_FRAME = 1;
+const DYNAMIC_SPAWNS_PER_CYCLE = 2;
+const SPAWN_LOOKAHEAD_DEPTH = 45;
 
 export class CreatureManager {
   constructor(scene) {
@@ -55,14 +58,20 @@ export class CreatureManager {
     }
   }
 
-  preloadDrain(maxCount, cancelToken) {
+  preloadDrain(maxCount, cancelToken, depth = Infinity) {
     if (maxCount <= 0) return 0;
     let drained = 0;
     while (this._spawnQueue.length > 0 && drained < maxCount) {
       if (cancelToken?.cancelled) break;
-      const entry = this._spawnQueue.shift();
+      const entryIndex = Number.isFinite(depth)
+        ? this._spawnQueue.findIndex((entry) => entry.depthMin <= depth + SPAWN_LOOKAHEAD_DEPTH)
+        : 0;
+      if (entryIndex === -1) break;
+      const [entry] = this._spawnQueue.splice(entryIndex, 1);
       this._add(entry.type, entry.createFn(), entry.depthMin, entry.depthMax);
-      this._spawnedCount++;
+      if (entry.countsTowardLoad !== false) {
+        this._spawnedCount++;
+      }
       drained++;
     }
     return drained;
@@ -70,6 +79,20 @@ export class CreatureManager {
 
   getSpawnQueueLength() {
     return this._spawnQueue.length;
+  }
+
+  getSpawnQueueLengthUpToDepth(maxDepth) {
+    let count = 0;
+    for (const entry of this._spawnQueue) {
+      if (entry.depthMin <= maxDepth) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  hasQueuedSpawnsUpToDepth(maxDepth) {
+    return this.getSpawnQueueLengthUpToDepth(maxDepth) > 0;
   }
 
   _rndPos(playerPos, hRange, yBase, yRange) {
@@ -94,7 +117,11 @@ export class CreatureManager {
   }
 
   _queueAdd(type, createFn, depthMin, depthMax) {
-    this._spawnQueue.push({ type, createFn, depthMin, depthMax });
+    this._spawnQueue.push({ type, createFn, depthMin, depthMax, countsTowardLoad: true });
+  }
+
+  _queueDynamicAdd(type, createFn, depthMin, depthMax) {
+    this._spawnQueue.push({ type, createFn, depthMin, depthMax, countsTowardLoad: false });
   }
 
   _spawnInitialCreatures(playerPos) {
@@ -301,9 +328,9 @@ export class CreatureManager {
   update(dt, playerPos, depth) {
     this.prepareInitialQueue(playerPos);
 
-    // Drain spawn queue: 3 creatures per frame
+    // Drain queued spawns gradually so dynamic creature bursts do not hitch descent.
     if (this._spawnQueue.length > 0) {
-      this.preloadDrain(3);
+      this.preloadDrain(QUEUE_DRAIN_PER_FRAME, undefined, depth);
     }
 
     this.lastDepth = depth;
@@ -337,81 +364,148 @@ export class CreatureManager {
     return this.creatures.filter(c => c.type === type).length;
   }
 
-  _trySpawn(type, Cls, depth, depthMin, depthMax, cap, playerPos, hRange, yOff, yRange, extra) {
+  _countQueued(type) {
+    return this._spawnQueue.filter(entry => entry.type === type).length;
+  }
+
+  _countWithQueued(type) {
+    return this._count(type) + this._countQueued(type);
+  }
+
+  _createDynamicSpawnEntry(type, Cls, depth, depthMin, depthMax, cap, playerPos, hRange, yOff, yRange, extra) {
     if (this.creatures.length >= MAX_CREATURES) return;
-    if (depth > depthMin && this._count(type) < cap) {
+    if (depth > depthMin && this._countWithQueued(type) < cap) {
       const pos = this._rndPos(playerPos, hRange, playerPos.y + yOff, yRange);
-      this._add(type, extra
-        ? new Cls(this.scene, pos, extra)
-        : new Cls(this.scene, pos),
-        depthMin, depthMax);
+      return {
+        type,
+        createFn: () => (extra ? new Cls(this.scene, pos, extra) : new Cls(this.scene, pos)),
+        depthMin,
+        depthMax
+      };
     }
+    return null;
+  }
+
+  _queueDynamicEntry(entry) {
+    if (!entry) return false;
+    this._spawnQueue.push({
+      type: entry.type,
+      createFn: entry.createFn,
+      depthMin: entry.depthMin,
+      depthMax: entry.depthMax,
+      countsTowardLoad: false,
+    });
+    return true;
+  }
+
+  _flushDynamicCandidates(candidates, maxCount) {
+    for (let i = candidates.length - 1; i > 0; i--) {
+      const swapIndex = Math.floor(Math.random() * (i + 1));
+      [candidates[i], candidates[swapIndex]] = [candidates[swapIndex], candidates[i]];
+    }
+
+    let queued = 0;
+    for (const candidate of candidates) {
+      if (queued >= maxCount) break;
+      if (this._queueDynamicEntry(candidate)) {
+        queued++;
+      }
+    }
+
+    return queued;
   }
 
   _dynamicSpawn(playerPos, depth) {
+    const candidates = [];
+
     // Original creatures
-    this._trySpawn('anglerfish', Anglerfish, depth, 150, 800, 5, playerPos, 80, -10, 30);
-    this._trySpawn('ghostshark', GhostShark, depth, 50, 600, 4, playerPos, 100, 0, 30);
+    candidates.push(this._createDynamicSpawnEntry('anglerfish', Anglerfish, depth, 150, 800, 5, playerPos, 80, -10, 30));
+    candidates.push(this._createDynamicSpawnEntry('ghostshark', GhostShark, depth, 50, 600, 4, playerPos, 100, 0, 30));
 
-    if (this.creatures.length < MAX_CREATURES && depth > 30 && depth < 400 && this._count('jellyfish') < 3) {
-      this._add('jellyfish',
-        new Jellyfish(this.scene,
-          this._rndPos(playerPos, 60, playerPos.y, 20),
-          4 + Math.floor(Math.random() * 4)),
-        30, 400);
+    if (this.creatures.length < MAX_CREATURES && depth > 30 && depth < 400 && this._countWithQueued('jellyfish') < 3) {
+      const pos = this._rndPos(playerPos, 60, playerPos.y, 20);
+      const count = 4 + Math.floor(Math.random() * 4);
+      candidates.push({
+        type: 'jellyfish',
+        createFn: () => new Jellyfish(this.scene, pos, count),
+        depthMin: 30,
+        depthMax: 400,
+      });
     }
 
-    if (this.creatures.length < MAX_CREATURES && depth > 500 && this._count('leviathan') < 3) {
-      this._add('leviathan',
-        new Leviathan(this.scene, this._rndPos(playerPos, 200, playerPos.y - 30, 50)),
-        400, 2000);
+    if (this.creatures.length < MAX_CREATURES && depth > 500 && this._countWithQueued('leviathan') < 3) {
+      const pos = this._rndPos(playerPos, 200, playerPos.y - 30, 50);
+      candidates.push({
+        type: 'leviathan',
+        createFn: () => new Leviathan(this.scene, pos),
+        depthMin: 400,
+        depthMax: 2000,
+      });
     }
 
-    if (this.creatures.length < MAX_CREATURES && depth > 300 && this._count('deepone') < 2) {
-      this._add('deepone',
-        new DeepOne(this.scene, this._angledPos(playerPos, 80 + Math.random() * 60, playerPos.y - 20 - Math.random() * 40)),
-        250, 2000);
+    if (this.creatures.length < MAX_CREATURES && depth > 300 && this._countWithQueued('deepone') < 2) {
+      const pos = this._angledPos(playerPos, 80 + Math.random() * 60, playerPos.y - 20 - Math.random() * 40);
+      candidates.push({
+        type: 'deepone',
+        createFn: () => new DeepOne(this.scene, pos),
+        depthMin: 250,
+        depthMax: 2000,
+      });
     }
 
     // Giger creature dynamic spawns – caps kept low for performance
-    this._trySpawn('needlefish', NeedleFish, depth, 30, 600, 4, playerPos, 90, -5, 20);
-    this._trySpawn('parasite', Parasite, depth, 50, 800, 4, playerPos, 70, -5, 20);
-    this._trySpawn('biomechcrab', BioMechCrab, depth, 60, 500, 3, playerPos, 70, -10, 20);
-    this._trySpawn('sporecloud', SporeCloud, depth, 40, 500, 3, playerPos, 80, -5, 20);
-    this._trySpawn('boneworm', BoneWorm, depth, 120, 700, 3, playerPos, 80, -10, 30);
-    this._trySpawn('spinaleel', SpinalEel, depth, 150, 800, 3, playerPos, 80, -10, 30);
-    this._trySpawn('sirenSkull', SirenSkull, depth, 120, 700, 3, playerPos, 80, -10, 30);
-    this._trySpawn('lamprey', Lamprey, depth, 150, 800, 3, playerPos, 80, -10, 30);
-    this._trySpawn('voidjelly', VoidJelly, depth, 100, 700, 3, playerPos, 80, -10, 30);
-    this._trySpawn('chaindragger', ChainDragger, depth, 150, 800, 3, playerPos, 80, -10, 30);
-    this._trySpawn('mechoctopus', MechOctopus, depth, 160, 900, 2, playerPos, 90, -15, 30);
-    this._trySpawn('tendrilhunter', TendrilHunter, depth, 250, 1200, 3, playerPos, 90, -15, 40);
-    this._trySpawn('harvester', Harvester, depth, 280, 1200, 2, playerPos, 80, -15, 40);
-    this._trySpawn('abysswraith', AbyssWraith, depth, 300, 1500, 3, playerPos, 90, -15, 40);
-    this._trySpawn('birthsac', BirthSac, depth, 250, 1200, 2, playerPos, 70, -10, 30);
-    this._trySpawn('facelessone', FacelessOne, depth, 400, 2000, 2, playerPos, 90, -20, 50);
-    this._trySpawn('amalgam', Amalgam, depth, 450, 2000, 2, playerPos, 80, -20, 50);
-    this._trySpawn('sentinel', Sentinel, depth, 400, 2000, 3, playerPos, 90, -20, 50);
-    this._trySpawn('abyssalmaw', AbyssalMaw, depth, 450, 2000, 2, playerPos, 90, -20, 50);
-    this._trySpawn('husk', Husk, depth, 350, 2000, 4, playerPos, 80, -15, 50);
-    this._trySpawn('ironwhale', IronWhale, depth, 500, 2000, 1, playerPos, 150, -30, 60);
+    candidates.push(this._createDynamicSpawnEntry('needlefish', NeedleFish, depth, 30, 600, 4, playerPos, 90, -5, 20));
+    candidates.push(this._createDynamicSpawnEntry('parasite', Parasite, depth, 50, 800, 4, playerPos, 70, -5, 20));
+    candidates.push(this._createDynamicSpawnEntry('biomechcrab', BioMechCrab, depth, 60, 500, 3, playerPos, 70, -10, 20));
+    candidates.push(this._createDynamicSpawnEntry('sporecloud', SporeCloud, depth, 40, 500, 3, playerPos, 80, -5, 20));
+    candidates.push(this._createDynamicSpawnEntry('boneworm', BoneWorm, depth, 120, 700, 3, playerPos, 80, -10, 30));
+    candidates.push(this._createDynamicSpawnEntry('spinaleel', SpinalEel, depth, 150, 800, 3, playerPos, 80, -10, 30));
+    candidates.push(this._createDynamicSpawnEntry('sirenSkull', SirenSkull, depth, 120, 700, 3, playerPos, 80, -10, 30));
+    candidates.push(this._createDynamicSpawnEntry('lamprey', Lamprey, depth, 150, 800, 3, playerPos, 80, -10, 30));
+    candidates.push(this._createDynamicSpawnEntry('voidjelly', VoidJelly, depth, 100, 700, 3, playerPos, 80, -10, 30));
+    candidates.push(this._createDynamicSpawnEntry('chaindragger', ChainDragger, depth, 150, 800, 3, playerPos, 80, -10, 30));
+    candidates.push(this._createDynamicSpawnEntry('mechoctopus', MechOctopus, depth, 160, 900, 2, playerPos, 90, -15, 30));
+    candidates.push(this._createDynamicSpawnEntry('tendrilhunter', TendrilHunter, depth, 250, 1200, 3, playerPos, 90, -15, 40));
+    candidates.push(this._createDynamicSpawnEntry('harvester', Harvester, depth, 280, 1200, 2, playerPos, 80, -15, 40));
+    candidates.push(this._createDynamicSpawnEntry('abysswraith', AbyssWraith, depth, 300, 1500, 3, playerPos, 90, -15, 40));
+    candidates.push(this._createDynamicSpawnEntry('birthsac', BirthSac, depth, 250, 1200, 2, playerPos, 70, -10, 30));
+    candidates.push(this._createDynamicSpawnEntry('facelessone', FacelessOne, depth, 400, 2000, 2, playerPos, 90, -20, 50));
+    candidates.push(this._createDynamicSpawnEntry('amalgam', Amalgam, depth, 450, 2000, 2, playerPos, 80, -20, 50));
+    candidates.push(this._createDynamicSpawnEntry('sentinel', Sentinel, depth, 400, 2000, 3, playerPos, 90, -20, 50));
+    candidates.push(this._createDynamicSpawnEntry('abyssalmaw', AbyssalMaw, depth, 450, 2000, 2, playerPos, 90, -20, 50));
+    candidates.push(this._createDynamicSpawnEntry('husk', Husk, depth, 350, 2000, 4, playerPos, 80, -15, 50));
+    candidates.push(this._createDynamicSpawnEntry('ironwhale', IronWhale, depth, 500, 2000, 1, playerPos, 150, -30, 60));
 
     // Stationary creatures spawn more rarely
-    if (this.creatures.length < MAX_CREATURES && depth > 200 && this._count('pipeorgan') < 4 && Math.random() < 0.3) {
-      this._add('pipeorgan',
-        new PipeOrgan(this.scene, this._rndPos(playerPos, 80, playerPos.y - 15, 30)),
-        200, 1500);
+    if (this.creatures.length < MAX_CREATURES && depth > 200 && this._countWithQueued('pipeorgan') < 4 && Math.random() < 0.3) {
+      const pos = this._rndPos(playerPos, 80, playerPos.y - 15, 30);
+      candidates.push({
+        type: 'pipeorgan',
+        createFn: () => new PipeOrgan(this.scene, pos),
+        depthMin: 200,
+        depthMax: 1500,
+      });
     }
-    if (this.creatures.length < MAX_CREATURES && depth > 150 && this._count('tubecluster') < 6 && Math.random() < 0.3) {
-      this._add('tubecluster',
-        new TubeCluster(this.scene, this._rndPos(playerPos, 70, playerPos.y - 10, 25)),
-        150, 1200);
+    if (this.creatures.length < MAX_CREATURES && depth > 150 && this._countWithQueued('tubecluster') < 6 && Math.random() < 0.3) {
+      const pos = this._rndPos(playerPos, 70, playerPos.y - 10, 25);
+      candidates.push({
+        type: 'tubecluster',
+        createFn: () => new TubeCluster(this.scene, pos),
+        depthMin: 150,
+        depthMax: 1200,
+      });
     }
-    if (this.creatures.length < MAX_CREATURES && depth > 280 && this._count('ribcage') < 3 && Math.random() < 0.25) {
-      this._add('ribcage',
-        new RibCage(this.scene, this._rndPos(playerPos, 70, playerPos.y - 15, 30)),
-        280, 1500);
+    if (this.creatures.length < MAX_CREATURES && depth > 280 && this._countWithQueued('ribcage') < 3 && Math.random() < 0.25) {
+      const pos = this._rndPos(playerPos, 70, playerPos.y - 15, 30);
+      candidates.push({
+        type: 'ribcage',
+        createFn: () => new RibCage(this.scene, pos),
+        depthMin: 280,
+        depthMax: 1500,
+      });
     }
+
+    this._flushDynamicCandidates(candidates.filter(Boolean), DYNAMIC_SPAWNS_PER_CYCLE);
   }
 
   getCreaturePositions() {

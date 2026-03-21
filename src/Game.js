@@ -16,6 +16,7 @@ export class Game {
     this.scene = new THREE.Scene();
     this.running = false;
     this.pendingStart = false;
+    this.startPreparing = false;
 
     // Renderer
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -62,6 +63,19 @@ export class Game {
       },
     };
     this._targetExposure = this.renderer.toneMappingExposure;
+    this._pointLightBudget = {
+      shallowMax: 10,
+      deepMax: 6,
+      transitionBand: 3,
+      scanInterval: 0.35,
+      scanElapsed: 1,
+      retargetInterval: 0.22,
+      retargetElapsed: 1,
+      fadeInRate: 8,
+      fadeOutRate: 6,
+      managedLights: [],
+      tempWorldPos: new THREE.Vector3(),
+    };
 
     // Alias so automated tests can use game.creatureManager or game.creatures
     this.creatureManager = this.creatures;
@@ -94,6 +108,10 @@ export class Game {
       terrain: this.terrain,
       flora: this.flora,
       creatures: this.creatures,
+      prepareDepthState: (depth) => {
+        this._updateEnvironmentForDepth(depth);
+        this._updateRenderPipelineForDepth(depth);
+      },
     });
     this.preload.startMenuIdleWarmup();
 
@@ -189,20 +207,12 @@ export class Game {
    * drive the game via press_key / evaluate_script without user gestures.
    */
   startAutoplay() {
-    if (this.running) return;
+    if (this.running || this.startPreparing) return;
     this.preload.cancel('autoplay-start');
-    this.preload.startDescentAssistFromSnapshot();
-    this._startTransition.startRequested = false;
-    this._startTransition.started = true;
     this.autoplay = true;
     this.player.locked = true; // simulate lock without real pointer lock
-    this.menuOverlay.classList.add('hidden');
-    this.gameOverOverlay.classList.remove('visible');
-    this.pauseOverlay.classList.remove('visible');
-    this.running = true;
     this.audio.start();
-    this.clock.start();
-    console.log('[deep-underworld] Autoplay mode active');
+    void this._primeAndEnterGameplay('Autoplay mode active');
   }
 
   restart() {
@@ -211,6 +221,7 @@ export class Game {
     this.flashlightOn = false;
     this.pendingStart = false;
     this.running = false;
+    this.startPreparing = false;
     this.gameOverOverlay.classList.add('visible');
     this.player.reset();
     this.creatures.reset();
@@ -241,27 +252,57 @@ export class Game {
   }
 
   _beginGameplay() {
+    void this._primeAndEnterGameplay('Gameplay started');
+  }
+
+  async _primeAndEnterGameplay(logMessage) {
+    if (this.running || this.startPreparing || this.gameOver) return;
+
+    this.startPreparing = true;
     this._startTransition.startRequested = false;
     this._startTransition.started = true;
     this.pendingStart = false;
-    this.preload.startDescentAssistFromSnapshot();
     this.menuOverlay.classList.add('hidden');
     this.gameOverOverlay.classList.remove('visible');
     this.pauseOverlay.classList.remove('visible');
 
-    // Show descent transition overlay
     this.descentOverlay.classList.add('visible');
     this.descentOverlay.classList.remove('fade-out');
     this.descentProgressBar.style.width = '0%';
     this._descentActive = true;
+    this._updateDescentProgress();
 
-    // Warm-up render to force shader compilation before gameplay
+    const primeSummary = await this.preload.primeStartBaseline({
+      onProgress: () => this._updateDescentProgress(),
+    });
+
+    if (this.gameOver) {
+      this.startPreparing = false;
+      return;
+    }
+
+    this.preload.startDescentAssistFromSnapshot();
+
+    // Warm-up render to force shader compilation before gameplay.
     this.underwaterEffect.render(0);
 
     this.running = true;
+    this.startPreparing = false;
     this._resumeAudio();
     this.clock.start();
-    console.log('[deep-underworld] Gameplay started');
+
+    console.log(`[deep-underworld] ${logMessage}`, primeSummary);
+  }
+
+  _updateDescentProgress() {
+    const progress = this.creatures.getLoadProgress();
+    if (progress.total <= 0) {
+      this.descentProgressBar.style.width = '0%';
+      return;
+    }
+
+    const pct = Math.min(100, (progress.loaded / progress.total) * 100);
+    this.descentProgressBar.style.width = pct + '%';
   }
 
   _pauseAudio() {
@@ -322,16 +363,15 @@ export class Game {
       encounterState: this.abyssEncounter.getAudioState(),
     });
 
+    this._updatePointLightBudget(dt, depth, this.player.position);
+
     // Keep descent assist pumping in both regular and autoplay starts.
     this.preload.pumpDescentAssist();
 
     // Update descent transition overlay
     if (this._descentActive) {
       const progress = this.creatures.getLoadProgress();
-      if (progress.total > 0) {
-        const pct = Math.min(100, (progress.loaded / progress.total) * 100);
-        this.descentProgressBar.style.width = pct + '%';
-      }
+      this._updateDescentProgress();
       if (this.creatures.isFullyLoaded()) {
         this._descentActive = false;
         this.descentOverlay.classList.add('fade-out');
@@ -421,5 +461,116 @@ export class Game {
       this._targetExposure,
       exposure.easing
     );
+  }
+
+  _updatePointLightBudget(dt, depth, playerPos) {
+    const budget = this._pointLightBudget;
+    budget.scanElapsed += dt;
+    budget.retargetElapsed += dt;
+
+    if (budget.scanElapsed >= budget.scanInterval || budget.managedLights.length === 0) {
+      budget.scanElapsed = 0;
+      this._refreshManagedPointLights();
+    }
+
+    if (budget.retargetElapsed >= budget.retargetInterval) {
+      budget.retargetElapsed = 0;
+      this._retargetPointLights(depth, playerPos);
+    }
+
+    const fadeInAlpha = 1 - Math.exp(-budget.fadeInRate * dt);
+    const fadeOutAlpha = 1 - Math.exp(-budget.fadeOutRate * dt);
+
+    for (const light of budget.managedLights) {
+      if (!light.parent) continue;
+
+      const baseIntensity = light.userData.duwBaseIntensity ?? light.intensity;
+      const targetIntensity = light.userData.duwTargetIntensity ?? baseIntensity;
+
+      if (targetIntensity > 0.001 && !light.visible) {
+        light.visible = true;
+      }
+
+      const alpha = targetIntensity >= light.intensity ? fadeInAlpha : fadeOutAlpha;
+      light.intensity = THREE.MathUtils.lerp(light.intensity, targetIntensity, alpha);
+
+      if (targetIntensity <= 0.001 && light.intensity < Math.max(baseIntensity * 0.18, 0.05)) {
+        light.intensity = 0;
+        light.visible = false;
+      }
+    }
+  }
+
+  _refreshManagedPointLights() {
+    const managedLights = [];
+    this.scene.traverse((obj) => {
+      if (!obj.isPointLight) return;
+      if (obj === this.player.subLight) return;
+
+      if (obj.userData.duwBaseIntensity === undefined) {
+        obj.userData.duwBaseIntensity = obj.intensity;
+      }
+      if (obj.userData.duwTargetIntensity === undefined) {
+        obj.userData.duwTargetIntensity = obj.intensity;
+      }
+
+      managedLights.push(obj);
+    });
+    this._pointLightBudget.managedLights = managedLights;
+  }
+
+  _retargetPointLights(depth, playerPos) {
+    const budget = this._pointLightBudget;
+    const depthBlend = THREE.MathUtils.smoothstep(depth, 35, 220);
+    const maxLights = Math.round(THREE.MathUtils.lerp(
+      budget.shallowMax,
+      budget.deepMax,
+      depthBlend
+    ));
+
+    const candidates = [];
+    for (const light of budget.managedLights) {
+      if (!light.parent) continue;
+
+      const baseIntensity = light.userData.duwBaseIntensity ?? light.intensity;
+      const worldPos = light.getWorldPosition(budget.tempWorldPos);
+      const distanceSq = worldPos.distanceToSquared(playerPos);
+      // Hysteresis: boost score for currently-active lights to prevent flip-flopping
+      const isActive = (light.userData.duwTargetIntensity ?? 0) > 0.01;
+      const hysteresis = isActive ? 1.2 : 1.0;
+      const score = ((baseIntensity + 0.001) / (distanceSq + 1)) * hysteresis;
+      candidates.push({ light, score });
+      light.userData.duwTargetIntensity = 0;
+    }
+
+    candidates.sort((a, b) => b.score - a.score);
+
+    const fullyLitCount = Math.min(maxLights, candidates.length);
+    const fadeStartIndex = Math.max(fullyLitCount - 1, 0);
+    const fadeEndIndex = fullyLitCount + budget.transitionBand;
+    const cutoffIndex = Math.max(fullyLitCount - 1, 0);
+    const softCutoffIndex = Math.min(candidates.length - 1, cutoffIndex + budget.transitionBand);
+    const cutoffScore = candidates[cutoffIndex]?.score ?? 0;
+    const softCutoffScore = candidates[softCutoffIndex]?.score ?? cutoffScore;
+
+    for (let i = 0; i < candidates.length; i++) {
+      const entry = candidates[i];
+      const baseIntensity = entry.light.userData.duwBaseIntensity ?? 0;
+      let weight = 0;
+
+      if (i < fullyLitCount) {
+        weight = 1;
+      } else if (i < fadeEndIndex) {
+        const rankWeight = 1 - THREE.MathUtils.smoothstep(fadeStartIndex, fadeEndIndex, i);
+        if (cutoffScore > 0) {
+          const scoreWeight = THREE.MathUtils.smoothstep(softCutoffScore * 0.9, cutoffScore * 1.05, entry.score);
+          weight = rankWeight * scoreWeight;
+        } else {
+          weight = rankWeight;
+        }
+      }
+
+      entry.light.userData.duwTargetIntensity = baseIntensity * weight;
+    }
   }
 }
