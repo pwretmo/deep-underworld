@@ -573,7 +573,7 @@ export class MusicSystem {
     this.undertowGain.gain.setTargetAtTime(lerp(0.012, 0.036, Math.max(depthNorm * 0.55, threat, this.encounterIntensity)), now, 0.9);
 
     this.melodyTimer += dt;
-    const melInterval = lerp(12.5, 7.5, depthNorm) + threat * 3.2 + this.encounterIntensity * 5.2;
+    const melInterval = lerp(7.2, 4.8, depthNorm) + threat * 2.8 + this.encounterIntensity * 5.2;
     if (this.melodyTimer > melInterval) {
       if (Math.random() < 0.72 - this.encounterIntensity * 0.45) {
         this.melodyTimer = 0;
