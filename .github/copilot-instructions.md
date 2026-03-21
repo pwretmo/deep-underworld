@@ -34,13 +34,15 @@ This is a Three.js deep-ocean exploration horror game built with Vite.
 Local subagents **must** work in a dedicated git worktree, never directly on `main`.
 Worktrees are created at `F:\repos\deep-underworld-<slug>` where `<slug>` matches the branch suffix.
 
-### GitHub Operations
+### GitHub Operations (Local Agents)
 
-**Always use the GitHub MCP server tools** (`mcp_io_github_git_*`) for all GitHub operations:
+Local agents **must** use the GitHub MCP server tools (`mcp_io_github_git_*`) for all GitHub operations:
 
 - Creating branches, PRs, reading files, searching code, merging PRs, etc.
-- **Never** use the `gh` CLI. It may not be installed or authenticated.
+- **Never** use the `gh` CLI locally — it may not be installed or authenticated.
 - The MCP tools use the parameters `owner: "pwretmo"` and `repo: "deep-underworld"`.
+
+GitHub cloud agents (Copilot coding agent) use their built-in GitHub API access instead.
 
 ### PR Lifecycle
 
