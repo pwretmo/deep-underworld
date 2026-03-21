@@ -1,7 +1,6 @@
 ---
 name: Local Worker
 description: Implements code changes in a git worktree branch. Handles feature development, bug fixes, and review fix-ups. Pushes commits and creates PRs via MCP.
-tools: [execute, read, edit, search, "io.github.github/github-mcp-server/*"]
 user-invocable: false
 ---
 

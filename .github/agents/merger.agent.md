@@ -1,7 +1,6 @@
 ---
 name: Merger
 description: Squash-merges agent-approved PRs into main one at a time. Verifies builds after each merge and cleans up worktrees.
-tools: [execute, read, search, "io.github.github/github-mcp-server/*"]
 user-invocable: false
 ---
 

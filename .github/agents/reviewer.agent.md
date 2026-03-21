@@ -1,7 +1,6 @@
 ---
 name: Reviewer
 description: Expert code reviewer for Three.js game code. Reads PR diffs via GitHub MCP, posts inline review comments, manages agent-reviewed and agent-approved labels.
-tools: [read, search, "io.github.github/github-mcp-server/*"]
 user-invocable: false
 ---
 

@@ -6,15 +6,6 @@ description: >
   Local Workers to fix them, dispatches Reviewers for each PR, merges
   approved PRs, and re-tests to verify fixes. Closes all browser windows/tabs when done.
   Runs the full loop autonomously.
-tools:
-  [
-    execute,
-    read,
-    search,
-    agent,
-    "io.github.ChromeDevTools/chrome-devtools-mcp/*",
-    "io.github.github/github-mcp-server/*",
-  ]
 agents: ["Local Worker", "Reviewer", "Merger"]
 user-invocable: false
 ---
