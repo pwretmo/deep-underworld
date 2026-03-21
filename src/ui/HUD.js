@@ -115,6 +115,7 @@ export class HUD {
   _showWarning(text, duration) {
     this.warningText.textContent = text;
     this.warningText.classList.add('visible');
+    this.warningText.style.opacity = '';
     this.warningTimer = duration;
     setTimeout(() => {
       if (this.warningText.textContent === text) {
