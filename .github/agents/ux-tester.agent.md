@@ -88,11 +88,11 @@ For each issue found, record:
 - **Description**: what's wrong
 - **Evidence**: screenshot or console output
 - **Likely file**: which source file to fix (use `semantic_search` if unsure)
-- **Suggested fix**: brief technical recommendation
+- **Suggested fix**: brief technical recommendation. Every issue MUST have a suggested fix — even complex ones. If an issue requires significant refactoring (e.g., converting to InstancedMesh, adding code-splitting), break it into smaller actionable sub-tasks that a single worker can handle and provide the first step as the suggested fix.
 
 ### Phase 4 — Delegate Fixes
 
-For **every fixable issue** (critical, major, AND minor), dispatch a Local Worker subagent. Don't skip issues — fix everything you find.
+For **every issue** (critical, major, AND minor), dispatch a Local Worker subagent. Do NOT skip or defer issues because they seem complex. If an issue requires significant refactoring (e.g., converting to InstancedMesh, adding code-splitting), break it into the smallest meaningful first step that a worker can implement — even a partial improvement counts. Every issue in the Phase 3 list MUST get a worker dispatched.
 
 #### Step 1 — Create ALL worktrees upfront
 
@@ -284,6 +284,8 @@ Return a structured report to the orchestrator:
 - If the dev server fails to start, report the error and stop
 - Don't stop after dispatching workers — continue through review, merge, and verification
 - Fix ALL issues, not just major ones — minor polish matters for UX quality
+- Never classify issues as "remaining known issues" or "lower priority" — every issue gets a worker
+- For complex issues, break them into incremental improvements rather than skipping them
 - Always poll for external GitHub Copilot reviews before and after each review round — don't ignore external feedback
 - Use `mcp_io_github_chr_evaluate_script` to access game internals rather than guessing
 - Each dispatched worker gets a unique slug: `ux-fix-<N>`
