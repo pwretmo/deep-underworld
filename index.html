@@ -100,8 +100,7 @@
     .bar-fill {
       height: 100%; border-radius: 3px; transition: width 0.3s;
     }
-    #oxygen-bar { background: #22aaff; box-shadow: 0 0 8px #22aaff88; }
-    #battery-bar { background: #ffaa22; box-shadow: 0 0 8px #ffaa2288; }
+
 
     #warning-text {
       position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
@@ -291,16 +290,7 @@
   <div id="hud" role="status" aria-label="HUD">
     <div id="depth-display" aria-label="Depth">0m</div>
     <div id="depth-zone" aria-label="Depth zone">SURFACE</div>
-    <div id="bars">
-      <div class="bar-container">
-        <span class="bar-label">Oxygen</span>
-        <div class="bar-track"><div class="bar-fill" id="oxygen-bar" style="width:100%"></div></div>
-      </div>
-      <div class="bar-container">
-        <span class="bar-label">Battery</span>
-        <div class="bar-track"><div class="bar-fill" id="battery-bar" style="width:100%"></div></div>
-      </div>
-    </div>
+
     <div id="warning-text"></div>
     <div id="crosshair"></div>
     <canvas id="sonar" width="150" height="150"></canvas>
@@ -353,7 +343,7 @@
 
   <div id="game-over" role="dialog" aria-label="Game over">
     <h1>LOST AT SEA</h1>
-    <p>Your oxygen supply has been depleted</p>
+    <p>You have been lost in the deep</p>
     <button class="start-btn" id="restart-btn" data-testid="restart-btn">Try Again</button>
   </div>
 
