@@ -142,14 +142,21 @@ mcp_io_github_chr_lighthouse_audit
 
 Use `runSubagent` with `agentName: "Local Worker"`. Each issue gets its own worktree.
 
-Before dispatching, create the worktree:
+### Create all worktrees upfront
+
+Batch-create every worktree before dispatching any worker. This avoids interleaving slow agent runs with fast git operations:
 
 ```bash
 cd F:\repos\deep-underworld
-git worktree add -b agent/ux-fix-<N> F:\repos\deep-underworld-ux-fix-<N> main
+git fetch origin main
+git worktree add -b agent/ux-fix-1 F:\repos\deep-underworld-ux-fix-1 origin/main
+git worktree add -b agent/ux-fix-2 F:\repos\deep-underworld-ux-fix-2 origin/main
+# ... one command per issue, run sequentially (shares .git state)
 ```
 
-Then dispatch with a prompt that includes:
+### Dispatch workers
+
+Subagent calls are blocking, so dispatch workers one at a time. Include in each prompt:
 
 1. Worktree path and branch name
 2. Task description with `[UX Fix]` prefix
@@ -165,29 +172,30 @@ GitHub is configured with an **external Copilot reviewer** that automatically re
 
 ### Polling for External Reviews
 
-After a worker creates or updates a PR, poll for external reviews before dispatching the local Reviewer:
+After workers create or update PRs, poll for external reviews. **Poll ALL PRs in parallel** — fire `get_reviews` and `get_review_comments` for every PR in one tool-call batch:
 
 ```
-Tool: mcp_io_github_git_pull_request_read
-Parameters:
-  owner: "pwretmo"
-  repo: "deep-underworld"
-  pullNumber: <number>
-  method: "get_reviews"
+# Parallel batch — all calls are independent reads:
+mcp_io_github_git_pull_request_read  pullNumber: <PR-A>  method: "get_reviews"
+mcp_io_github_git_pull_request_read  pullNumber: <PR-A>  method: "get_review_comments"
+mcp_io_github_git_pull_request_read  pullNumber: <PR-B>  method: "get_reviews"
+mcp_io_github_git_pull_request_read  pullNumber: <PR-B>  method: "get_review_comments"
+# ... one pair per PR
 ```
 
-Also read any inline comments:
+If external reviews haven't appeared yet, wait ~30 seconds and poll the full batch again. Repeat up to ~2 minutes total (not per PR).
 
-```
-Tool: mcp_io_github_git_pull_request_read
-Parameters:
-  owner: "pwretmo"
-  repo: "deep-underworld"
-  pullNumber: <number>
-  method: "get_review_comments"
-```
+#### Grouping by review state
 
-Poll every ~30 seconds, up to ~2 minutes, for the external review to appear. If it doesn't arrive, proceed with the local Reviewer anyway.
+After polling, sort PRs into:
+
+- **Needs external fixes** — external reviewer requested changes → re-dispatch workers first
+- **Ready for local review** — external approved or absent → dispatch local Reviewer
+- **Already approved** — skip review
+
+Process "needs external fixes" first (unblocks re-review), then "ready for local review".
+
+After a batch of fix pushes, re-poll ALL affected PRs in parallel before dispatching the next review round.
 
 ### Handling External Review Feedback
 

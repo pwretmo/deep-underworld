@@ -77,14 +77,23 @@ For each issue found, record:
 
 For **every fixable issue** (critical, major, AND minor), dispatch a Local Worker subagent. Don't skip issues — fix everything you find.
 
-Before dispatching, create the worktree:
+#### Step 1 — Create ALL worktrees upfront
+
+Create every worktree before dispatching any workers. This avoids interleaving slow agent runs with fast git operations:
 
 ```bash
 cd F:\repos\deep-underworld
-git worktree add -b agent/ux-fix-<N> F:\repos\deep-underworld-ux-fix-<N> main
+git fetch origin main
+git worktree add -b agent/ux-fix-1 F:\repos\deep-underworld-ux-fix-1 origin/main
+git worktree add -b agent/ux-fix-2 F:\repos\deep-underworld-ux-fix-2 origin/main
+# ... one per issue
 ```
 
-Then dispatch using `runSubagent` with `agentName: "Local Worker"`:
+Worktree creation must be sequential (shares `.git` state), but batching them first means workers can be dispatched back-to-back without pausing for git setup.
+
+#### Step 2 — Dispatch workers sequentially
+
+Dispatch using `runSubagent` with `agentName: "Local Worker"` (subagent calls are blocking, so these run one at a time):
 
 ```
 You are a Local Worker agent for the deep-underworld repo (owner: pwretmo, repo: deep-underworld).
@@ -107,12 +116,40 @@ Each issue gets a unique number N (1, 2, 3, ...).
 
 After all Local Workers complete, each PR goes through review. GitHub is configured with an **external Copilot reviewer** that automatically reviews every PR. Account for both external and local reviews.
 
+#### Parallel polling — poll ALL PRs at once
+
+Instead of polling one PR at a time (which costs ~2 minutes × N PRs), poll all PRs in a single parallel batch. For each PR, call both `get_reviews` and `get_review_comments` in parallel — they are independent reads:
+
+```
+# Fire ALL of these in one parallel tool-call batch:
+mcp_io_github_git_pull_request_read  pullNumber: 10  method: "get_reviews"
+mcp_io_github_git_pull_request_read  pullNumber: 10  method: "get_review_comments"
+mcp_io_github_git_pull_request_read  pullNumber: 11  method: "get_reviews"
+mcp_io_github_git_pull_request_read  pullNumber: 11  method: "get_review_comments"
+# ... one pair per PR
+```
+
+If no external reviews have appeared yet, wait ~30 seconds and poll the full batch again. Repeat up to ~2 minutes total (not per PR).
+
+#### Group PRs by review state
+
+After polling, sort PRs into groups:
+
+- **Needs external fixes** — external reviewer requested changes → dispatch workers first
+- **Ready for local review** — external reviewer approved or absent → dispatch local Reviewer
+- **Already fully approved** — skip review, proceed to merge
+
+Process the "needs external fixes" group first (fixes unblock re-review), then the "ready for local review" group.
+
+#### Per-PR review flow
+
 For each PR:
 
-1. **Poll for external reviews first.** Use `mcp_io_github_git_pull_request_read` with `method: "get_reviews"` to check whether GitHub's Copilot reviewer (or any other external reviewer) has already posted a review. Also use `method: "get_review_comments"` to read any inline comments. Wait up to ~2 minutes, polling every 30 seconds, for the external review to appear.
-2. **If the external review requests changes**, extract the comments and re-dispatch the Local Worker to fix them (see fix-review loop below) — do NOT dispatch your own Reviewer yet.
-3. **If the external review approves** (or no external review appears after polling), dispatch the local Reviewer agent as normal.
-4. **After the local Reviewer runs**, poll for external reviews again — the worker's fix push may trigger a new external review round.
+1. **If the external review requests changes**, extract the comments and re-dispatch the Local Worker to fix them (see fix-review loop below) — do NOT dispatch your own Reviewer yet.
+2. **If the external review approves** (or no external review appears after polling), dispatch the local Reviewer agent as normal.
+3. **After the local Reviewer runs**, poll for external reviews again — the worker's fix push may trigger a new external review round.
+
+> **After each batch of worker fix pushes**, re-poll ALL affected PRs in parallel before dispatching the next round of reviewers.
 
 Dispatch the local Reviewer:
 
@@ -185,8 +222,8 @@ Return a structured report to the orchestrator:
 
 ### Issues & PRs
 
-| #   | Category | Severity | Description | PR  | Status |
-| --- | -------- | -------- | ----------- | --- | ------ |
+| #   | Category | Severity | Description | PR  | Status                                   |
+| --- | -------- | -------- | ----------- | --- | ---------------------------------------- |
 | 1   | ...      | ...      | ...         | #XX | merged ✓ / review-blocked / merge-failed |
 
 ### Verification Results

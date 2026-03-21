@@ -161,3 +161,34 @@ Focus area (optional): <area or "full sweep">
 Follow the ux-testing skill in .github/skills/ux-testing/SKILL.md.
 When done: return a structured UX test report with all issues found and PRs created.
 ```
+
+## Parallelization Rules
+
+These rules apply to the orchestrator and any agent that dispatches sub-work.
+
+### Safe to parallelize (independent read/write targets)
+
+- **MCP read calls across different PRs** — e.g. `get_reviews` and `get_review_comments` for PR #10, #11, #12 can all fire in one batch.
+- **MCP read calls within the same PR** — `get_reviews` and `get_review_comments` for the same PR are independent reads; call both at once.
+- **Label writes on different PRs** — each `issue_write` targets a different issue number.
+
+### Must stay sequential
+
+- **`runSubagent`** — blocking by design. Dispatch workers/reviewers one at a time.
+- **`run_in_terminal`** — shares a single shell session. Run one command, wait for output, then next.
+- **Git worktree creation** — `git worktree add` modifies shared `.git/worktrees` state. Create them one at a time. Batch all creations _before_ dispatching workers so agent runs aren't interleaved with git setup.
+- **Merges** — must be sequential with a build-verify step between each.
+
+### Orchestrator patterns for parallel polling
+
+When multiple PRs need external review polling, poll the entire batch at once instead of waiting ~2 minutes per PR:
+
+```
+# One parallel batch — all independent reads:
+mcp_io_github_git_pull_request_read  pullNumber: 10  method: "get_reviews"
+mcp_io_github_git_pull_request_read  pullNumber: 10  method: "get_review_comments"
+mcp_io_github_git_pull_request_read  pullNumber: 11  method: "get_reviews"
+mcp_io_github_git_pull_request_read  pullNumber: 11  method: "get_review_comments"
+```
+
+After collecting results, group PRs by state (needs-fixes / ready-for-review / already-approved) and process each group in order.
