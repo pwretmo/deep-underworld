@@ -181,6 +181,7 @@ export class DeepOne {
   }
 
   update(dt, playerPos) {
+    const time = performance.now() * 0.001;
     this.turnTimer += dt;
 
     const distToPlayer = this.group.position.distanceTo(playerPos);
@@ -248,7 +249,6 @@ export class DeepOne {
     // Animate tentacles with organic sway (throttled to reduce GC)
     this._frameCount++;
     if (this._frameCount % 6 === 0) {
-      const time = performance.now() * 0.001;
       for (const t of this.tentacles) {
         const newPoints = [];
         for (let j = 0; j <= t.segments; j++) {
