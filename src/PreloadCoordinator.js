@@ -42,6 +42,7 @@ export class PreloadCoordinator {
       targetTerrainChunks: 0,
       targetFloraChunks: 0,
     };
+    this._descentAssistRequested = false;
 
     this._cache = new ProceduralStartupCache({
       cacheKey: this.cacheKey,
@@ -70,6 +71,7 @@ export class PreloadCoordinator {
   }
 
   startDescentAssistFromSnapshot() {
+    this._descentAssistRequested = true;
     if (!this._advisorySnapshot) {
       this._descentAssist.active = false;
       return false;
@@ -316,6 +318,12 @@ export class PreloadCoordinator {
     this._advisorySnapshot = snapshot;
     this.runtimeCache.set('startupSnapshot', snapshot);
     this._skipLookupWarmupFromSnapshot = snapshot.lookupChecksum !== null;
+
+    // Start immediately if gameplay/autoplay already requested assist before
+    // the async cache read delivered this advisory snapshot.
+    if (this._descentAssistRequested) {
+      this.startDescentAssistFromSnapshot();
+    }
   }
 
   _clampInt(value, min, max) {

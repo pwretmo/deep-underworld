@@ -294,9 +294,11 @@ export class Game {
     // Update underwater fog based on depth
     this._updateEnvironmentForDepth(depth);
 
+    // Keep descent assist pumping in both regular and autoplay starts.
+    this.preload.pumpDescentAssist();
+
     // Update descent transition overlay
     if (this._descentActive) {
-      this.preload.pumpDescentAssist();
       const progress = this.creatures.getLoadProgress();
       if (progress.total > 0) {
         const pct = Math.min(100, (progress.loaded / progress.total) * 100);
