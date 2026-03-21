@@ -81,6 +81,20 @@ export class CreatureManager {
     return this._spawnQueue.length;
   }
 
+  getSpawnQueueLengthUpToDepth(maxDepth) {
+    let count = 0;
+    for (const entry of this._spawnQueue) {
+      if (entry.depthMin <= maxDepth) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  hasQueuedSpawnsUpToDepth(maxDepth) {
+    return this.getSpawnQueueLengthUpToDepth(maxDepth) > 0;
+  }
+
   _rndPos(playerPos, hRange, yBase, yRange) {
     return new THREE.Vector3(
       playerPos.x + (Math.random() - 0.5) * hRange,

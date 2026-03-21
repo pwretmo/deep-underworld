@@ -89,13 +89,6 @@ const UnderwaterShader = {
       float abyssBlend = smoothstep(depthThresholds.z, depthThresholds.z + 280.0, depth);
       float depthBlend = clamp(midBlend * 0.45 + deepBlend * 0.7 + abyssBlend * 0.35, 0.0, 1.0);
 
-      // Chromatic aberration (increases with depth)
-      float caStr = 0.0015 + depth * 0.000005;
-      float r = texture2D(tDiffuse, uv + vec2(caStr, caStr * 0.3)).r;
-      float b = texture2D(tDiffuse, uv - vec2(caStr, caStr * 0.2)).b;
-      color.r = r;
-      color.b = b;
-
       // Heavy vignette, but avoid crushing edge details into pure black.
       float vigBase = 0.28 + depthBlend * grading.y;
       float vigStr = min(vigBase, 0.9);
@@ -137,33 +130,12 @@ const UnderwaterShader = {
       float ditherStrength = mix(0.0016, 0.0065, abyssBlend);
       color.rgb += (dither - 0.5) * ditherStrength;
 
-      // Lightweight highlight spill keeps bioluminescent creatures glowing without
-      // the multi-pass cost of full bloom.
-      vec2 texel = vec2(1.0) / resolution;
-      vec2 bloomStep = texel * bloomParams.z;
-      vec3 bloomAccum = vec3(0.0);
-
-      vec3 bloomSampleA = texture2D(tDiffuse, uv + vec2(bloomStep.x, 0.0)).rgb;
-      vec3 bloomSampleB = texture2D(tDiffuse, uv + vec2(-bloomStep.x, 0.0)).rgb;
-      vec3 bloomSampleC = texture2D(tDiffuse, uv + vec2(0.0, bloomStep.y)).rgb;
-      vec3 bloomSampleD = texture2D(tDiffuse, uv + vec2(0.0, -bloomStep.y)).rgb;
-      vec3 bloomSampleE = texture2D(tDiffuse, uv + bloomStep).rgb;
-      vec3 bloomSampleF = texture2D(tDiffuse, uv - bloomStep).rgb;
-
-      float maskA = smoothstep(bloomParams.y, 1.0, max(max(bloomSampleA.r, bloomSampleA.g), bloomSampleA.b));
-      float maskB = smoothstep(bloomParams.y, 1.0, max(max(bloomSampleB.r, bloomSampleB.g), bloomSampleB.b));
-      float maskC = smoothstep(bloomParams.y, 1.0, max(max(bloomSampleC.r, bloomSampleC.g), bloomSampleC.b));
-      float maskD = smoothstep(bloomParams.y, 1.0, max(max(bloomSampleD.r, bloomSampleD.g), bloomSampleD.b));
-      float maskE = smoothstep(bloomParams.y, 1.0, max(max(bloomSampleE.r, bloomSampleE.g), bloomSampleE.b));
-      float maskF = smoothstep(bloomParams.y, 1.0, max(max(bloomSampleF.r, bloomSampleF.g), bloomSampleF.b));
-
-      bloomAccum += bloomSampleA * maskA;
-      bloomAccum += bloomSampleB * maskB;
-      bloomAccum += bloomSampleC * maskC;
-      bloomAccum += bloomSampleD * maskD;
-      bloomAccum += bloomSampleE * maskE;
-      bloomAccum += bloomSampleF * maskF;
-      color.rgb += bloomAccum * (bloomParams.x / 6.0);
+      // A single-sample highlight spill is much cheaper than sampling neighboring
+      // texels for bloom, while still keeping bright bioluminescent accents lively.
+      float highlight = max(max(color.r, color.g), color.b);
+      float bloomMask = smoothstep(bloomParams.y, 1.0, highlight);
+      float bloomLift = bloomParams.x * (0.18 + depthBlend * 0.22);
+      color.rgb += color.rgb * bloomMask * bloomLift;
 
       // Slight scanline effect for deep water dread
       float scanline = 0.97 + 0.03 * sin(uv.y * resolution.y * 1.5);

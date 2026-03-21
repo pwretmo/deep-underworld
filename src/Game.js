@@ -16,6 +16,7 @@ export class Game {
     this.scene = new THREE.Scene();
     this.running = false;
     this.pendingStart = false;
+    this.startPreparing = false;
 
     // Renderer
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -107,6 +108,10 @@ export class Game {
       terrain: this.terrain,
       flora: this.flora,
       creatures: this.creatures,
+      prepareDepthState: (depth) => {
+        this._updateEnvironmentForDepth(depth);
+        this._updateRenderPipelineForDepth(depth);
+      },
     });
     this.preload.startMenuIdleWarmup();
 
@@ -202,20 +207,12 @@ export class Game {
    * drive the game via press_key / evaluate_script without user gestures.
    */
   startAutoplay() {
-    if (this.running) return;
+    if (this.running || this.startPreparing) return;
     this.preload.cancel('autoplay-start');
-    this.preload.startDescentAssistFromSnapshot();
-    this._startTransition.startRequested = false;
-    this._startTransition.started = true;
     this.autoplay = true;
     this.player.locked = true; // simulate lock without real pointer lock
-    this.menuOverlay.classList.add('hidden');
-    this.gameOverOverlay.classList.remove('visible');
-    this.pauseOverlay.classList.remove('visible');
-    this.running = true;
     this.audio.start();
-    this.clock.start();
-    console.log('[deep-underworld] Autoplay mode active');
+    void this._primeAndEnterGameplay('Autoplay mode active');
   }
 
   restart() {
@@ -224,6 +221,7 @@ export class Game {
     this.flashlightOn = false;
     this.pendingStart = false;
     this.running = false;
+    this.startPreparing = false;
     this.gameOverOverlay.classList.add('visible');
     this.player.reset();
     this.creatures.reset();
@@ -254,27 +252,57 @@ export class Game {
   }
 
   _beginGameplay() {
+    void this._primeAndEnterGameplay('Gameplay started');
+  }
+
+  async _primeAndEnterGameplay(logMessage) {
+    if (this.running || this.startPreparing || this.gameOver) return;
+
+    this.startPreparing = true;
     this._startTransition.startRequested = false;
     this._startTransition.started = true;
     this.pendingStart = false;
-    this.preload.startDescentAssistFromSnapshot();
     this.menuOverlay.classList.add('hidden');
     this.gameOverOverlay.classList.remove('visible');
     this.pauseOverlay.classList.remove('visible');
 
-    // Show descent transition overlay
     this.descentOverlay.classList.add('visible');
     this.descentOverlay.classList.remove('fade-out');
     this.descentProgressBar.style.width = '0%';
     this._descentActive = true;
+    this._updateDescentProgress();
 
-    // Warm-up render to force shader compilation before gameplay
+    const primeSummary = await this.preload.primeStartBaseline({
+      onProgress: () => this._updateDescentProgress(),
+    });
+
+    if (this.gameOver) {
+      this.startPreparing = false;
+      return;
+    }
+
+    this.preload.startDescentAssistFromSnapshot();
+
+    // Warm-up render to force shader compilation before gameplay.
     this.underwaterEffect.render(0);
 
     this.running = true;
+    this.startPreparing = false;
     this._resumeAudio();
     this.clock.start();
-    console.log('[deep-underworld] Gameplay started');
+
+    console.log(`[deep-underworld] ${logMessage}`, primeSummary);
+  }
+
+  _updateDescentProgress() {
+    const progress = this.creatures.getLoadProgress();
+    if (progress.total <= 0) {
+      this.descentProgressBar.style.width = '0%';
+      return;
+    }
+
+    const pct = Math.min(100, (progress.loaded / progress.total) * 100);
+    this.descentProgressBar.style.width = pct + '%';
   }
 
   _pauseAudio() {
@@ -343,10 +371,7 @@ export class Game {
     // Update descent transition overlay
     if (this._descentActive) {
       const progress = this.creatures.getLoadProgress();
-      if (progress.total > 0) {
-        const pct = Math.min(100, (progress.loaded / progress.total) * 100);
-        this.descentProgressBar.style.width = pct + '%';
-      }
+      this._updateDescentProgress();
       if (this.creatures.isFullyLoaded()) {
         this._descentActive = false;
         this.descentOverlay.classList.add('fade-out');

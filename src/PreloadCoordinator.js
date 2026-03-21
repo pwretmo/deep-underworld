@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { noise2D } from './utils/noise.js';
 
 const SCHEMA_VERSION = 1;
@@ -11,18 +12,22 @@ const MAX_PRELOADED_TERRAIN_CHUNKS = 6;
 const MAX_PRELOADED_FLORA_CHUNKS = 5;
 const FRAME_BUDGET_MS = 6;
 const DESCENT_ASSIST_FRAME_BUDGET_MS = 5;
+const START_PRIME_FRAME_BUDGET_MS = 12;
+const START_PRIME_TIMEOUT_MS = 1000 * 6;
+const START_PRIME_DEPTH = 320;
 const WRITE_THROTTLE_MS = 5000;
 const ENTRY_TTL_MS = 1000 * 60 * 60 * 24;
 const INDEXED_DB_SIZE_CEILING = 3 * 1024 * 1024;
 
 export class PreloadCoordinator {
-  constructor({ renderer, underwaterEffect, player, terrain, flora, creatures }) {
+  constructor({ renderer, underwaterEffect, player, terrain, flora, creatures, prepareDepthState }) {
     this.renderer = renderer;
     this.underwaterEffect = underwaterEffect;
     this.player = player;
     this.terrain = terrain;
     this.flora = flora;
     this.creatures = creatures;
+    this.prepareDepthState = prepareDepthState;
 
     this.state = 'idle';
     this._token = null;
@@ -109,6 +114,70 @@ export class PreloadCoordinator {
     if (this._isDescentAssistComplete()) {
       this._descentAssist.active = false;
     }
+  }
+
+  async primeStartBaseline({ onProgress } = {}) {
+    const token = { cancelled: false };
+
+    this.creatures.prepareInitialQueue(this.player.position);
+    this.terrain.preloadPrepareAround(this.player.position);
+    this.flora.preloadPrepareAround(this.player.position);
+    this._warmGpuOnce(token);
+
+    const deadline = performance.now() + START_PRIME_TIMEOUT_MS;
+    const reportProgress = () => {
+      onProgress?.({
+        creatures: this.creatures.getLoadProgress(),
+        queuedThroughDepth: this.creatures.getSpawnQueueLengthUpToDepth(START_PRIME_DEPTH),
+        terrainPending: this.terrain.getPendingCount(),
+        floraPending: this.flora.getPendingCount(),
+      });
+    };
+
+    reportProgress();
+
+    while (this._needsStartPrimeWork() && performance.now() < deadline) {
+      const frameStart = performance.now();
+
+      while (performance.now() - frameStart < START_PRIME_FRAME_BUDGET_MS) {
+        let didWork = false;
+
+        if (this.creatures.hasQueuedSpawnsUpToDepth(START_PRIME_DEPTH)) {
+          didWork = this.creatures.preloadDrain(1, undefined, START_PRIME_DEPTH) > 0 || didWork;
+        }
+
+        if (this.terrain.getPendingCount() > 0) {
+          didWork = this.terrain.preloadDrain(1) > 0 || didWork;
+        }
+
+        if (this.flora.getPendingCount() > 0) {
+          didWork = this.flora.preloadDrain(1) > 0 || didWork;
+        }
+
+        reportProgress();
+
+        if (!didWork || !this._needsStartPrimeWork()) {
+          break;
+        }
+      }
+
+      if (this._needsStartPrimeWork()) {
+        await new Promise(resolve => window.requestAnimationFrame(() => resolve()));
+      }
+    }
+
+    await this._warmDepthBandRenders();
+
+    reportProgress();
+
+    return {
+      timedOut: this._needsStartPrimeWork(),
+      primedDepth: START_PRIME_DEPTH,
+      creatures: this.creatures.getLoadProgress(),
+      queuedThroughDepth: this.creatures.getSpawnQueueLengthUpToDepth(START_PRIME_DEPTH),
+      terrainPending: this.terrain.getPendingCount(),
+      floraPending: this.flora.getPendingCount(),
+    };
   }
 
   async _runWarmup(token) {
@@ -292,6 +361,50 @@ export class PreloadCoordinator {
       this.flora.getPendingCount() === 0;
 
     return creatureDone && terrainDone && floraDone;
+  }
+
+  _needsStartPrimeWork() {
+    return this.creatures.hasQueuedSpawnsUpToDepth(START_PRIME_DEPTH) ||
+      this.terrain.getPendingCount() > 0 ||
+      this.flora.getPendingCount() > 0;
+  }
+
+  async _warmDepthBandRenders() {
+    if (!this.prepareDepthState) return;
+
+    const sampleDepths = [0, 20, 35, 50, 70, 95, 120, 160, 220, 320];
+    const sampleYawAngles = [0, Math.PI * 0.5, Math.PI, Math.PI * 1.5];
+    const samplePitchAngles = [0, -0.32, -0.6];
+    const originalPosition = this.player.position.clone();
+    const originalQuaternion = this.player.camera.quaternion.clone();
+    const originalEuler = this.player.euler.clone();
+    const originalDepth = this.player.depth;
+
+    for (const depth of sampleDepths) {
+      this.player.position.copy(originalPosition);
+      this.player.position.y = -Math.max(depth, 5);
+      this.player.depth = depth;
+      this.prepareDepthState(depth);
+
+      for (const pitch of samplePitchAngles) {
+        for (const yaw of sampleYawAngles) {
+          this.player.euler.set(pitch, yaw, 0, 'YXZ');
+          this.player.camera.quaternion.setFromEuler(this.player.euler);
+          this.renderer.compile(this.underwaterEffect.scene, this.underwaterEffect.camera);
+          this.underwaterEffect.render(depth, {
+            flashlightOn: false,
+            exposure: this.renderer.toneMappingExposure,
+          });
+          await new Promise(resolve => window.requestAnimationFrame(() => resolve()));
+        }
+      }
+    }
+
+    this.player.position.copy(originalPosition);
+    this.player.depth = originalDepth;
+    this.player.euler.copy(originalEuler);
+    this.player.camera.quaternion.copy(originalQuaternion);
+    this.prepareDepthState(Math.max(0, -this.player.position.y));
   }
 
   _normalizeSnapshot(snapshot) {
