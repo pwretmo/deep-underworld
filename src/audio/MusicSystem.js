@@ -222,9 +222,9 @@ export class MusicSystem {
     source.stop(now + duration);
   }
 
-  _playMelodyNote(scale, rootMidi, duration, threat) {
+  _playMelodyNote(scale, rootMidi, duration, threat, startTime = null) {
     if (!this.ctx) return;
-    const now = this.ctx.currentTime;
+    const now = startTime ?? this.ctx.currentTime;
     const idx = pickIndex(Math.min(scale.length, 5));
     const midi = rootMidi - 12 + scale[idx];
     const freq = midiToFreq(midi);
@@ -275,6 +275,7 @@ export class MusicSystem {
       frequency: Math.min(820, Math.max(300, freq * 2.1)),
       Q: 0.9,
       destination: this.melodyFilter,
+      delay: Math.max(0, now - this.ctx.currentTime),
     });
   }
 
@@ -574,12 +575,13 @@ export class MusicSystem {
     this.melodyTimer += dt;
     const melInterval = lerp(12.5, 7.5, depthNorm) + threat * 3.2 + this.encounterIntensity * 5.2;
     if (this.melodyTimer > melInterval) {
-      this.melodyTimer = 0;
       if (Math.random() < 0.72 - this.encounterIntensity * 0.45) {
+        this.melodyTimer = 0;
         const dur = lerp(5, 2.4, threat + this.encounterIntensity * 0.3);
         this._playMelodyNote(scale, rootMidi, dur, threat);
         if (Math.random() < 0.16 - threat * 0.08) {
-          setTimeout(() => this._playMelodyNote(scale, rootMidi, dur * 0.68, threat), (0.45 + Math.random() * 0.5) * 1000);
+          const answerDelay = 0.45 + Math.random() * 0.5;
+          this._playMelodyNote(scale, rootMidi, dur * 0.68, threat, now + answerDelay);
         }
       }
     }
