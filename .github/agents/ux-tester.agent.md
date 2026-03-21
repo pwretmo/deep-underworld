@@ -108,9 +108,9 @@ git worktree add -b agent/ux-fix-2 F:\repos\deep-underworld-ux-fix-2 origin/main
 
 Worktree creation must be sequential (shares `.git` state), but batching them first means workers can be dispatched back-to-back without pausing for git setup.
 
-#### Step 2 — Dispatch workers sequentially
+#### Step 2 — Dispatch workers in parallel
 
-Dispatch using `runSubagent` with `agentName: "Local Worker"` (subagent calls are blocking, so these run one at a time):
+Each worker operates in its own worktree and branch — they have no data dependencies — so dispatch them all in parallel using `runSubagent` with `agentName: "Local Worker"`:
 
 ```
 You are a Local Worker agent for the deep-underworld repo (owner: pwretmo, repo: deep-underworld).
@@ -127,7 +127,7 @@ Follow the worktree-workflow skill in .github/skills/worktree-workflow/SKILL.md.
 When done: commit, push, and create a PR targeting main with the label "agent-work".
 ```
 
-Each issue gets a unique number N (1, 2, 3, ...).
+Each issue gets a unique number N (1, 2, 3, ...). Since all workers target different branches and worktrees, fire all `runSubagent` calls in a single parallel batch.
 
 ### Phase 5 — Review All PRs
 
@@ -177,6 +177,12 @@ git worktree add F:\repos\deep-underworld-ux-fix-<N> agent/ux-fix-<N>
 This preserves the PR's existing commits. See the worktree-workflow skill for details.
 
 #### Per-PR review flow
+
+After grouping, dispatch reviews in parallel where possible:
+
+- **Local Reviewer dispatch**: all PRs in the "ready for local review" group are independent — dispatch their Reviewer subagents in a single parallel batch.
+- **Worker fix dispatch**: all PRs in the "needs external fixes" group target different worktrees — dispatch their Local Worker fix subagents in a single parallel batch.
+- **After a batch of fixes completes**, re-poll all affected PRs in parallel, then dispatch the next round.
 
 For each PR:
 

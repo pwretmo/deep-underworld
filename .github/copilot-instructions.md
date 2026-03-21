@@ -168,15 +168,16 @@ These rules apply to the orchestrator and any agent that dispatches sub-work.
 
 ### Safe to parallelize (independent read/write targets)
 
+- **`runSubagent` (independent tasks)** — parallel subagent execution is supported (since VS Code January 2026). Dispatch multiple workers or reviewers in parallel when they operate on **separate worktrees/branches** and have no data dependencies. Example: dispatching 3 Local Workers that each fix a different issue in their own worktree.
 - **MCP read calls across different PRs** — e.g. `get_reviews` and `get_review_comments` for PR #10, #11, #12 can all fire in one batch.
 - **MCP read calls within the same PR** — `get_reviews` and `get_review_comments` for the same PR are independent reads; call both at once.
 - **Label writes on different PRs** — each `issue_write` targets a different issue number.
 
 ### Must stay sequential
 
-- **`runSubagent`** — blocking by design. Dispatch workers/reviewers one at a time.
+- **`runSubagent` (dependent tasks)** — when one subagent's output feeds into the next (e.g. worker → reviewer for the same PR), keep them sequential.
 - **`run_in_terminal`** — shares a single shell session. Run one command, wait for output, then next.
-- **Git worktree creation** — `git worktree add` modifies shared `.git/worktrees` state. Create them one at a time. Batch all creations _before_ dispatching workers so agent runs aren't interleaved with git setup.
+- **Git worktree creation** — `git worktree add` modifies shared `.git/worktrees` state. Create them one at a time. Batch all creations _before_ dispatching parallel workers.
 - **Merges** — must be sequential with a build-verify step between each.
 
 ### Orchestrator patterns for parallel polling
