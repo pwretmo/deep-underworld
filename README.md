@@ -76,6 +76,8 @@ Agent definitions and skills live in `.github/`:
     reviewer.agent.md              # Reviewer agent
     merger.agent.md                # Merger agent
     ux-tester.agent.md             # UX Tester agent
+  instructions/
+    agent-files.instructions.md    # Auto-loaded when editing agent/skill files
   skills/
     worktree-workflow/SKILL.md     # Git worktree lifecycle
     review-workflow/SKILL.md       # PR review via GitHub MCP
