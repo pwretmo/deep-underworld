@@ -64,6 +64,9 @@ export class Game {
     this.gameOverOverlay = document.getElementById('game-over');
     this.controlsHelpOverlay = document.getElementById('controls-help');
     this.controlsHelpVisible = false;
+    this.descentOverlay = document.getElementById('descent-transition');
+    this.descentProgressBar = document.getElementById('descent-progress-bar');
+    this._descentActive = false;
 
     this._initEnvironmentColors();
     this._setupEvents();
@@ -156,6 +159,8 @@ export class Game {
     this.creatures.reset();
     this.player.flashlight.visible = false;
     this.pauseOverlay.classList.remove('visible');
+    this._descentActive = false;
+    this.descentOverlay.classList.remove('visible', 'fade-out');
     if (this.autoplay) {
       this.startAutoplay();
     } else {
@@ -181,10 +186,20 @@ export class Game {
 
   _beginGameplay() {
     this.pendingStart = false;
-    this.running = true;
     this.menuOverlay.classList.add('hidden');
     this.gameOverOverlay.classList.remove('visible');
     this.pauseOverlay.classList.remove('visible');
+
+    // Show descent transition overlay
+    this.descentOverlay.classList.add('visible');
+    this.descentOverlay.classList.remove('fade-out');
+    this.descentProgressBar.style.width = '0%';
+    this._descentActive = true;
+
+    // Warm-up render to force shader compilation before gameplay
+    this.underwaterEffect.render(0);
+
+    this.running = true;
     this._resumeAudio();
     this.clock.start();
     console.log('[deep-underworld] Gameplay started');
@@ -263,6 +278,23 @@ export class Game {
       this._pauseAudio();
       this.player.unlock();
       console.log('[deep-underworld] Game over — oxygen depleted at depth ' + Math.floor(depth) + 'm');
+    }
+
+    // Update descent transition overlay
+    if (this._descentActive) {
+      const progress = this.creatures.getLoadProgress();
+      if (progress.total > 0) {
+        const pct = Math.min(100, (progress.loaded / progress.total) * 100);
+        this.descentProgressBar.style.width = pct + '%';
+      }
+      if (this.creatures.isFullyLoaded()) {
+        this._descentActive = false;
+        this.descentOverlay.classList.add('fade-out');
+        setTimeout(() => {
+          this.descentOverlay.classList.remove('visible');
+          this.descentOverlay.classList.remove('fade-out');
+        }, 800);
+      }
     }
 
     // Render with post-processing
