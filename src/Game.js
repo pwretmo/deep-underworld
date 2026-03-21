@@ -65,8 +65,15 @@ export class Game {
     this._pointLightBudget = {
       shallowMax: 10,
       deepMax: 6,
-      refreshInterval: 0,
-      elapsed: 0,
+      transitionBand: 2,
+      scanInterval: 0.35,
+      scanElapsed: 1,
+      retargetInterval: 0.22,
+      retargetElapsed: 1,
+      fadeInRate: 8,
+      fadeOutRate: 18,
+      managedLights: [],
+      tempWorldPos: new THREE.Vector3(),
     };
 
     // Alias so automated tests can use game.creatureManager or game.creatures
@@ -432,57 +439,110 @@ export class Game {
   }
 
   _updatePointLightBudget(dt, depth, playerPos) {
-    this._pointLightBudget.elapsed += dt;
-    if (this._pointLightBudget.elapsed < this._pointLightBudget.refreshInterval) {
-      return;
+    const budget = this._pointLightBudget;
+    budget.scanElapsed += dt;
+    budget.retargetElapsed += dt;
+
+    if (budget.scanElapsed >= budget.scanInterval || budget.managedLights.length === 0) {
+      budget.scanElapsed = 0;
+      this._refreshManagedPointLights();
     }
 
-    this._pointLightBudget.elapsed = 0;
+    if (budget.retargetElapsed >= budget.retargetInterval) {
+      budget.retargetElapsed = 0;
+      this._retargetPointLights(depth, playerPos);
+    }
 
-    const depthBlend = THREE.MathUtils.smoothstep(depth, 35, 220);
-    const maxLights = Math.round(THREE.MathUtils.lerp(
-      this._pointLightBudget.shallowMax,
-      this._pointLightBudget.deepMax,
-      depthBlend
-    ));
+    const fadeInAlpha = 1 - Math.exp(-budget.fadeInRate * dt);
+    const fadeOutAlpha = 1 - Math.exp(-budget.fadeOutRate * dt);
 
-    const candidates = [];
+    for (const light of budget.managedLights) {
+      if (!light.parent) continue;
+
+      const baseIntensity = light.userData.duwBaseIntensity ?? light.intensity;
+      const targetIntensity = light.userData.duwTargetIntensity ?? baseIntensity;
+
+      if (targetIntensity > 0.001 && !light.visible) {
+        light.visible = true;
+      }
+
+      const alpha = targetIntensity >= light.intensity ? fadeInAlpha : fadeOutAlpha;
+      light.intensity = THREE.MathUtils.lerp(light.intensity, targetIntensity, alpha);
+
+      if (targetIntensity <= 0.001 && light.intensity < Math.max(baseIntensity * 0.18, 0.05)) {
+        light.intensity = 0;
+        light.visible = false;
+      }
+    }
+  }
+
+  _refreshManagedPointLights() {
+    const managedLights = [];
     this.scene.traverse((obj) => {
       if (!obj.isPointLight) return;
       if (obj === this.player.subLight) return;
 
-      if (obj.userData.duwBaseIntensity === undefined || obj.intensity > 0) {
+      if (obj.userData.duwBaseIntensity === undefined) {
         obj.userData.duwBaseIntensity = obj.intensity;
       }
+      if (obj.userData.duwTargetIntensity === undefined) {
+        obj.userData.duwTargetIntensity = obj.intensity;
+      }
 
-      const desiredIntensity = obj.intensity > 0
-        ? obj.intensity
-        : (obj.userData.duwBaseIntensity ?? 0);
-
-      const worldPos = obj.getWorldPosition(new THREE.Vector3());
-      const distanceSq = worldPos.distanceToSquared(playerPos);
-      const score = (desiredIntensity + 0.001) / (distanceSq + 1);
-      candidates.push({ light: obj, score, distanceSq });
+      managedLights.push(obj);
     });
+    this._pointLightBudget.managedLights = managedLights;
+  }
+
+  _retargetPointLights(depth, playerPos) {
+    const budget = this._pointLightBudget;
+    const depthBlend = THREE.MathUtils.smoothstep(depth, 35, 220);
+    const maxLights = Math.round(THREE.MathUtils.lerp(
+      budget.shallowMax,
+      budget.deepMax,
+      depthBlend
+    ));
+
+    const candidates = [];
+    for (const light of budget.managedLights) {
+      if (!light.parent) continue;
+
+      const baseIntensity = light.userData.duwBaseIntensity ?? light.intensity;
+      const worldPos = light.getWorldPosition(budget.tempWorldPos);
+      const distanceSq = worldPos.distanceToSquared(playerPos);
+      const score = (baseIntensity + 0.001) / (distanceSq + 1);
+      candidates.push({ light, score });
+      light.userData.duwTargetIntensity = 0;
+    }
 
     candidates.sort((a, b) => b.score - a.score);
 
+    const fullyLitCount = Math.min(maxLights, candidates.length);
+    const fadeStartIndex = Math.max(fullyLitCount - 1, 0);
+    const fadeEndIndex = fullyLitCount + budget.transitionBand;
+    const cutoffIndex = Math.max(fullyLitCount - 1, 0);
+    const softCutoffIndex = Math.min(candidates.length - 1, cutoffIndex + budget.transitionBand);
+    const cutoffScore = candidates[cutoffIndex]?.score ?? 0;
+    const softCutoffScore = candidates[softCutoffIndex]?.score ?? cutoffScore;
+
     for (let i = 0; i < candidates.length; i++) {
       const entry = candidates[i];
-      const desiredIntensity = entry.light.intensity > 0
-        ? entry.light.intensity
-        : (entry.light.userData.duwBaseIntensity ?? 0);
-      entry.light.userData.duwDesiredIntensity = desiredIntensity;
+      const baseIntensity = entry.light.userData.duwBaseIntensity ?? 0;
+      let weight = 0;
 
-      if (i < maxLights) {
-        if (entry.light.userData.duwCulled && desiredIntensity > 0) {
-          entry.light.intensity = entry.light.userData.duwDesiredIntensity;
+      if (i < fullyLitCount) {
+        weight = 1;
+      } else if (i < fadeEndIndex) {
+        const rankWeight = 1 - THREE.MathUtils.smoothstep(fadeStartIndex, fadeEndIndex, i);
+        if (cutoffScore > 0) {
+          const scoreWeight = THREE.MathUtils.smoothstep(softCutoffScore * 0.9, cutoffScore * 1.05, entry.score);
+          weight = rankWeight * scoreWeight;
+        } else {
+          weight = rankWeight;
         }
-        entry.light.userData.duwCulled = false;
-      } else {
-        entry.light.userData.duwCulled = true;
-        entry.light.intensity = 0;
       }
+
+      entry.light.userData.duwTargetIntensity = baseIntensity * weight;
     }
   }
 }

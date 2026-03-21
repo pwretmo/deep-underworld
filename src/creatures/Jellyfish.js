@@ -139,6 +139,91 @@ export class Jellyfish {
     return bellGeo;
   }
 
+  _createAppendageDescriptor(mesh, options) {
+    mesh.frustumCulled = false;
+
+    const geometry = mesh.geometry;
+    const positionAttr = geometry.attributes.position;
+    positionAttr.setUsage(THREE.DynamicDrawUsage);
+
+    const restPositions = Float32Array.from(positionAttr.array);
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (let i = 0; i < restPositions.length; i += 3) {
+      const y = restPositions[i + 1];
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+
+    const rootBand = maxY - Math.max((maxY - minY) * 0.08, 0.001);
+    let rootX = 0;
+    let rootZ = 0;
+    let rootCount = 0;
+    for (let i = 0; i < restPositions.length; i += 3) {
+      if (restPositions[i + 1] < rootBand) continue;
+      rootX += restPositions[i];
+      rootZ += restPositions[i + 2];
+      rootCount++;
+    }
+
+    return {
+      mesh,
+      geometry,
+      restPositions,
+      rootCenter: {
+        x: rootCount > 0 ? rootX / rootCount : 0,
+        z: rootCount > 0 ? rootZ / rootCount : 0,
+      },
+      minY,
+      maxY,
+      length: Math.max(maxY - minY, 0.001),
+      ...options,
+    };
+  }
+
+  _deformAppendage(appendage, jelly, pulse, t) {
+    const positions = appendage.geometry.attributes.position;
+    const array = positions.array;
+    const rest = appendage.restPositions;
+    const contraction = Math.max(0, pulse);
+    const relaxed = Math.max(0, -pulse);
+    const flowFactor = 0.3 + relaxed * 0.82;
+    const pulseSqueeze = 1 - contraction * appendage.radialPulse;
+    const driftX = jelly.driftX * appendage.trailFactor * 0.22;
+    const driftZ = jelly.driftZ * appendage.trailFactor * 0.22;
+
+    for (let i = 0; i < rest.length; i += 3) {
+      const baseX = rest[i];
+      const baseY = rest[i + 1];
+      const baseZ = rest[i + 2];
+      const along = THREE.MathUtils.clamp((appendage.maxY - baseY) / appendage.length, 0, 1);
+      const tipWeight = along * along * (3 - 2 * along);
+      const tipWeightSq = tipWeight * tipWeight;
+
+      const waveA = Math.sin(t * appendage.swaySpeed + appendage.phaseOffset + along * appendage.waveFrequency);
+      const waveB = Math.sin(t * appendage.secondarySpeed + appendage.phaseOffset * 0.67 + along * appendage.secondaryFrequency);
+      const lateral = (waveA * appendage.swayAmount + waveB * appendage.secondarySwayAmount) * flowFactor * tipWeight;
+      const axial = Math.cos(t * appendage.twistSpeed + appendage.phaseOffset + along * appendage.waveFrequency * 0.55)
+        * appendage.twistAmount * tipWeight;
+      const curl = (relaxed * appendage.relaxCurlAmount - contraction * appendage.pulseCurlAmount) * tipWeightSq;
+      const vertical = contraction * jelly.size * appendage.liftAmount * tipWeight
+        - relaxed * jelly.size * appendage.dropAmount * along * 0.4
+        + waveB * appendage.heaveAmount * tipWeightSq;
+
+      const radialX = baseX - appendage.rootCenter.x;
+      const radialZ = baseZ - appendage.rootCenter.z;
+      const radialScale = THREE.MathUtils.lerp(1, pulseSqueeze, tipWeight);
+
+      array[i] = appendage.rootCenter.x + radialX * radialScale + appendage.perpX * lateral + appendage.dirX * (axial + driftX * tipWeight) + radialX * curl;
+      array[i + 1] = baseY + vertical;
+      array[i + 2] = appendage.rootCenter.z + radialZ * radialScale + appendage.perpZ * lateral + appendage.dirZ * (axial + driftZ * tipWeight) + radialZ * curl;
+    }
+
+    positions.needsUpdate = true;
+    appendage.geometry.computeVertexNormals();
+    appendage.geometry.attributes.normal.needsUpdate = true;
+  }
+
   _createFlowingAppendages(group, color, size, profile) {
     const oralArms = [];
     const tentacles = [];
@@ -176,18 +261,29 @@ export class Jellyfish {
       });
       const arm = new THREE.Mesh(armGeo, armMat);
       group.add(arm);
-      oralArms.push({
-        mesh: arm,
+      oralArms.push(this._createAppendageDescriptor(arm, {
         angle,
-        segs: profile.oralArmSegments,
-        basePosition: arm.position.clone(),
-        baseRotation: arm.rotation.clone(),
-        baseScale: arm.scale.clone(),
+        dirX: Math.cos(angle),
+        dirZ: Math.sin(angle),
+        perpX: Math.cos(angle + Math.PI * 0.5),
+        perpZ: Math.sin(angle + Math.PI * 0.5),
         phaseOffset: Math.random() * Math.PI * 2,
+        swaySpeed: 0.58 + Math.random() * 0.24,
+        secondarySpeed: 0.34 + Math.random() * 0.18,
         swayAmount: 0.025 + Math.random() * 0.035,
+        secondarySwayAmount: 0.015 + Math.random() * 0.02,
+        waveFrequency: 2.8 + Math.random() * 0.8,
+        secondaryFrequency: 5.2 + Math.random() * 1.1,
+        twistSpeed: 0.36 + Math.random() * 0.12,
         twistAmount: 0.02 + Math.random() * 0.03,
         liftAmount: 0.03 + Math.random() * 0.03,
-      });
+        heaveAmount: 0.01 + Math.random() * 0.012,
+        pulseCurlAmount: 0.02 + Math.random() * 0.018,
+        relaxCurlAmount: 0.045 + Math.random() * 0.025,
+        dropAmount: 0.015 + Math.random() * 0.02,
+        radialPulse: 0.03 + Math.random() * 0.02,
+        trailFactor: 0.3 + Math.random() * 0.25,
+      }));
     }
 
     const tentacleCount = profile.tentacleMin + Math.floor(Math.random() * profile.tentacleMaxExtra);
@@ -226,19 +322,29 @@ export class Jellyfish {
       });
       const tentacle = new THREE.Mesh(tentGeo, tentMat);
       group.add(tentacle);
-      tentacles.push({
-        mesh: tentacle,
-        segs: profile.tentacleSegments,
-        basePosition: tentacle.position.clone(),
-        baseRotation: tentacle.rotation.clone(),
-        baseScale: tentacle.scale.clone(),
+      tentacles.push(this._createAppendageDescriptor(tentacle, {
+        angle,
+        dirX: Math.cos(angle),
+        dirZ: Math.sin(angle),
+        perpX: Math.cos(angle + Math.PI * 0.5),
+        perpZ: Math.sin(angle + Math.PI * 0.5),
         phaseOffset: Math.random() * Math.PI * 2,
         swaySpeed: 0.5 + Math.random() * 0.5,
         swayAmount: 0.04 + Math.random() * 0.04,
+        secondarySpeed: 0.3 + Math.random() * 0.18,
+        secondarySwayAmount: 0.02 + Math.random() * 0.02,
+        waveFrequency: 4.2 + Math.random() * 1.3,
+        secondaryFrequency: 7.8 + Math.random() * 1.6,
+        twistSpeed: 0.42 + Math.random() * 0.2,
         twistAmount: 0.03 + Math.random() * 0.03,
         trailFactor: 0.4 + Math.random() * 0.4,
         liftAmount: 0.05 + Math.random() * 0.05,
-      });
+        heaveAmount: 0.016 + Math.random() * 0.018,
+        pulseCurlAmount: 0.03 + Math.random() * 0.025,
+        relaxCurlAmount: 0.07 + Math.random() * 0.03,
+        dropAmount: 0.018 + Math.random() * 0.02,
+        radialPulse: 0.04 + Math.random() * 0.02,
+      }));
     }
 
     return { oralArms, tentacles };
@@ -391,36 +497,12 @@ export class Jellyfish {
   }
 
   _animateTierAppendages(jelly, tier, pulse, t) {
-    const contraction = Math.max(0, pulse);
-    const relaxed = Math.max(0, -pulse);
     for (const tent of tier.tentacles) {
-      const relaxedMotion = 0.45 + relaxed * 0.75;
-      tent.mesh.position.x = tent.basePosition.x + jelly.driftX * tent.trailFactor * 0.2;
-      tent.mesh.position.y = tent.basePosition.y + contraction * jelly.size * tent.liftAmount;
-      tent.mesh.position.z = tent.basePosition.z + jelly.driftZ * tent.trailFactor * 0.2;
-      tent.mesh.rotation.x = tent.baseRotation.x + Math.cos(t * tent.swaySpeed * 0.84 + tent.phaseOffset) * tent.twistAmount * relaxedMotion;
-      tent.mesh.rotation.y = tent.baseRotation.y + Math.sin(t * tent.swaySpeed * 0.45 + tent.phaseOffset) * 0.06 * relaxedMotion;
-      tent.mesh.rotation.z = tent.baseRotation.z + Math.sin(t * tent.swaySpeed + tent.phaseOffset) * tent.swayAmount * relaxedMotion;
-      tent.mesh.scale.set(
-        tent.baseScale.x * (1 - contraction * 0.05),
-        tent.baseScale.y * (1 + contraction * 0.12 - relaxed * 0.03),
-        tent.baseScale.z * (1 - contraction * 0.05)
-      );
+      this._deformAppendage(tent, jelly, pulse, t);
     }
 
     for (const arm of tier.oralArms) {
-      const relaxedMotion = 0.35 + relaxed * 0.55;
-      arm.mesh.position.x = arm.basePosition.x + jelly.driftX * 0.12;
-      arm.mesh.position.y = arm.basePosition.y + contraction * jelly.size * arm.liftAmount;
-      arm.mesh.position.z = arm.basePosition.z + jelly.driftZ * 0.12;
-      arm.mesh.rotation.x = arm.baseRotation.x + Math.cos(t * 0.54 + arm.phaseOffset) * arm.twistAmount * relaxedMotion;
-      arm.mesh.rotation.y = arm.baseRotation.y + Math.sin(t * 0.42 + arm.angle + arm.phaseOffset) * 0.05 * relaxedMotion;
-      arm.mesh.rotation.z = arm.baseRotation.z + Math.sin(t * 0.6 + arm.angle + arm.phaseOffset) * arm.swayAmount * relaxedMotion;
-      arm.mesh.scale.set(
-        arm.baseScale.x * (1 - contraction * 0.04),
-        arm.baseScale.y * (1 + contraction * 0.08 - relaxed * 0.02),
-        arm.baseScale.z * (1 - contraction * 0.04)
-      );
+      this._deformAppendage(arm, jelly, pulse, t);
     }
   }
 

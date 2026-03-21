@@ -29,9 +29,9 @@ const RENDER_PIPELINE_TUNING = Object.freeze({
     radius: 0.62,
   },
   performance: {
-    baseScale: 0.72,
-    minScale: 0.55,
-    maxScale: 0.82,
+    baseScale: 1.0,
+    minScale: 0.6,
+    maxScale: 1.0,
     degradeThresholdMs: 28,
     severeThresholdMs: 45,
     recoveryThresholdMs: 16,
@@ -194,6 +194,7 @@ export class UnderwaterEffect {
     // Composer
     this.composer = new EffectComposer(renderer);
     this.tuning = RENDER_PIPELINE_TUNING;
+    this._nativeComposerPixelRatio = Math.max(renderer.getPixelRatio(), 1);
     this._composerScale = this.tuning.performance.baseScale;
     this._appliedComposerScale = 0;
 
@@ -239,6 +240,7 @@ export class UnderwaterEffect {
   }
 
   _applyComposerScale(force = false) {
+    this._nativeComposerPixelRatio = Math.max(this.renderer.getPixelRatio(), 1);
     const nextScale = THREE.MathUtils.clamp(
       this._composerScale,
       this.tuning.performance.minScale,
@@ -250,11 +252,12 @@ export class UnderwaterEffect {
     }
 
     this._appliedComposerScale = nextScale;
-    this.composer.setPixelRatio(nextScale);
+    const pixelRatio = this._nativeComposerPixelRatio * nextScale;
+    this.composer.setPixelRatio(pixelRatio);
     this.composer.setSize(window.innerWidth, window.innerHeight);
     this.underwaterPass.uniforms.resolution.value.set(
-      window.innerWidth * nextScale,
-      window.innerHeight * nextScale
+      window.innerWidth * pixelRatio,
+      window.innerHeight * pixelRatio
     );
   }
 
