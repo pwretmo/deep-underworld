@@ -8,6 +8,7 @@ import { HUD } from './ui/HUD.js';
 import { AudioManager } from './audio/AudioManager.js';
 import { UnderwaterEffect } from './shaders/UnderwaterEffect.js';
 import { PreloadCoordinator } from './PreloadCoordinator.js';
+import { AbyssEncounter } from './encounters/AbyssEncounter.js';
 
 export class Game {
   constructor() {
@@ -43,6 +44,7 @@ export class Game {
     this.hud = new HUD();
     this.audio = new AudioManager();
     this.underwaterEffect = new UnderwaterEffect(this.renderer, this.scene, this.camera);
+    this.abyssEncounter = new AbyssEncounter();
 
     // Alias so automated tests can use game.creatureManager or game.creatures
     this.creatureManager = this.creatures;
@@ -291,8 +293,9 @@ export class Game {
     this.hud.update(depth, this.flashlightOn);
     this.hud.updateLocator(creaturesByType, this.player.position, this.camera);
 
-    // Update underwater fog based on depth
+    // Update underwater fog based on depth, then let encounter override if active
     this._updateEnvironmentForDepth(depth);
+    this.abyssEncounter.update(dt, depth, this.player, this.scene, this._fog, this.ocean.ambientLight, this.hud);
 
     // Keep descent assist pumping in both regular and autoplay starts.
     this.preload.pumpDescentAssist();
