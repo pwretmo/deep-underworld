@@ -13,6 +13,7 @@ tools:
     search,
     agent,
     "io.github.ChromeDevTools/chrome-devtools-mcp/*",
+    "io.github.github/github-mcp-server/*",
   ]
 agents: ["Local Worker", "Reviewer", "Merger"]
 user-invocable: false
@@ -43,6 +44,22 @@ Read these skills before starting:
 - `.github/skills/merge-workflow/SKILL.md`
 
 ## Workflow
+
+### Phase 0 — Discover Tools
+
+The browser tools are **deferred** and must be loaded before use. Run these discovery calls at the start:
+
+1. `tool_search_tool_regex` with pattern `mcp_io_github_chr` — loads Chrome DevTools MCP tools (screenshots, clicks, keyboard, console, performance, Lighthouse)
+2. `tool_search_tool_regex` with pattern `mcp_io_github_git` — loads GitHub MCP tools (needed for PR polling in Phase 5)
+
+Verify that key tools appear in the results:
+
+- `mcp_io_github_chr_new_page` (open browser)
+- `mcp_io_github_chr_take_screenshot` (screenshots)
+- `mcp_io_github_chr_press_key` (keyboard input)
+- `mcp_io_github_git_pull_request_read` (PR polling)
+
+**If tools are not found**: STOP and report to the orchestrator that the Chrome DevTools MCP server is unavailable. Do NOT silently fall back to code-based analysis — browser-based testing is the core purpose of this agent.
 
 ### Phase 1 — Launch
 

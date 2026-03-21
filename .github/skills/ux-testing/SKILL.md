@@ -7,6 +7,24 @@ description: "Browser-based UX testing for Three.js games using Chrome DevTools 
 
 How to play-test the deep-underworld game in a browser, find UX issues, and dispatch fixes.
 
+## Tool Discovery (Required First Step)
+
+The Chrome DevTools MCP tools are **deferred** — they won't be available until you load them. Before any browser interaction, run:
+
+```
+tool_search_tool_regex  pattern: "mcp_io_github_chr"
+```
+
+This loads all Chrome DevTools tools (screenshots, clicks, keyboard, console, performance, Lighthouse, etc.). Verify that `mcp_io_github_chr_new_page` appears in the results before proceeding.
+
+If the search returns no matching tools, the Chrome DevTools MCP server is not running. **STOP and report this** — do not fall back to code-based analysis.
+
+If you also need GitHub MCP tools (for PR polling), load them too:
+
+```
+tool_search_tool_regex  pattern: "mcp_io_github_git"
+```
+
 ## Starting the Dev Server
 
 Run in a background terminal:
