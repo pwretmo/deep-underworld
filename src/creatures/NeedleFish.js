@@ -20,6 +20,7 @@ export class NeedleFish {
     const metalMat = new THREE.MeshPhysicalMaterial({
       color: 0x101018, roughness: 0.1, metalness: 0.9,
       clearcoat: 1.0, clearcoatRoughness: 0.05,
+      emissive: 0x080210, emissiveIntensity: 0.4,
     });
     const spineMat = new THREE.MeshPhysicalMaterial({
       color: 0x302820, roughness: 0.2, metalness: 0.5,
@@ -94,6 +95,11 @@ export class NeedleFish {
     const tail = new THREE.Mesh(tailGeo, tailMat);
     tail.position.x = -2.1;
     this.group.add(tail);
+
+    // Red warning glow from eye area
+    this.eyeLight = new THREE.PointLight(0xff2200, 0.6, 10);
+    this.eyeLight.position.set(1.8, 0, 0);
+    this.group.add(this.eyeLight);
 
     const s = 1.5 + Math.random() * 1;
     this.group.scale.setScalar(s);

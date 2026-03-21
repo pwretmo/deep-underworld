@@ -20,6 +20,7 @@ export class IronWhale {
     const hullMat = new THREE.MeshPhysicalMaterial({
       color: 0x0a0a0c, roughness: 0.2, metalness: 0.75,
       clearcoat: 1.0, clearcoatRoughness: 0.1,
+      emissive: 0x040610, emissiveIntensity: 0.3,
     });
     const barnMat = new THREE.MeshPhysicalMaterial({
       color: 0x2a2218, roughness: 0.35, metalness: 0.4,
@@ -114,6 +115,11 @@ export class IronWhale {
       vent.rotation.z = Math.PI / 2;
       this.group.add(vent);
     }
+
+    // Deep blue bioluminescent glow from eyes
+    this.eyeLight = new THREE.PointLight(0x2244aa, 1.5, 25);
+    this.eyeLight.position.set(5, 0.5, 0);
+    this.group.add(this.eyeLight);
 
     this.group.scale.setScalar(2 + Math.random() * 2);
   }

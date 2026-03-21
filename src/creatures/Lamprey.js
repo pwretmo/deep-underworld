@@ -25,6 +25,7 @@ export class Lamprey {
     const fleshMat = new THREE.MeshPhysicalMaterial({
       color: 0x1a0810, roughness: 0.3, metalness: 0.3,
       clearcoat: 0.8,
+      emissive: 0x100408, emissiveIntensity: 0.5,
     });
     const toothMat = new THREE.MeshPhysicalMaterial({
       color: 0x403028, roughness: 0.2, metalness: 0.5,
@@ -94,6 +95,11 @@ export class Lamprey {
     const tail = new THREE.Mesh(tailGeo, metalMat);
     tail.position.set(-segments * 0.28, 0, 0);
     this.group.add(tail);
+
+    // Predatory red glow from mouth ring
+    this.mouthLight = new THREE.PointLight(0xff2200, 0.8, 12);
+    this.mouthLight.position.set(0.3, 0, 0);
+    this.group.add(this.mouthLight);
 
     const s = 2 + Math.random() * 2;
     this.group.scale.setScalar(s);

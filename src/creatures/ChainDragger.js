@@ -21,6 +21,7 @@ export class ChainDragger {
     const bodyMat = new THREE.MeshPhysicalMaterial({
       color: 0x0a0810, roughness: 0.2, metalness: 0.65,
       clearcoat: 1.0, clearcoatRoughness: 0.1,
+      emissive: 0x080406, emissiveIntensity: 0.3,
     });
     const chainMat = new THREE.MeshPhysicalMaterial({
       color: 0x151515, roughness: 0.1, metalness: 0.92,
@@ -79,6 +80,11 @@ export class ChainDragger {
       this.chains.push(chainGroup);
       this.group.add(chainGroup);
     }
+
+    // Amber glow from eye area
+    this.eyeLight = new THREE.PointLight(0xcc8800, 0.8, 12);
+    this.eyeLight.position.set(0.8, 0.3, 0);
+    this.group.add(this.eyeLight);
 
     const s = 2 + Math.random() * 1.5;
     this.group.scale.setScalar(s);

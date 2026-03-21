@@ -23,6 +23,7 @@ export class Parasite {
       color: 0x1a0810, roughness: 0.2, metalness: 0.2,
       clearcoat: 0.9, transparent: true, opacity: 0.8,
       transmission: 0.2, thickness: 0.3,
+      emissive: 0x180610, emissiveIntensity: 0.7,
     });
     const metalMat = new THREE.MeshPhysicalMaterial({
       color: 0x101010, roughness: 0.1, metalness: 0.85,
@@ -101,6 +102,11 @@ export class Parasite {
       vein.rotation.set(Math.random(), Math.random(), Math.random());
       this.group.add(vein);
     }
+
+    // Sickly bioluminescent glow from sacs
+    this.glow = new THREE.PointLight(0x220810, 0.7, 8);
+    this.glow.position.set(0, 0, 0);
+    this.group.add(this.glow);
 
     const s = 1.5 + Math.random() * 1.5;
     this.group.scale.setScalar(s);

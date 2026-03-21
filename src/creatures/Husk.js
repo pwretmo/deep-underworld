@@ -21,10 +21,12 @@ export class Husk {
     const shellMat = new THREE.MeshPhysicalMaterial({
       color: 0x181410, roughness: 0.25, metalness: 0.5,
       clearcoat: 0.7, clearcoatRoughness: 0.2,
+      emissive: 0x08060a, emissiveIntensity: 0.4,
     });
     const innerMat = new THREE.MeshPhysicalMaterial({
       color: 0x060406, roughness: 0.3, metalness: 0.3,
       side: THREE.DoubleSide,
+      emissive: 0x0c0412, emissiveIntensity: 0.6,
     });
 
     // Split shell halves - like a molted exoskeleton
@@ -82,6 +84,11 @@ export class Husk {
       this.shellParts.push(joint);
       this.group.add(joint);
     }
+
+    // Residual energy leak from cracked shell
+    this.glow = new THREE.PointLight(0x1a0828, 0.6, 10);
+    this.glow.position.set(0, 0, 0);
+    this.group.add(this.glow);
 
     const s = 1.5 + Math.random() * 2;
     this.group.scale.setScalar(s);

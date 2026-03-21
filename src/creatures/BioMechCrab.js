@@ -21,6 +21,7 @@ export class BioMechCrab {
     const shellMat = new THREE.MeshPhysicalMaterial({
       color: 0x0c0a08, roughness: 0.2, metalness: 0.7,
       clearcoat: 1.0, clearcoatRoughness: 0.1,
+      emissive: 0x0a0402, emissiveIntensity: 0.4,
     });
     const metalMat = new THREE.MeshPhysicalMaterial({
       color: 0x181818, roughness: 0.15, metalness: 0.9,
@@ -139,6 +140,11 @@ export class BioMechCrab {
       clawGroup.rotation.y = side * -0.3;
       this.group.add(clawGroup);
     }
+
+    // Industrial red glow from eye stalks
+    this.eyeLight = new THREE.PointLight(0xff4400, 1.0, 14);
+    this.eyeLight.position.set(1.3, 0.4, 0);
+    this.group.add(this.eyeLight);
 
     const s = 1.5 + Math.random() * 1.5;
     this.group.scale.setScalar(s);

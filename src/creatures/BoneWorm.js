@@ -27,6 +27,7 @@ export class BoneWorm {
       color: 0x1a0a18, roughness: 0.2, metalness: 0.3,
       clearcoat: 0.9, clearcoatRoughness: 0.1,
       transparent: true, opacity: 0.7,
+      emissive: 0x1a0620, emissiveIntensity: 0.8,
     });
 
     for (let i = 0; i < segCount; i++) {
@@ -78,6 +79,11 @@ export class BoneWorm {
       tooth.rotation.z = Math.PI / 2;
       this.group.add(tooth);
     }
+
+    // Bioluminescent glow from exposed flesh
+    this.glow = new THREE.PointLight(0x2a0830, 1.0, 15);
+    this.glow.position.set(0, 0, 0);
+    this.group.add(this.glow);
 
     const scale = 1.5 + Math.random() * 2;
     this.group.scale.setScalar(scale);
