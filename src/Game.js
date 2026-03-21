@@ -172,6 +172,7 @@ export class Game {
   startAutoplay() {
     if (this.running) return;
     this.preload.cancel('autoplay-start');
+    this.preload.startDescentAssistFromSnapshot();
     this._startTransition.startRequested = false;
     this._startTransition.started = true;
     this.autoplay = true;
@@ -224,6 +225,7 @@ export class Game {
     this._startTransition.startRequested = false;
     this._startTransition.started = true;
     this.pendingStart = false;
+    this.preload.startDescentAssistFromSnapshot();
     this.menuOverlay.classList.add('hidden');
     this.gameOverOverlay.classList.remove('visible');
     this.pauseOverlay.classList.remove('visible');
@@ -291,6 +293,9 @@ export class Game {
 
     // Update underwater fog based on depth
     this._updateEnvironmentForDepth(depth);
+
+    // Keep descent assist pumping in both regular and autoplay starts.
+    this.preload.pumpDescentAssist();
 
     // Update descent transition overlay
     if (this._descentActive) {

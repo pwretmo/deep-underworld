@@ -14,10 +14,11 @@ npm run build     # Production build
 
 - A menu-idle preload phase warms non-audio systems after page load and before Begin Descent.
 - Begin Descent always takes priority and never waits for preload completion.
+- On valid repeat-session cache hits, startup uses persisted preload targets as advisory hints to skip redundant lookup warmup and speed descent-time preload catch-up.
 - Audio remains gesture-gated and is not resumed/initialized by preload work.
 - Procedural startup metadata stays tiny in localStorage; larger snapshots use IndexedDB when available.
 - Cache key invalidation uses: `gameVersion + worldSeed + qualityTier + schemaVersion`.
-- If storage APIs are unavailable/restricted or quota is exceeded, gameplay continues with memory-only warmup.
+- If cache entries are invalid/stale/unreadable, or storage APIs are unavailable/restricted/quota-limited, gameplay cleanly falls back to the standard warmup path.
 
 ## AI Agent Workflow
 
