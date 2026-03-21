@@ -23,6 +23,7 @@ export class Flora {
 
     // Use noise to determine flora placement
     const floraCount = 12 + Math.floor(Math.random() * 10);
+    let lightsInChunk = 0;
 
     for (let i = 0; i < floraCount; i++) {
       const fx = (Math.random() - 0.5) * size * 0.9;
@@ -46,7 +47,7 @@ export class Flora {
         this._addCoral(group, fx, groundY, fz, depth);
       } else if (depth > 100 && type < 0.8) {
         // Bioluminescent orbs
-        this._addBioOrb(group, fx, groundY, fz, depth);
+        lightsInChunk = this._addBioOrb(group, fx, groundY, fz, depth, lightsInChunk);
       } else if (depth > 200) {
         // Deep sea tube worms
         this._addTubeWorms(group, fx, groundY, fz);
@@ -133,7 +134,7 @@ export class Flora {
     create(x, y, z, 0.4 + Math.random() * 0.4, 0);
   }
 
-  _addBioOrb(parent, x, y, z, depth) {
+  _addBioOrb(parent, x, y, z, depth, lightsInChunk) {
     const colors = [0x00ffaa, 0x00aaff, 0x8844ff, 0xff00aa, 0x44ffaa];
     const color = colors[Math.floor(Math.random() * colors.length)];
     const size = 0.1 + Math.random() * 0.3;
@@ -151,12 +152,15 @@ export class Flora {
     orb.position.set(x, y + 1 + Math.random() * 5, z);
     parent.add(orb);
 
-    // Point light for glow
-    if (Math.random() < 0.3) {
-      const light = new THREE.PointLight(color, 1, 10);
+    // Point light for glow — capped at 2 per chunk to reduce draw calls
+    if (lightsInChunk < 2 && Math.random() < 0.1) {
+      const light = new THREE.PointLight(color, 0.8, 25);
       light.position.copy(orb.position);
       parent.add(light);
+      lightsInChunk++;
     }
+
+    return lightsInChunk;
   }
 
   _addTubeWorms(parent, x, y, z) {
