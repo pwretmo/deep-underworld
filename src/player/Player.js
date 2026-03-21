@@ -67,7 +67,7 @@ export class Player {
 
     // Submarine flashlight
     this.flashlight = new THREE.Group();
-    const spotlight = new THREE.SpotLight(0xccddff, 72, 108, Math.PI / 7, 0.3, 1.55);
+    const spotlight = new THREE.SpotLight(0xccddff, 200, 120, Math.PI / 7, 0.3, 1.4);
     spotlight.position.set(0, 0, 0);
     spotlight.target.position.set(0, 0, -1);
     this.flashlight.add(spotlight);
@@ -103,8 +103,8 @@ export class Player {
       this._rebuildDustParticles(e.detail.settings.particleCount);
     });
 
-    // Submarine ambient glow - dimmer for more contrast
-    this.subLight = new THREE.PointLight(0x112233, 0.32, 7);
+    // Submarine ambient glow — visible cockpit illumination
+    this.subLight = new THREE.PointLight(0x334466, 1.5, 18);
     camera.add(this.subLight);
 
     /** Current depth (positive = deeper). Updated by Game._animate(). */

@@ -60,7 +60,7 @@ export class Game {
         mid: 0.66,
         deep: 0.55,
         abyss: 0.48,
-        flashlightBoost: 0.08,
+        flashlightBoost: 0.16,
         easing: 0.08,
       },
     };
@@ -443,15 +443,23 @@ export class Game {
 
     const nearTwilight = THREE.MathUtils.lerp(5.0, 1.6, twilight);
     const nearDark = THREE.MathUtils.lerp(nearTwilight, 0.45, darkZone);
-    const fogNear = THREE.MathUtils.lerp(nearDark, 0.18, abyss);
+    let fogNear = THREE.MathUtils.lerp(nearDark, 0.18, abyss);
 
     const farTwilight = THREE.MathUtils.lerp(220, 82, twilight);
     const farDark = THREE.MathUtils.lerp(farTwilight, 34, darkZone);
-    const fogFar = THREE.MathUtils.lerp(farDark, 19, abyss);
+    let fogFar = THREE.MathUtils.lerp(farDark, 19, abyss);
 
     const ambientTwilight = THREE.MathUtils.lerp(0.24, 0.1, twilight);
     const ambientDark = THREE.MathUtils.lerp(ambientTwilight, 0.025, darkZone);
     const ambientIntensity = THREE.MathUtils.lerp(ambientDark, 0.006, abyss);
+
+    // When flashlight is on, push fog back so the beam can illuminate the scene.
+    // The push is proportional to depth — stronger at deeper zones where fog is thickest.
+    if (this.flashlightOn) {
+      const pushStrength = THREE.MathUtils.smoothstep(depth, 100, 600);
+      fogNear += THREE.MathUtils.lerp(0.5, 3, pushStrength);
+      fogFar += THREE.MathUtils.lerp(8, 38, pushStrength);
+    }
 
     this._fog.color.copy(this._fogColor);
     this._fog.near = fogNear;
