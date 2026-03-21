@@ -107,6 +107,11 @@ export class UnderwaterEffect {
     this.underwaterPass = new ShaderPass(UnderwaterShader);
     this.underwaterPass.uniforms.resolution.value.set(window.innerWidth, window.innerHeight);
     this.composer.addPass(this.underwaterPass);
+
+    // Adaptive bloom guard:
+    // creature-dense scenes can cause heavy post-processing stalls on some GPUs.
+    this._renderEmaMs = 16;
+    this._bloomSuppressedUntil = 0;
   }
 
   resize() {
@@ -115,19 +120,31 @@ export class UnderwaterEffect {
   }
 
   render(depth) {
+    const frameStart = performance.now();
     this.time += 0.016;
     this.underwaterPass.uniforms.time.value = this.time;
     this.underwaterPass.uniforms.depth.value = depth;
 
     // Increase bloom in deep zones (bioluminescence and flashlight stand out more)
     if (depth > 200) {
-      this.bloomPass.strength = 0.7 + (depth - 200) / 400 * 0.8;
+      this.bloomPass.strength = Math.min(1.1, 0.7 + (depth - 200) / 400 * 0.8);
       this.bloomPass.threshold = Math.max(0.3, 0.7 - depth / 1000);
     } else {
       this.bloomPass.strength = 0.4;
       this.bloomPass.threshold = 0.7;
     }
 
+    const now = performance.now();
+    this.bloomPass.enabled = now >= this._bloomSuppressedUntil;
+
     this.composer.render();
+
+    const renderMs = performance.now() - frameStart;
+    this._renderEmaMs = this._renderEmaMs * 0.92 + renderMs * 0.08;
+
+    // If a render spike occurs, temporarily disable bloom to prevent repeated freezes.
+    if (renderMs > 100 || this._renderEmaMs > 28) {
+      this._bloomSuppressedUntil = performance.now() + 3500;
+    }
   }
 }
