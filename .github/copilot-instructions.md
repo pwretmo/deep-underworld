@@ -62,7 +62,7 @@ Use conventional commits: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`.
 
 ## Agent Roles
 
-Three agent roles are defined in `.github/agents/`:
+Four agent roles are defined in `.github/agents/`:
 
 | Agent            | File                    | Purpose                                                           |
 | ---------------- | ----------------------- | ----------------------------------------------------------------- |

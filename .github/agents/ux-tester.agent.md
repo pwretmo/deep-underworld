@@ -12,6 +12,7 @@ tools:
     agent,
     "io.github.ChromeDevTools/chrome-devtools-mcp/*",
   ]
+agents: ["Local Worker"]
 user-invocable: false
 ---
 
