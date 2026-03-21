@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { noise2D } from '../utils/noise.js';
+import { qualityManager } from '../QualityManager.js';
 
 export class Flora {
   constructor(scene) {
@@ -11,6 +12,15 @@ export class Flora {
     this.time = 0;
     this.kelps = [];
     this._pendingChunks = []; // queue for staggered generation
+    this._floraDensityScale = qualityManager.getSettings().floraDensityScale;
+
+    window.addEventListener('qualitychange', (e) => {
+      this._floraDensityScale = e.detail.settings.floraDensityScale;
+      // Mark all chunks for rebuild on next move
+      if (this.lastChunkX !== null) {
+        this._rebuildPendingAround(this.lastChunkX, this.lastChunkZ);
+      }
+    });
   }
 
   _getChunkKey(cx, cz) { return `${cx},${cz}`; }
@@ -22,7 +32,7 @@ export class Flora {
     const offsetZ = cz * size;
 
     // Use noise to determine flora placement
-    const floraCount = 12 + Math.floor(Math.random() * 10);
+    const floraCount = Math.round((12 + Math.floor(Math.random() * 10)) * this._floraDensityScale);
     let lightsInChunk = 0;
 
     for (let i = 0; i < floraCount; i++) {

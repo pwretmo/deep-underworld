@@ -29,14 +29,21 @@ import { SporeCloud } from './SporeCloud.js';
 import { IronWhale } from './IronWhale.js';
 import { MechOctopus } from './MechOctopus.js';
 import { Parasite } from './Parasite.js';
+import { qualityManager } from '../QualityManager.js';
 
-// Distance beyond which creatures are removed entirely
-const DESPAWN_DISTANCE = 250;
-// Distance beyond which creature updates are skipped (cheaper than despawn)
-const CULL_DISTANCE = 180;
-// Hard cap on total alive creatures to bound per-frame work
-const MAX_CREATURES = 60;
+// Defaults come from QualityManager per tier
+const _qSettings = qualityManager.getSettings();
+let DESPAWN_DISTANCE = _qSettings.creatureDespawnDistance;
+let CULL_DISTANCE = _qSettings.creatureCullDistance;
+let MAX_CREATURES = _qSettings.maxCreatures;
 const QUEUE_DRAIN_PER_FRAME = 1;
+
+window.addEventListener('qualitychange', (e) => {
+  const s = e.detail.settings;
+  DESPAWN_DISTANCE = s.creatureDespawnDistance;
+  CULL_DISTANCE = s.creatureCullDistance;
+  MAX_CREATURES = s.maxCreatures;
+});
 const DYNAMIC_SPAWNS_PER_CYCLE = 2;
 const SPAWN_LOOKAHEAD_DEPTH = 45;
 

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { qualityManager } from '../QualityManager.js';
 
 const RENDER_PIPELINE_TUNING = Object.freeze({
   depthThresholds: {
@@ -211,7 +212,14 @@ export class UnderwaterEffect {
     // Adaptive render guard:
     // creature-dense scenes can cause heavy post-processing stalls on some GPUs.
     this._renderEmaMs = 16;
+    this._postProcessMaxScale = qualityManager.getSettings().postProcessScale;
     this._applyComposerScale(true);
+
+    window.addEventListener('qualitychange', (e) => {
+      this._postProcessMaxScale = e.detail.settings.postProcessScale;
+      this._composerScale = Math.min(this._composerScale, this._postProcessMaxScale);
+      this._applyComposerScale(true);
+    });
   }
 
   resize() {
@@ -223,7 +231,7 @@ export class UnderwaterEffect {
     const nextScale = THREE.MathUtils.clamp(
       this._composerScale,
       this.tuning.performance.minScale,
-      this.tuning.performance.maxScale
+      this._postProcessMaxScale
     );
 
     if (!force && Math.abs(nextScale - this._appliedComposerScale) < 0.01) {
@@ -288,7 +296,7 @@ export class UnderwaterEffect {
       this._composerScale = Math.max(this.tuning.performance.minScale, this._composerScale - degradeStep);
       this._applyComposerScale();
     } else if (this._renderEmaMs < this.tuning.performance.recoveryThresholdMs) {
-      this._composerScale = Math.min(this.tuning.performance.maxScale, this._composerScale + this.tuning.performance.recoveryStep);
+      this._composerScale = Math.min(this._postProcessMaxScale, this._composerScale + this.tuning.performance.recoveryStep);
       this._applyComposerScale();
     }
   }
