@@ -13,6 +13,7 @@ export class Game {
     this.clock = new THREE.Clock();
     this.scene = new THREE.Scene();
     this.running = false;
+    this.pendingStart = false;
 
     // Renderer
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -46,6 +47,9 @@ export class Game {
     this.flashlightOn = false;
     this.gameOver = false;
     this.maxDepth = 0;
+    this.menuOverlay = document.getElementById('menu');
+    this.pauseOverlay = document.getElementById('paused');
+    this.gameOverOverlay = document.getElementById('game-over');
 
     this._setupEvents();
     this._animate();
@@ -71,12 +75,28 @@ export class Game {
       }
     });
 
-    this.pauseOverlay = document.getElementById('paused');
     this.player.onLockChange = (locked) => {
-      if (this.running && !this.gameOver) {
-        this.pauseOverlay.classList.toggle('visible', !locked);
+      if (locked) {
+        if (this.pendingStart && !this.gameOver) {
+          this._beginGameplay();
+        } else if (this.running && !this.gameOver) {
+          this.pauseOverlay.classList.remove('visible');
+          this._resumeAudio();
+        }
+      } else if (this.pendingStart) {
+        this.pendingStart = false;
+        this._pauseAudio();
+      } else if (this.running && !this.gameOver) {
+        this.pauseOverlay.classList.add('visible');
+        this._pauseAudio();
       }
     };
+    document.addEventListener('pointerlockerror', () => {
+      if (!this.pendingStart) return;
+      this.pendingStart = false;
+      this.running = false;
+      this._pauseAudio();
+    });
     this.pauseOverlay.addEventListener('click', () => {
       this.pauseOverlay.classList.remove('visible');
       this.player.lock();
@@ -84,10 +104,11 @@ export class Game {
   }
 
   start() {
-    this.running = true;
+    if (this.gameOver || this.running || this.pendingStart) return;
+    this.pendingStart = true;
+    this.pauseOverlay.classList.remove('visible');
     this.player.lock();
     this.audio.start();
-    this.clock.start();
   }
 
   restart() {
@@ -95,9 +116,12 @@ export class Game {
     this.battery = 100;
     this.gameOver = false;
     this.flashlightOn = false;
+    this.pendingStart = false;
+    this.running = false;
     this.player.reset();
     this.creatures.reset();
     this.player.flashlight.visible = false;
+    this.pauseOverlay.classList.remove('visible');
     this.start();
   }
 
@@ -112,11 +136,30 @@ export class Game {
     this.audio.playSonar();
   }
 
+  _beginGameplay() {
+    this.pendingStart = false;
+    this.running = true;
+    this.menuOverlay.classList.add('hidden');
+    this.pauseOverlay.classList.remove('visible');
+    this._resumeAudio();
+    this.clock.start();
+  }
+
+  _pauseAudio() {
+    if (!this.audio.ctx) return;
+    void this.audio.ctx.suspend().catch(() => {});
+  }
+
+  _resumeAudio() {
+    if (!this.audio.ctx) return;
+    void this.audio.ctx.resume().catch(() => {});
+  }
+
   _animate() {
     requestAnimationFrame(() => this._animate());
 
     const dt = Math.min(this.clock.getDelta(), 0.05);
-    if (!this.running || this.gameOver) return;
+    if (!this.running || this.gameOver || !this.player.locked) return;
 
     const depth = Math.max(0, -this.player.position.y);
 
@@ -159,7 +202,8 @@ export class Game {
     if (this.oxygen <= 0) {
       this.gameOver = true;
       this.running = false;
-      document.getElementById('game-over').classList.add('visible');
+      this.gameOverOverlay.classList.add('visible');
+      this._pauseAudio();
       this.player.unlock();
     }
 
