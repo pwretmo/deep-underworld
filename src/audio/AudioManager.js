@@ -123,6 +123,28 @@ export class AudioManager {
     osc.stop(now + 4);
   }
 
+  playPickup() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+
+    // Ethereal chime — two quick rising tones
+    for (const [freq, delay] of [[600, 0], [900, 0.08]]) {
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now + delay);
+      osc.frequency.exponentialRampToValueAtTime(freq * 1.5, now + delay + 0.15);
+
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.12, now + delay);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + delay + 0.4);
+
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+      osc.start(now + delay);
+      osc.stop(now + delay + 0.5);
+    }
+  }
+
   playSonar() {
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
