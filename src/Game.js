@@ -170,7 +170,7 @@ export class Game {
     this.terrain.update(this.player.position);
     this.flora.update(dt, this.player.position);
     this.creatures.update(dt, this.player.position, depth);
-    this.audio.update(dt, depth, this.creatures.getNearestCreatureDistance(this.player.position));
+    this.audio.update(dt, depth, this.creatures.getNearestCreatureDistance(this.player.position), this.oxygen);
 
     // Oxygen depletion
     this.oxygen -= dt * 0.8;
