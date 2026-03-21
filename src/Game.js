@@ -7,6 +7,7 @@ import { CreatureManager } from './creatures/CreatureManager.js';
 import { HUD } from './ui/HUD.js';
 import { AudioManager } from './audio/AudioManager.js';
 import { UnderwaterEffect } from './shaders/UnderwaterEffect.js';
+import { SupplyCache } from './environment/SupplyCache.js';
 
 export class Game {
   constructor() {
@@ -42,6 +43,7 @@ export class Game {
     this.hud = new HUD();
     this.audio = new AudioManager();
     this.underwaterEffect = new UnderwaterEffect(this.renderer, this.scene, this.camera);
+    this.supplyCaches = new SupplyCache(this.scene, this.terrain);
 
     // Alias so automated tests can use game.creatureManager or game.creatures
     this.creatureManager = this.creatures;
@@ -157,6 +159,7 @@ export class Game {
     this.gameOverOverlay.classList.add('visible');
     this.player.reset();
     this.creatures.reset();
+    this.supplyCaches.reset();
     this.player.flashlight.visible = false;
     this.pauseOverlay.classList.remove('visible');
     this._descentActive = false;
@@ -241,6 +244,15 @@ export class Game {
     this.flora.update(dt, this.player.position);
     this.creatures.update(dt, this.player.position, depth);
     this.audio.update(dt, depth, this.creatures.getNearestCreatureDistance(this.player.position), this.oxygen);
+
+    // Supply cache pickups
+    const pickups = this.supplyCaches.update(dt, this.player.position);
+    for (const pickup of pickups) {
+      this.oxygen = Math.min(100, this.oxygen + pickup.oxygen);
+      this.battery = Math.min(100, this.battery + pickup.battery);
+      this.hud.showPickup(`+${pickup.oxygen}% O\u2082  +${pickup.battery}% Battery`);
+      this.audio.playPickup();
+    }
 
     // Oxygen depletion
     this.oxygen -= dt * 0.8;

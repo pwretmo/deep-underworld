@@ -59,6 +59,16 @@ export class HUD {
     this.trackedType = null;
     this.creatureTypes = [];
 
+    // Pickup notification
+    this.pickupEl = document.createElement('div');
+    this.pickupEl.id = 'pickup-text';
+    this.pickupEl.style.cssText =
+      'position:fixed;top:35%;left:50%;transform:translateX(-50%);' +
+      'color:#22ffaa;font-family:monospace;font-size:18px;text-shadow:0 0 10px #22ffaa;' +
+      'opacity:0;transition:opacity 0.3s;pointer-events:none;z-index:100;white-space:nowrap;';
+    document.body.appendChild(this.pickupEl);
+    this._pickupTimeout = null;
+
     this.creatureList.addEventListener('click', (e) => {
       const entry = e.target.closest('.creature-entry');
       if (!entry || !entry.dataset.creatureType) return;
@@ -123,6 +133,15 @@ export class HUD {
         this.warningTimer = 0;
       }
     }, duration);
+  }
+
+  showPickup(text) {
+    this.pickupEl.textContent = text;
+    this.pickupEl.style.opacity = '1';
+    clearTimeout(this._pickupTimeout);
+    this._pickupTimeout = setTimeout(() => {
+      this.pickupEl.style.opacity = '0';
+    }, 2000);
   }
 
   sonarPing(playerPos, creaturePositions) {
