@@ -37,8 +37,6 @@ export class HUD {
   constructor() {
     this.depthDisplay = document.getElementById('depth-display');
     this.depthZone = document.getElementById('depth-zone');
-    this.oxygenBar = document.getElementById('oxygen-bar');
-    this.batteryBar = document.getElementById('battery-bar');
     this.warningText = document.getElementById('warning-text');
     this.sonarCanvas = document.getElementById('sonar');
     this.sonarCtx = this.sonarCanvas.getContext('2d');
@@ -76,7 +74,7 @@ export class HUD {
     });
   }
 
-  update(depth, oxygen, battery, flashlightOn) {
+  update(depth, flashlightOn) {
     // Depth counter
     this.depthDisplay.textContent = `${Math.floor(depth)}m`;
 
@@ -99,21 +97,7 @@ export class HUD {
       }
     }
 
-    // Bars
-    this.oxygenBar.style.width = `${oxygen}%`;
-    this.oxygenBar.style.background = oxygen < 25
-      ? `hsl(0, 80%, ${50 + Math.sin(Date.now() * 0.01) * 20}%)`
-      : '#22aaff';
-
-    this.batteryBar.style.width = `${battery}%`;
-    this.batteryBar.style.background = battery < 20 ? '#ff6622' : '#ffaa22';
-
-    // Low oxygen warning
-    if (oxygen < 20 && oxygen > 0) {
-      this.warningText.textContent = 'LOW OXYGEN';
-      this.warningText.classList.add('visible');
-      this.warningText.style.opacity = 0.5 + Math.sin(Date.now() * 0.005) * 0.5;
-    } else if (this.warningTimer <= 0) {
+    if (this.warningTimer <= 0) {
       this.warningText.classList.remove('visible');
       this.warningText.style.opacity = '';
     }

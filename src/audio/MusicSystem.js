@@ -415,13 +415,13 @@ export class MusicSystem {
   // =========================================================================
   //  UPDATE – called every frame from Game
   // =========================================================================
-  update(dt, depth, nearestCreatureDist, oxygen) {
+  update(dt, depth, nearestCreatureDist) {
     if (!this.started || !this.ctx) return;
 
     this.time += dt;
     this.depth = depth;
     this.creatureProx = clamp01(1 - nearestCreatureDist / 60);
-    this.oxygenStress = clamp01(1 - oxygen / 35);  // stress ramps below 35%
+    this.oxygenStress = 0;
 
     const now = this.ctx.currentTime;
 

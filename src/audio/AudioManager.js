@@ -204,12 +204,12 @@ export class AudioManager {
     }
   }
 
-  update(dt, depth, nearestCreatureDist, oxygen) {
+  update(dt, depth, nearestCreatureDist) {
     if (!this.ctx) return;
 
     // Update adaptive music
     if (this.music) {
-      this.music.update(dt, depth, nearestCreatureDist, oxygen);
+      this.music.update(dt, depth, nearestCreatureDist);
     }
 
     // Adjust drone frequencies based on depth

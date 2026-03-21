@@ -7,7 +7,6 @@ import { CreatureManager } from './creatures/CreatureManager.js';
 import { HUD } from './ui/HUD.js';
 import { AudioManager } from './audio/AudioManager.js';
 import { UnderwaterEffect } from './shaders/UnderwaterEffect.js';
-import { SupplyCache } from './environment/SupplyCache.js';
 
 export class Game {
   constructor() {
@@ -43,7 +42,6 @@ export class Game {
     this.hud = new HUD();
     this.audio = new AudioManager();
     this.underwaterEffect = new UnderwaterEffect(this.renderer, this.scene, this.camera);
-    this.supplyCaches = new SupplyCache(this.scene, this.terrain);
 
     // Alias so automated tests can use game.creatureManager or game.creatures
     this.creatureManager = this.creatures;
@@ -54,8 +52,6 @@ export class Game {
     this._fpsTime = 0;
 
     // Game state
-    this.oxygen = 100;
-    this.battery = 100;
     this.flashlightOn = false;
     this.gameOver = false;
     this.maxDepth = 0;
@@ -151,8 +147,6 @@ export class Game {
 
   restart() {
     this.hud.closeLocator();
-    this.oxygen = 100;
-    this.battery = 100;
     this.gameOver = false;
     this.flashlightOn = false;
     this.pendingStart = false;
@@ -160,7 +154,6 @@ export class Game {
     this.gameOverOverlay.classList.add('visible');
     this.player.reset();
     this.creatures.reset();
-    this.supplyCaches.reset();
     this.player.flashlight.visible = false;
     this.pauseOverlay.classList.remove('visible');
     this._descentActive = false;
@@ -178,7 +171,6 @@ export class Game {
   }
 
   _toggleFlashlight() {
-    if (this.battery <= 0) return;
     this.flashlightOn = !this.flashlightOn;
     this.player.flashlight.visible = this.flashlightOn;
   }
@@ -245,54 +237,18 @@ export class Game {
     this.terrain.update(this.player.position);
     this.flora.update(dt, this.player.position);
     this.creatures.update(dt, this.player.position, depth);
-    this.audio.update(dt, depth, this.creatures.getNearestCreatureDistance(this.player.position), this.oxygen);
-
-    // Supply cache pickups
-    const pickups = this.supplyCaches.update(dt, this.player.position);
-    for (const pickup of pickups) {
-      this.oxygen = Math.min(100, this.oxygen + pickup.oxygen);
-      this.battery = Math.min(100, this.battery + pickup.battery);
-      this.hud.showPickup(`+${pickup.oxygen}% O\u2082  +${pickup.battery}% Battery`);
-      this.audio.playPickup();
-    }
-
-    // Oxygen depletion
-    this.oxygen -= dt * 0.8;
-    if (depth > 200) this.oxygen -= dt * 0.3;
-    if (depth > 500) this.oxygen -= dt * 0.5;
-    this.oxygen = Math.max(0, this.oxygen);
-
-    // Battery drain when flashlight is on
-    if (this.flashlightOn) {
-      this.battery -= dt * 2;
-      if (this.battery <= 0) {
-        this.battery = 0;
-        this.flashlightOn = false;
-        this.player.flashlight.visible = false;
-      }
-    }
+    this.audio.update(dt, depth, this.creatures.getNearestCreatureDistance(this.player.position));
 
     // Depth tracking
     if (depth > this.maxDepth) this.maxDepth = depth;
 
     // Update HUD
     const creaturesByType = this.creatures.getCreaturesByType(this.player.position);
-    this.hud.update(depth, this.oxygen, this.battery, this.flashlightOn);
+    this.hud.update(depth, this.flashlightOn);
     this.hud.updateLocator(creaturesByType, this.player.position, this.camera);
 
     // Update underwater fog based on depth
     this._updateEnvironmentForDepth(depth);
-
-    // Game over check
-    if (this.oxygen <= 0) {
-      this.gameOver = true;
-      this.running = false;
-      this.hud.closeLocator();
-      this.gameOverOverlay.classList.add('visible');
-      this._pauseAudio();
-      this.player.unlock();
-      console.log('[deep-underworld] Game over — oxygen depleted at depth ' + Math.floor(depth) + 'm');
-    }
 
     // Update descent transition overlay
     if (this._descentActive) {
