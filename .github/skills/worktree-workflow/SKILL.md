@@ -76,10 +76,12 @@ Parameters:
   owner: "pwretmo"
   repo: "deep-underworld"
   title: "feat: add volumetric fog to ocean scene"
-  body: "Description of what was changed and why..."
+  body: "Description of what was changed and why...\n\nFixes #<issue-number>"
   base: "main"
   head: "agent/<slug>"
 ```
+
+**Issue linkage**: If the task implements a GitHub issue, always include `Fixes #<number>` (or `Closes #<number>`) in the PR body. This enables the reviewer to verify that all requirements from the issue are fully addressed.
 
 Then add the `agent-work` label:
 

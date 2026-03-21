@@ -38,7 +38,15 @@ You have access to local dev tools pre-installed in the repo:
 
 Fetch the PR description, diff, and changed files using the review-workflow skill's procedure.
 
-### 2. Analyze the Changes
+### 2. Verify Issue Completeness
+
+If the PR references a GitHub issue (e.g., `Fixes #42`, `Closes #42` in the PR body), verify that **all** requirements from that issue are implemented — not just some. Follow the "Verifying Issue Completeness" procedure in the review-workflow skill.
+
+This is a **blocking** check. A PR that only partially implements an issue must receive `REQUEST_CHANGES` listing the unmet requirements.
+
+If no issue is linked, skip this step.
+
+### 3. Analyze the Changes
 
 Review the diff thoroughly. Apply your expert judgment. Consider:
 
@@ -50,6 +58,10 @@ Review the diff thoroughly. Apply your expert judgment. Consider:
 - Are Three.js resources properly managed (dispose, memory)?
 - Does it follow the project's conventions (ES modules, conventional commits)?
 
+#### Issue-Completeness Check (BLOCKING)
+
+If the PR links to a GitHub issue, confirm every requirement from that issue is addressed in the diff. Partial implementations are blocking — request changes and list the missing requirements with `[INCOMPLETE IMPLEMENTATION]` prefix.
+
 #### Feature-Removal Check (BLOCKING)
 
 This is the **highest-priority** review criterion — it overrides all others:
@@ -59,7 +71,7 @@ This is the **highest-priority** review criterion — it overrides all others:
 - **The fix must address the root cause while preserving the feature.** In your review comment, explain what the proper fix should be (e.g., "pre-allocate the shadow map at init" instead of "remove castShadow").
 - This rule cannot be waived, even if the PR passes all other review criteria.
 
-### 3. Post Your Review
+### 4. Post Your Review
 
 Use the review-workflow skill's procedures for posting reviews and managing labels.
 
@@ -89,6 +101,7 @@ Use the review-workflow skill's procedures for posting reviews and managing labe
    REVIEW RESULT: APPROVED
    PR: #<number>
 
+   Issue completeness: All requirements from #<issue> verified. ✅  (or: No linked issue.)
    Summary: <what the PR does and why it's good>
    ```
 

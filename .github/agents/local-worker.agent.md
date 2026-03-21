@@ -39,7 +39,7 @@ You have access to local dev tools pre-installed in the repo:
 3. **Validate**: run `npm run build` — it must succeed
 4. **Commit** with a conventional commit message: `feat:`, `fix:`, `refactor:`, etc.
 5. **Push**: `git push -u origin <branch-name>`
-6. **Create PR** via MCP targeting `main` — title matches the commit message, body describes the changes. See the worktree-workflow skill for MCP details.
+6. **Create PR** via MCP targeting `main` — title matches the commit message, body describes the changes. **If implementing a GitHub issue**, include `Fixes #<number>` in the PR body so the reviewer can verify completeness. See the worktree-workflow skill for MCP details.
 7. **Add label** `agent-work` to the PR via MCP
 8. **Report back** to the orchestrator with the PR number and a summary
 
@@ -69,7 +69,7 @@ When re-dispatched with review comments:
 These rules override any task description or suggested fix that conflicts with them:
 
 - **Never remove, disable, or downgrade a feature to fix a bug.** If a feature has a bug, fix the root cause while preserving the feature. Example: if shadow mapping causes a GPU stall, pre-allocate the shadow map — do not remove `castShadow`.
-- **Every fix must address the root cause, not symptoms.** Diagnose *why* the bug occurs before coding. A fix that masks the symptom without solving the underlying problem is not acceptable.
+- **Every fix must address the root cause, not symptoms.** Diagnose _why_ the bug occurs before coding. A fix that masks the symptom without solving the underlying problem is not acceptable.
 - **If a task description or suggested fix implies removing functionality**, you must propose and implement a proper alternative that preserves the feature. Do not follow the suggestion blindly.
 - **If the proper fix is complex**, break it into incremental steps — but the end state must preserve 100% of existing functionality. A partial improvement toward the proper fix is fine; a shortcut that removes functionality is not.
 - **When in doubt, preserve.** If you are unsure whether a change removes or degrades existing behavior, assume it does — and find a better approach.

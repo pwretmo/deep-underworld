@@ -34,19 +34,19 @@ This is the single most important engineering rule in this repository. Removing,
 
 Examples of **prohibited** shortcuts:
 
-| Problem | Prohibited shortcut | Required approach |
-| --- | --- | --- |
-| Shadow map causes GPU stall on first use | Remove `castShadow` | Pre-allocate the shadow map at init time |
-| A creature's AI causes frame drops | Disable the creature | Optimize the AI (LOD, spatial culling, throttling) |
-| Post-processing effect glitches on resize | Remove the effect | Fix the resize handler to re-initialize properly |
-| Audio causes errors on mobile | Skip audio loading | Add proper feature detection and graceful fallback |
-| Physics causes collision bugs | Remove physics | Fix the collision detection logic |
+| Problem                                   | Prohibited shortcut  | Required approach                                  |
+| ----------------------------------------- | -------------------- | -------------------------------------------------- |
+| Shadow map causes GPU stall on first use  | Remove `castShadow`  | Pre-allocate the shadow map at init time           |
+| A creature's AI causes frame drops        | Disable the creature | Optimize the AI (LOD, spatial culling, throttling) |
+| Post-processing effect glitches on resize | Remove the effect    | Fix the resize handler to re-initialize properly   |
+| Audio causes errors on mobile             | Skip audio loading   | Add proper feature detection and graceful fallback |
+| Physics causes collision bugs             | Remove physics       | Fix the collision detection logic                  |
 
 ### Root-Cause Analysis Required
 
 Every bug fix must identify and address the **root cause**, not symptoms. Before implementing a fix, the worker must:
 
-1. **Diagnose** — understand *why* the bug occurs, not just *what* happens
+1. **Diagnose** — understand _why_ the bug occurs, not just _what_ happens
 2. **Preserve** — confirm the fix keeps all existing features and behavior intact
 3. **Verify** — ensure the fix resolves the root cause, not just the visible symptom
 
@@ -147,8 +147,11 @@ Your worktree is at: F:\repos\deep-underworld-<slug>
 Your branch is: agent/<slug>
 
 TASK: <description>
+ISSUE: #<number> (omit if not implementing a specific issue)
 
 ENGINEERING RULE: Never remove, disable, or downgrade a feature to fix a bug. Fix the root cause while preserving all functionality. See Engineering Quality Standards in copilot-instructions.md.
+
+If an ISSUE number is provided, include "Fixes #<number>" in the PR body and ensure ALL requirements from the issue are implemented — not just some. The reviewer will verify completeness.
 
 Follow the worktree-workflow skill in .github/skills/worktree-workflow/SKILL.md.
 When done: commit, push, and create a PR targeting main with the label "agent-work".
@@ -160,7 +163,10 @@ When done: commit, push, and create a PR targeting main with the label "agent-wo
 You are a Reviewer agent for the deep-underworld repo (owner: pwretmo, repo: deep-underworld).
 Review PR #<number>.
 
-BLOCKING RULE: Reject any PR that removes, disables, or downgrades existing functionality to fix a bug. The fix must preserve the feature and address the root cause. See Engineering Quality Standards in copilot-instructions.md.
+BLOCKING RULES:
+1. Reject any PR that removes, disables, or downgrades existing functionality to fix a bug. The fix must preserve the feature and address the root cause.
+2. If the PR references a GitHub issue (Fixes #X), verify that ALL requirements from that issue are implemented. Partial implementations are blocking — list the missing requirements.
+See Engineering Quality Standards in copilot-instructions.md.
 
 Follow the review-workflow skill in .github/skills/review-workflow/SKILL.md.
 If issues found: post REQUEST_CHANGES review, add "agent-reviewed" label, return the list of issues.

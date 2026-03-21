@@ -21,6 +21,58 @@ Parameters:
 
 This returns the PR title, description, diff, and list of changed files.
 
+## Verifying Issue Completeness
+
+When a PR implements a GitHub issue, verify that **all** requirements from the issue are addressed — not just some.
+
+### Step 1: Extract the Issue Number
+
+Look in the PR description for issue references like `Fixes #42`, `Closes #42`, or `Resolves #42`. Also check the PR title for `#<number>` patterns.
+
+If no issue is linked, skip this section — the PR may be a standalone improvement.
+
+### Step 2: Fetch the Issue Body
+
+```
+Tool: mcp_io_github_git_issue_read
+Parameters:
+  owner: "pwretmo"
+  repo: "deep-underworld"
+  issue_number: <extracted number>
+```
+
+This returns the issue title, body, labels, and comments.
+
+### Step 3: Identify Requirements
+
+Parse the issue body for:
+
+- Numbered acceptance criteria or task lists (`- [ ]` checkboxes)
+- Bullet-pointed requirements
+- Described behavior changes or features
+- If the issue body is unstructured, treat each distinct behavior or feature mentioned as a requirement
+
+### Step 4: Check Each Requirement Against the Diff
+
+For every requirement identified in Step 3, verify that the PR's changed files address it. A requirement is **met** if the diff contains code that implements the described behavior. A requirement is **unmet** if no corresponding change exists in the diff.
+
+### Step 5: Report
+
+If any requirements are unmet, this is a **blocking** review finding — treat it like a bug or missing functionality. Include it in your `REQUEST_CHANGES` review with a clear list:
+
+```
+[INCOMPLETE IMPLEMENTATION] This PR references issue #42 but does not fully implement it:
+- ✅ Requirement 1: <met — brief note>
+- ❌ Requirement 2: <unmet — what's missing>
+- ❌ Requirement 3: <unmet — what's missing>
+```
+
+If all requirements are met, note this in the approval:
+
+```
+Issue #42 completeness: All requirements verified. ✅
+```
+
 ## Posting a Review
 
 ### Request Changes
@@ -138,11 +190,24 @@ Issues:
 1. [FEATURE REMOVAL] <file>:<line> — Removed castShadow to fix GPU stall. Must pre-allocate shadow map instead.
 ```
 
+If the rejection is due to incomplete issue implementation, prefix with `[INCOMPLETE IMPLEMENTATION]`:
+
+```
+REVIEW RESULT: REQUEST_CHANGES
+PR: #<number>
+Issue: #<issue number>
+
+Issues:
+1. [INCOMPLETE IMPLEMENTATION] Issue #42 requires HUD indicator for flashlight — not implemented.
+2. [INCOMPLETE IMPLEMENTATION] Issue #42 requires spawn logic update — not implemented.
+```
+
 ### On Approve
 
 ```
 REVIEW RESULT: APPROVED
 PR: #<number>
 
+Issue completeness: All requirements from #<issue> verified. ✅  (or: No linked issue.)
 Summary: <brief description of what the PR does well>
 ```
