@@ -269,8 +269,8 @@ Batch-create every worktree before dispatching any worker. This avoids interleav
 ```bash
 cd F:\repos\deep-underworld
 git fetch origin main
-git worktree add -b agent/ux-fix-1 F:\repos\deep-underworld-ux-fix-1 origin/main
-git worktree add -b agent/ux-fix-2 F:\repos\deep-underworld-ux-fix-2 origin/main
+git worktree add -b agent/ux-fix-1 F:\repos\deep-underworld-worktrees\ux-fix-1 origin/main
+git worktree add -b agent/ux-fix-2 F:\repos\deep-underworld-worktrees\ux-fix-2 origin/main
 # ... one command per issue, run sequentially (shares .git state)
 ````
 

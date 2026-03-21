@@ -11,7 +11,7 @@ Step-by-step instructions for creating, using, and cleaning up git worktrees for
 
 - You are working in the `pwretmo/deep-underworld` repository
 - Local path: `F:\repos\deep-underworld`
-- Worktrees are created at: `F:\repos\deep-underworld-<slug>`
+- Worktrees are created at: `F:\repos\deep-underworld-worktrees\<slug>`
 
 ## Creating a Worktree
 
@@ -25,7 +25,7 @@ cd F:\repos\deep-underworld
 git fetch origin main
 
 # Create worktree with a new branch based on latest main
-git worktree add F:\repos\deep-underworld-<slug> -b agent/<slug> origin/main
+git worktree add F:\repos\deep-underworld-worktrees\<slug> -b agent/<slug> origin/main
 ```
 
 Where `<slug>` is a short kebab-case name for the task (e.g., `add-fog`, `fix-camera`, `refactor-creatures`).
@@ -34,7 +34,7 @@ Where `<slug>` is a short kebab-case name for the task (e.g., `add-fog`, `fix-ca
 
 ```powershell
 # Navigate to the worktree
-cd F:\repos\deep-underworld-<slug>
+cd F:\repos\deep-underworld-worktrees\<slug>
 
 # Install dependencies (worktree shares git but not node_modules)
 npm install
@@ -113,7 +113,7 @@ Look for the expected path in the output. Then:
 
 ```powershell
 git fetch origin agent/<slug>
-git worktree add F:\repos\deep-underworld-<slug> agent/<slug>
+git worktree add F:\repos\deep-underworld-worktrees\<slug> agent/<slug>
 ```
 
 > **Important**: Use `agent/<slug>` (the existing remote branch), not `-b agent/<slug> origin/main`. Using `origin/main` would discard all prior work on the PR.
@@ -123,7 +123,7 @@ The worker then continues with `cd`, edit, build, commit, `git push` — no new 
 Before implementing review fix-ups, rebase onto the latest `origin/main` to reduce merge conflicts at merge time:
 
 ```powershell
-cd F:\repos\deep-underworld-<slug>
+cd F:\repos\deep-underworld-worktrees\<slug>
 git fetch origin main
 git rebase origin/main
 ```
@@ -151,7 +151,9 @@ cd F:\repos\deep-underworld
 git worktree list
 
 # For each stale worktree (no matching open PR):
-git worktree remove F:\repos\deep-underworld-<slug> --force
+git worktree remove F:\repos\deep-underworld-worktrees\<slug> --force
+# Remove any residual files that git didn't clean up
+if (Test-Path F:\repos\deep-underworld-worktrees\<slug>) { Remove-Item F:\repos\deep-underworld-worktrees\<slug> -Recurse -Force }
 git worktree prune
 git branch -D agent/<slug>
 ```
@@ -164,7 +166,10 @@ The **merger agent** handles cleanup after a PR is merged:
 
 ```powershell
 # Remove the worktree
-git worktree remove F:\repos\deep-underworld-<slug> --force
+git worktree remove F:\repos\deep-underworld-worktrees\<slug> --force
+
+# Remove any residual files that git didn't clean up (node_modules, build artifacts, etc.)
+if (Test-Path F:\repos\deep-underworld-worktrees\<slug>) { Remove-Item F:\repos\deep-underworld-worktrees\<slug> -Recurse -Force }
 
 # Prune stale worktree references
 git worktree prune

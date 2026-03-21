@@ -12,7 +12,7 @@ You are a **Local Worker** for the `pwretmo/deep-underworld` repository.
 
 The orchestrator provides these in your dispatch prompt:
 
-- **Worktree path** — absolute path like `F:\repos\deep-underworld-<slug>`
+- **Worktree path** — absolute path like `F:\repos\deep-underworld-worktrees\<slug>`
 - **Branch name** — like `agent/<slug>`
 - **Task description** — what to implement
 - **Review fix comments** (optional) — if you are re-dispatched to fix review issues

@@ -71,7 +71,10 @@ Given a merged branch `agent/<slug>`:
 git worktree list
 
 # Remove the worktree
-git worktree remove F:\repos\deep-underworld-<slug> --force
+git worktree remove F:\repos\deep-underworld-worktrees\<slug> --force
+
+# Remove any residual files that git didn't clean up (node_modules, build artifacts, etc.)
+if (Test-Path F:\repos\deep-underworld-worktrees\<slug>) { Remove-Item F:\repos\deep-underworld-worktrees\<slug> -Recurse -Force }
 
 # Prune stale references
 git worktree prune

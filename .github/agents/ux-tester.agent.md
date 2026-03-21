@@ -126,8 +126,8 @@ Create every worktree before dispatching any workers. This avoids interleaving s
 ```bash
 cd F:\repos\deep-underworld
 git fetch origin main
-git worktree add -b agent/ux-fix-1 F:\repos\deep-underworld-ux-fix-1 origin/main
-git worktree add -b agent/ux-fix-2 F:\repos\deep-underworld-ux-fix-2 origin/main
+git worktree add -b agent/ux-fix-1 F:\repos\deep-underworld-worktrees\ux-fix-1 origin/main
+git worktree add -b agent/ux-fix-2 F:\repos\deep-underworld-worktrees\ux-fix-2 origin/main
 # ... one per issue
 ```
 
@@ -139,7 +139,7 @@ Each worker operates in its own worktree and branch — they have no data depend
 
 ```
 You are a Local Worker agent for the deep-underworld repo (owner: pwretmo, repo: deep-underworld).
-Your worktree is at: F:\repos\deep-underworld-ux-fix-<N>
+Your worktree is at: F:\repos\deep-underworld-worktrees\ux-fix-<N>
 Your branch is: agent/ux-fix-<N>
 
 TASK: [UX Fix] <issue description>
@@ -198,7 +198,7 @@ git worktree list
 
 ```bash
 git fetch origin agent/ux-fix-<N>
-git worktree add F:\repos\deep-underworld-ux-fix-<N> agent/ux-fix-<N>
+git worktree add F:\repos\deep-underworld-worktrees\ux-fix-<N> agent/ux-fix-<N>
 ```
 
 This preserves the PR's existing commits. See the worktree-workflow skill for details.
@@ -234,7 +234,7 @@ If either the external reviewer or the local Reviewer requests changes, re-dispa
 
 ```
 You are a Local Worker agent for the deep-underworld repo (owner: pwretmo, repo: deep-underworld).
-Your worktree is at: F:\repos\deep-underworld-ux-fix-<N>
+Your worktree is at: F:\repos\deep-underworld-worktrees\ux-fix-<N>
 Your branch is: agent/ux-fix-<N>
 PR number: #<number>
 

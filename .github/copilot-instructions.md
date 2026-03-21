@@ -71,7 +71,7 @@ If a proper fix is complex, break it into incremental steps — but the end stat
 ### Worktree Isolation (Local Agents)
 
 Local subagents **must** work in a dedicated git worktree, never directly on `main`.
-Worktrees are created at `F:\repos\deep-underworld-<slug>` where `<slug>` matches the branch suffix.
+Worktrees are created at `F:\repos\deep-underworld-worktrees\<slug>` where `<slug>` matches the branch suffix.
 
 Cloud agents do not use worktrees — they work directly on their `copilot/` branch.
 
@@ -143,7 +143,7 @@ The main conversation agent acts as orchestrator. Example dispatch prompts:
 
 ```
 You are a Local Worker agent for the deep-underworld repo (owner: pwretmo, repo: deep-underworld).
-Your worktree is at: F:\repos\deep-underworld-<slug>
+Your worktree is at: F:\repos\deep-underworld-worktrees\<slug>
 Your branch is: agent/<slug>
 
 TASK: <description>
@@ -177,7 +177,7 @@ If approved: post APPROVE review, add "agent-reviewed" and "agent-approved" labe
 
 ```
 You are a Local Worker agent for the deep-underworld repo (owner: pwretmo, repo: deep-underworld).
-Your worktree is at: F:\repos\deep-underworld-<slug>
+Your worktree is at: F:\repos\deep-underworld-worktrees\<slug>
 Your branch is: agent/<slug>
 PR number: #<number>
 
