@@ -122,24 +122,7 @@ export class Terrain {
     }
   }
 
-  update(playerPos) {
-    const cx = Math.round(playerPos.x / this.chunkSize);
-    const cz = Math.round(playerPos.z / this.chunkSize);
-
-    // Build at most 1 pending chunk per frame to avoid frame spikes
-    if (this._pendingChunks.length > 0) {
-      const { key, x, z } = this._pendingChunks.shift();
-      if (!this.chunks.has(key)) {
-        const chunk = this._createChunk(x, z);
-        this.scene.add(chunk);
-        this.chunks.set(key, chunk);
-      }
-    }
-
-    if (cx === this.lastChunkX && cz === this.lastChunkZ) return;
-    this.lastChunkX = cx;
-    this.lastChunkZ = cz;
-
+  _rebuildPendingAround(cx, cz) {
     const needed = new Set();
     for (let dx = -this.viewDistance; dx <= this.viewDistance; dx++) {
       for (let dz = -this.viewDistance; dz <= this.viewDistance; dz++) {
@@ -165,5 +148,57 @@ export class Terrain {
         this._pendingChunks.push({ key, x, z });
       }
     }
+  }
+
+  preloadPrepareAround(playerPos) {
+    const cx = Math.round(playerPos.x / this.chunkSize);
+    const cz = Math.round(playerPos.z / this.chunkSize);
+    this.lastChunkX = cx;
+    this.lastChunkZ = cz;
+    this._rebuildPendingAround(cx, cz);
+  }
+
+  preloadDrain(maxCount, cancelToken) {
+    if (maxCount <= 0) return 0;
+    let built = 0;
+    while (this._pendingChunks.length > 0 && built < maxCount) {
+      if (cancelToken?.cancelled) break;
+      const { key, x, z } = this._pendingChunks.shift();
+      if (!this.chunks.has(key)) {
+        const chunk = this._createChunk(x, z);
+        this.scene.add(chunk);
+        this.chunks.set(key, chunk);
+        built++;
+      }
+    }
+    return built;
+  }
+
+  getPendingCount() {
+    return this._pendingChunks.length;
+  }
+
+  getChunkCount() {
+    return this.chunks.size;
+  }
+
+  update(playerPos) {
+    const cx = Math.round(playerPos.x / this.chunkSize);
+    const cz = Math.round(playerPos.z / this.chunkSize);
+
+    // Build at most 1 pending chunk per frame to avoid frame spikes
+    if (this._pendingChunks.length > 0) {
+      const { key, x, z } = this._pendingChunks.shift();
+      if (!this.chunks.has(key)) {
+        const chunk = this._createChunk(x, z);
+        this.scene.add(chunk);
+        this.chunks.set(key, chunk);
+      }
+    }
+
+    if (cx === this.lastChunkX && cz === this.lastChunkZ) return;
+    this.lastChunkX = cx;
+    this.lastChunkZ = cz;
+    this._rebuildPendingAround(cx, cz);
   }
 }

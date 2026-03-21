@@ -49,6 +49,29 @@ export class CreatureManager {
     this._spawnedCount = 0;
   }
 
+  prepareInitialQueue(playerPos) {
+    if (!this.initialized) {
+      this._spawnInitialCreatures(playerPos);
+    }
+  }
+
+  preloadDrain(maxCount, cancelToken) {
+    if (maxCount <= 0) return 0;
+    let drained = 0;
+    while (this._spawnQueue.length > 0 && drained < maxCount) {
+      if (cancelToken?.cancelled) break;
+      const entry = this._spawnQueue.shift();
+      this._add(entry.type, entry.createFn(), entry.depthMin, entry.depthMax);
+      this._spawnedCount++;
+      drained++;
+    }
+    return drained;
+  }
+
+  getSpawnQueueLength() {
+    return this._spawnQueue.length;
+  }
+
   _rndPos(playerPos, hRange, yBase, yRange) {
     return new THREE.Vector3(
       playerPos.x + (Math.random() - 0.5) * hRange,
@@ -276,18 +299,11 @@ export class CreatureManager {
   }
 
   update(dt, playerPos, depth) {
-    if (!this.initialized) {
-      this._spawnInitialCreatures(playerPos);
-    }
+    this.prepareInitialQueue(playerPos);
 
     // Drain spawn queue: 3 creatures per frame
     if (this._spawnQueue.length > 0) {
-      const batch = Math.min(3, this._spawnQueue.length);
-      for (let i = 0; i < batch; i++) {
-        const entry = this._spawnQueue.shift();
-        this._add(entry.type, entry.createFn(), entry.depthMin, entry.depthMax);
-        this._spawnedCount++;
-      }
+      this.preloadDrain(3);
     }
 
     this.lastDepth = depth;
