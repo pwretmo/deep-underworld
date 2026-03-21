@@ -15,34 +15,32 @@ How to play-test the deep-underworld game in a browser, find UX issues, and disp
 
 ## Tool Discovery (Required First Step)
 
-Chrome DevTools MCP is configured in `.vscode/mcp.json`. Before any browser interaction, verify the MCP server is running.
+Browser tooling may differ by session. Before any browser interaction, verify that you can both open a page and read page state.
 
-The Chrome DevTools MCP is accessed via **Playwright code** using the `run_playwright_code` tool. You write raw Playwright JavaScript to interact with the browser — no separate MCP tools per action.
+Acceptable open-page tools:
 
-If the Chrome DevTools MCP process fails to start, VS Code will log errors. **STOP immediately** — output the following and call `task_complete`:
+- `open_browser_page`
+- `mcp_io_github_chr_new_page`
 
-> **UX TEST ABORTED — Chrome DevTools MCP unavailable.**
-> Chrome DevTools MCP server failed to start or is not reachable.
-> Check `.vscode/mcp.json` configuration and MCP server logs in VS Code output panel.
-> Restart the VS Code extension host and retry.
+Acceptable page-state tools:
+
+- `read_page`
+- `mcp_io_github_chr_take_snapshot`
+
+If none of the valid open/read combinations are available, **STOP immediately** — output the following and call `task_complete`:
+
+> **UX TEST ABORTED — Browser tooling unavailable.**
+> Required page open/read capabilities are unavailable in this session.
+> Enable browser automation tools in VS Code and retry.
 
 Do NOT fall back to code-based analysis, file searching, or any substitute for live browser testing.
 
-Once ready, do a liveness check — open `about:blank` to verify the browser is actually reachable via Playwright:
+Once ready, do a liveness check by opening `about:blank` and reading a snapshot:
 
-```javascript
-// Liveness check
-async (page) => {
-  await page.goto("about:blank");
-  return "Browser is reachable";
-};
-```
+- `open_browser_page` + `read_page`, or
+- `mcp_io_github_chr_new_page` + `mcp_io_github_chr_take_snapshot`
 
-If this fails or times out, **STOP immediately** — output the following and call `task_complete`:
-
-> **UX TEST ABORTED — Chrome DevTools MCP browser unreachable.**
-> Playwright could not navigate to `about:blank`.
-> Restart the Chrome DevTools MCP server process and retry.
+If this fails or times out, **STOP immediately** with the same abort message above.
 
 ## Starting the Dev Server
 
@@ -57,38 +55,19 @@ Wait ~3 seconds, then open the game.
 
 ## Browser Interaction Patterns
 
-All interactions use `run_playwright_code` tool with raw Playwright JavaScript.
+Prefer high-level browser tools (`open_browser_page`, `read_page`, `click_element`, `type_in_page`, `screenshot_page`) and Chrome MCP tools when available.
 
 ### Opening the game
 
-```javascript
-// Without autoplay (requires manual Start button click)
-async (page) => {
-  await page.goto("http://localhost:5173");
-  return "Game loaded";
-};
-```
+- Preferred: `open_browser_page` with `http://localhost:5173?autoplay`
+- Alternate: `mcp_io_github_chr_new_page` with `http://localhost:5173?autoplay`
 
-Or with `?autoplay` to skip the menu:
-
-```javascript
-// With autoplay — game starts immediately in headless mode
-async (page) => {
-  await page.goto("http://localhost:5173?autoplay");
-  await page.waitForTimeout(2000); // Game init + creature spawn
-  return "Game running in autoplay mode";
-};
-```
+Always use `?autoplay` for automated UX testing.
 
 ### Taking a screenshot
 
-```javascript
-async (page) => {
-  const buffer = await page.screenshot();
-  // Screenshot is captured; describe what you see
-  return "Screenshot captured (binary data)";
-};
-```
+- Preferred: `screenshot_page`
+- Alternate: `mcp_io_github_chr_take_snapshot` (text/a11y snapshot)
 
 ### Reading console errors
 
@@ -107,20 +86,8 @@ async (page) => {
 
 ### Playing the game
 
-```javascript
-async (page) => {
-  // Move forward (W key)
-  await page.keyboard.press("w");
-
-  // Look left/right (arrow keys)
-  await page.keyboard.press("arrowleft");
-
-  // Wait a bit for movement animation
-  await page.waitForTimeout(500);
-
-  return "Input sent to game";
-};
-```
+- Preferred: `type_in_page` with key presses (WASD, arrows, Escape)
+- Alternate: `mcp_io_github_chr_press_key`
 
 ### Clicking the canvas (if not autoplay)
 

@@ -46,23 +46,25 @@ You have access to local dev tools pre-installed in the repo:
 
 ### Phase 0 — Discover Tools
 
-The browser tools are **deferred** and must be loaded before use. Run these discovery calls at the start:
+The browser tooling may vary by session. At startup, discover available browser tools and continue as long as you can both open a page and read a page snapshot.
 
-1. `tool_search_tool_regex` with pattern `mcp_io_github_chr` — loads Chrome DevTools MCP tools (screenshots, clicks, keyboard, console, performance, Lighthouse)
-2. `tool_search_tool_regex` with pattern `mcp_io_github_git` — loads GitHub MCP tools (needed for PR polling in Phase 5)
+Acceptable open-page tools:
 
-Verify that key tools appear in the results:
+- `open_browser_page`
+- `mcp_io_github_chr_new_page`
 
-- `mcp_io_github_chr_new_page` (open browser)
-- `mcp_io_github_chr_take_screenshot` (screenshots)
-- `mcp_io_github_chr_press_key` (keyboard input)
-- `mcp_io_github_git_pull_request_read` (PR polling)
+Acceptable snapshot/read tools:
 
-**If tools are not found or the liveness check fails**: You MUST output the following message verbatim and stop immediately — do nothing else:
+- `read_page`
+- `mcp_io_github_chr_take_snapshot`
 
-> **UX TEST ABORTED — Chrome DevTools MCP unavailable.**
-> Phase 0 tool discovery failed: `mcp_io_github_chr_new_page` was not found (or liveness check failed).
-> **Action required**: Ensure the Chrome DevTools MCP server is running. Check `.vscode/mcp.json` and restart the VS Code MCP session, then retry.
+Also ensure GitHub PR polling is available (`mcp_io_github_git_pull_request_read`) for Phase 5.
+
+**If no open-page tool is available, or no snapshot/read tool is available, or liveness fails**: You MUST output the following message verbatim and stop immediately — do nothing else:
+
+> **UX TEST ABORTED — Browser tooling unavailable.**
+> Phase 0 tool discovery failed: required page open/read capabilities were not found (or liveness check failed).
+> **Action required**: Ensure browser automation tools are available in this VS Code session, then retry.
 
 After outputting that message, call `task_complete` with that message as the summary and return. Under no circumstances should you:
 
@@ -77,18 +79,18 @@ Browser-based testing is the **only** acceptable mode for this agent. A UX repor
 
 After confirming tools are listed, verify the browser actually works before proceeding:
 
-```
-mcp_io_github_chr_new_page
-  url: "about:blank"
-```
+- If `open_browser_page` is available: open `about:blank`, then read the page with `read_page`.
+- Else if `mcp_io_github_chr_new_page` is available: open `about:blank`, then take a snapshot with `mcp_io_github_chr_take_snapshot`.
 
-If this call throws an error or times out, treat it as a failed liveness check and apply the same hard-stop rule above.
+If the open/read path throws an error or times out, treat it as a failed liveness check and apply the same hard-stop rule above.
 
 ### Phase 1 — Launch
 
 1. Start the dev server in a background terminal: `npm run dev`
-2. Open the game: `mcp_io_github_chr_new_page` → `http://localhost:5173`
-3. Wait for load, take an initial screenshot
+2. Open the game with whichever opener exists:
+  - `open_browser_page` → `http://localhost:5173?autoplay`, or
+  - `mcp_io_github_chr_new_page` → `http://localhost:5173?autoplay`
+3. Wait for load, capture initial evidence using `read_page`, `screenshot_page`, or `mcp_io_github_chr_take_snapshot`
 
 ### Phase 2 — Play & Observe
 
