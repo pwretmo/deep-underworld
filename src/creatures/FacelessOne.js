@@ -21,10 +21,12 @@ export class FacelessOne {
     const skinMat = new THREE.MeshPhysicalMaterial({
       color: 0x0a0810, roughness: 0.2, metalness: 0.5,
       clearcoat: 1.0, clearcoatRoughness: 0.1,
+      emissive: 0x0c0618, emissiveIntensity: 0.6,
     });
     const metalMat = new THREE.MeshPhysicalMaterial({
       color: 0x141414, roughness: 0.1, metalness: 0.9,
       clearcoat: 1.0,
+      emissive: 0x0a0412, emissiveIntensity: 0.4,
     });
     const boneMat = new THREE.MeshPhysicalMaterial({
       color: 0x2a2218, roughness: 0.25, metalness: 0.4,
@@ -41,7 +43,7 @@ export class FacelessOne {
     // Faint slit where a mouth might be
     const slitGeo = new THREE.PlaneGeometry(0.15, 0.02);
     const slitMat = new THREE.MeshPhysicalMaterial({
-      color: 0x000000, emissive: 0x110000, emissiveIntensity: 0.3,
+      color: 0x000000, emissive: 0x330808, emissiveIntensity: 1.5,
       roughness: 1, side: THREE.DoubleSide,
     });
     const slit = new THREE.Mesh(slitGeo, slitMat);
@@ -139,6 +141,11 @@ export class FacelessOne {
     const veil = new THREE.Mesh(veilGeo, veilMat);
     veil.position.set(-0.3, -0.5, 0);
     this.group.add(veil);
+
+    // Eerie cold glow from chest area
+    this.glow = new THREE.PointLight(0x1a0a2e, 1.2, 18);
+    this.glow.position.set(0, 1.5, 0);
+    this.group.add(this.glow);
 
     const s = 2 + Math.random() * 1.5;
     this.group.scale.setScalar(s);
