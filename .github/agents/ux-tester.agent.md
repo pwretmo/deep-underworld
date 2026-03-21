@@ -113,6 +113,8 @@ For each issue found, record:
 - **Likely file**: which source file to fix (use `semantic_search` if unsure)
 - **Suggested fix**: brief technical recommendation. Every issue MUST have a suggested fix — even complex ones. If an issue requires significant refactoring (e.g., converting to InstancedMesh, adding code-splitting), break it into smaller actionable sub-tasks that a single worker can handle and provide the first step as the suggested fix.
 
+**Fix Quality Rule — MANDATORY**: Suggested fixes must **never** remove, disable, or downgrade an existing feature. The fix must address the root cause while preserving the feature. Example: if a shadow map causes a GPU stall, suggest "pre-allocate the shadow map at init" — NOT "remove castShadow". This rule applies to every suggested fix you include in every issue. If you violate this rule, the Reviewer will block the PR and the fix cycle will restart from scratch.
+
 ### Phase 4 — Delegate Fixes
 
 For **every issue** (critical, major, AND minor), dispatch a Local Worker subagent. Do NOT skip or defer issues because they seem complex. If an issue requires significant refactoring (e.g., converting to InstancedMesh, adding code-splitting), break it into the smallest meaningful first step that a worker can implement — even a partial improvement counts. Every issue in the Phase 3 list MUST get a worker dispatched.
@@ -145,6 +147,8 @@ TASK: [UX Fix] <issue description>
 EVIDENCE: <screenshot path or console error>
 AFFECTED FILE: <file path>
 SUGGESTED FIX: <technical recommendation>
+
+ENGINEERING RULE: Never remove, disable, or downgrade a feature to fix a bug. Fix the root cause while preserving all functionality. See Engineering Quality Standards in copilot-instructions.md.
 
 Follow the worktree-workflow skill in .github/skills/worktree-workflow/SKILL.md.
 When done: commit, push, and create a PR targeting main with the label "agent-work".

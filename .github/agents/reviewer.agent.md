@@ -50,6 +50,15 @@ Review the diff thoroughly. Apply your expert judgment. Consider:
 - Are Three.js resources properly managed (dispose, memory)?
 - Does it follow the project's conventions (ES modules, conventional commits)?
 
+#### Feature-Removal Check (BLOCKING)
+
+This is the **highest-priority** review criterion — it overrides all others:
+
+- **Does this PR remove, disable, or downgrade any existing feature to fix a bug?** If yes, this is a **blocking** issue. Request changes immediately.
+- Look for removals disguised as cleanup: deleting a property (e.g., `castShadow = true`), wrapping code in `if (false)`, commenting out functionality, replacing a feature with a no-op stub.
+- **The fix must address the root cause while preserving the feature.** In your review comment, explain what the proper fix should be (e.g., "pre-allocate the shadow map at init" instead of "remove castShadow").
+- This rule cannot be waived, even if the PR passes all other review criteria.
+
 ### 3. Post Your Review
 
 Use the review-workflow skill's procedures for posting reviews and managing labels.
@@ -91,3 +100,4 @@ Use the review-workflow skill's procedures for posting reviews and managing labe
 - For local agent PRs (`agent/` branches): return issues inline so the orchestrator can re-dispatch the worker.
 - Always add the `agent-reviewed` label after posting any review.
 - Only add `agent-approved` when you are genuinely satisfied with the code.
+- **BLOCKING: Reject any PR that removes, disables, or downgrades existing functionality to fix a bug.** This is not a style preference — it is a mandatory engineering rule. The fix must preserve the feature and address the root cause. See the Engineering Quality Standards in `copilot-instructions.md`.

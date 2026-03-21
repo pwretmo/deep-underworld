@@ -63,3 +63,13 @@ When re-dispatched with review comments:
 - Use `git push` in terminal for pushing commits
 - Use conventional commit messages
 - If the build fails, fix the issue before committing
+
+### Engineering Quality — Mandatory
+
+These rules override any task description or suggested fix that conflicts with them:
+
+- **Never remove, disable, or downgrade a feature to fix a bug.** If a feature has a bug, fix the root cause while preserving the feature. Example: if shadow mapping causes a GPU stall, pre-allocate the shadow map — do not remove `castShadow`.
+- **Every fix must address the root cause, not symptoms.** Diagnose *why* the bug occurs before coding. A fix that masks the symptom without solving the underlying problem is not acceptable.
+- **If a task description or suggested fix implies removing functionality**, you must propose and implement a proper alternative that preserves the feature. Do not follow the suggestion blindly.
+- **If the proper fix is complex**, break it into incremental steps — but the end state must preserve 100% of existing functionality. A partial improvement toward the proper fix is fine; a shortcut that removes functionality is not.
+- **When in doubt, preserve.** If you are unsure whether a change removes or degrades existing behavior, assume it does — and find a better approach.

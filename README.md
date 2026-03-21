@@ -8,6 +8,7 @@ A Three.js deep-ocean exploration horror game built with Vite.
 npm install
 npm run dev       # Start dev server at http://localhost:5173
 npm run build     # Production build
+npm run preview   # Preview production build at http://localhost:4173
 ```
 
 ## Startup Preload And Cache

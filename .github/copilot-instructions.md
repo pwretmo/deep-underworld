@@ -22,6 +22,43 @@ This is a Three.js deep-ocean exploration horror game built with Vite.
 - **Dev server**: `npm run dev`
 - **No test framework yet** — validate changes by running `npm run build` successfully.
 
+## Engineering Quality Standards
+
+These rules are **mandatory** for every agent role — workers, reviewers, UX testers, the orchestrator, and cloud agents. No agent may override, weaken, or work around them.
+
+### Proper Fixes Only — Never Remove Features to Fix Bugs
+
+**If a feature has a bug, fix the bug — do not remove the feature.**
+
+This is the single most important engineering rule in this repository. Removing, disabling, or downgrading a feature to eliminate a side-effect is **never acceptable**. The fix must address the root cause while preserving all existing functionality.
+
+Examples of **prohibited** shortcuts:
+
+| Problem | Prohibited shortcut | Required approach |
+| --- | --- | --- |
+| Shadow map causes GPU stall on first use | Remove `castShadow` | Pre-allocate the shadow map at init time |
+| A creature's AI causes frame drops | Disable the creature | Optimize the AI (LOD, spatial culling, throttling) |
+| Post-processing effect glitches on resize | Remove the effect | Fix the resize handler to re-initialize properly |
+| Audio causes errors on mobile | Skip audio loading | Add proper feature detection and graceful fallback |
+| Physics causes collision bugs | Remove physics | Fix the collision detection logic |
+
+### Root-Cause Analysis Required
+
+Every bug fix must identify and address the **root cause**, not symptoms. Before implementing a fix, the worker must:
+
+1. **Diagnose** — understand *why* the bug occurs, not just *what* happens
+2. **Preserve** — confirm the fix keeps all existing features and behavior intact
+3. **Verify** — ensure the fix resolves the root cause, not just the visible symptom
+
+If a proper fix is complex, break it into incremental steps — but the end state must preserve 100% of existing functionality. A partial improvement that moves toward the proper fix is acceptable; a shortcut that removes functionality is not.
+
+### Applying These Rules by Role
+
+- **Workers** (local and cloud): Must follow these rules when implementing any change. If a task description or suggested fix implies removing a feature, the worker must propose a proper alternative instead.
+- **Reviewers**: Must reject any PR that removes, disables, or downgrades functionality to fix a bug. This is a **blocking** review issue — it cannot be waived.
+- **UX Testers**: Suggested fixes in issue reports must comply with these rules. Never suggest removing a feature as a fix.
+- **Orchestrator**: When re-dispatching a worker with review comments, reinforce these rules if the rejected fix involved a feature removal.
+
 ## Agent Workflow Conventions
 
 ### Branch Naming
@@ -111,6 +148,8 @@ Your branch is: agent/<slug>
 
 TASK: <description>
 
+ENGINEERING RULE: Never remove, disable, or downgrade a feature to fix a bug. Fix the root cause while preserving all functionality. See Engineering Quality Standards in copilot-instructions.md.
+
 Follow the worktree-workflow skill in .github/skills/worktree-workflow/SKILL.md.
 When done: commit, push, and create a PR targeting main with the label "agent-work".
 ```
@@ -120,6 +159,8 @@ When done: commit, push, and create a PR targeting main with the label "agent-wo
 ```
 You are a Reviewer agent for the deep-underworld repo (owner: pwretmo, repo: deep-underworld).
 Review PR #<number>.
+
+BLOCKING RULE: Reject any PR that removes, disables, or downgrades existing functionality to fix a bug. The fix must preserve the feature and address the root cause. See Engineering Quality Standards in copilot-instructions.md.
 
 Follow the review-workflow skill in .github/skills/review-workflow/SKILL.md.
 If issues found: post REQUEST_CHANGES review, add "agent-reviewed" label, return the list of issues.
@@ -133,6 +174,8 @@ You are a Local Worker agent for the deep-underworld repo (owner: pwretmo, repo:
 Your worktree is at: F:\repos\deep-underworld-<slug>
 Your branch is: agent/<slug>
 PR number: #<number>
+
+ENGINEERING RULE: Never remove, disable, or downgrade a feature to fix a bug. Fix the root cause while preserving all functionality. If the original fix removed functionality, the new fix must restore it AND address the root cause properly.
 
 FIX THESE REVIEW ISSUES:
 <paste review comments here>
@@ -157,6 +200,8 @@ Clean up worktrees for any merged local branches.
 You are a UX Tester agent for the deep-underworld repo (owner: pwretmo, repo: deep-underworld).
 
 Play the game and find UX issues. For each major issue, dispatch a Local Worker to fix it.
+
+ENGINEERING RULE: Suggested fixes must never remove, disable, or downgrade a feature. Fix the root cause while preserving all functionality. See Engineering Quality Standards in copilot-instructions.md.
 
 Focus area (optional): <area or "full sweep">
 

@@ -128,6 +128,16 @@ Issues:
 2. <file>:<line> — <description>
 ```
 
+If the rejection is due to feature removal, prefix the issue with `[FEATURE REMOVAL]`:
+
+```
+REVIEW RESULT: REQUEST_CHANGES
+PR: #<number>
+
+Issues:
+1. [FEATURE REMOVAL] <file>:<line> — Removed castShadow to fix GPU stall. Must pre-allocate shadow map instead.
+```
+
 ### On Approve
 
 ```
