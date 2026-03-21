@@ -7,6 +7,7 @@ import { CreatureManager } from './creatures/CreatureManager.js';
 import { HUD } from './ui/HUD.js';
 import { AudioManager } from './audio/AudioManager.js';
 import { UnderwaterEffect } from './shaders/UnderwaterEffect.js';
+import { PreloadCoordinator } from './PreloadCoordinator.js';
 
 export class Game {
   constructor() {
@@ -65,6 +66,17 @@ export class Game {
     this.descentOverlay = document.getElementById('descent-transition');
     this.descentProgressBar = document.getElementById('descent-progress-bar');
     this._descentActive = false;
+    this._startTransition = { owner: 'game', startRequested: false, started: false };
+
+    this.preload = new PreloadCoordinator({
+      renderer: this.renderer,
+      underwaterEffect: this.underwaterEffect,
+      player: this.player,
+      terrain: this.terrain,
+      flora: this.flora,
+      creatures: this.creatures,
+    });
+    this.preload.startMenuIdleWarmup();
 
     this._initEnvironmentColors();
     this._setupEvents();
@@ -102,6 +114,7 @@ export class Game {
         }
       } else if (this.pendingStart) {
         this.pendingStart = false;
+        this._startTransition.startRequested = false;
         this._pauseAudio();
       } else if (this.running && !this.gameOver) {
         this.pauseOverlay.classList.add('visible');
@@ -118,7 +131,9 @@ export class Game {
   }
 
   start() {
-    if (this.gameOver || this.running || this.pendingStart) return;
+    if (this.gameOver || this.running || this.pendingStart || this._startTransition.startRequested) return;
+    this._startTransition.startRequested = true;
+    this.preload.cancel('user-start');
     this.pendingStart = true;
     this.pauseOverlay.classList.remove('visible');
     this.audio.start();
@@ -150,6 +165,9 @@ export class Game {
    */
   startAutoplay() {
     if (this.running) return;
+    this.preload.cancel('autoplay-start');
+    this._startTransition.startRequested = false;
+    this._startTransition.started = true;
     this.autoplay = true;
     this.player.locked = true; // simulate lock without real pointer lock
     this.menuOverlay.classList.add('hidden');
@@ -197,6 +215,8 @@ export class Game {
   }
 
   _beginGameplay() {
+    this._startTransition.startRequested = false;
+    this._startTransition.started = true;
     this.pendingStart = false;
     this.menuOverlay.classList.add('hidden');
     this.gameOverOverlay.classList.remove('visible');

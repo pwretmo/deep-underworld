@@ -195,6 +195,78 @@ export class Flora {
     }
   }
 
+  _disposeGroup(group) {
+    group.traverse(child => {
+      if (child.geometry) child.geometry.dispose();
+      if (child.material) {
+        if (Array.isArray(child.material)) {
+          child.material.forEach(m => m.dispose());
+        } else {
+          child.material.dispose();
+        }
+      }
+    });
+    this.scene.remove(group);
+    this.kelps = this.kelps.filter(k => k.mesh.parent !== group);
+  }
+
+  _rebuildPendingAround(cx, cz) {
+    const needed = new Set();
+    for (let dx = -2; dx <= 2; dx++) {
+      for (let dz = -2; dz <= 2; dz++) {
+        needed.add(this._getChunkKey(cx + dx, cz + dz));
+      }
+    }
+
+    for (const [key, group] of this.groups) {
+      if (!needed.has(key)) {
+        this._disposeGroup(group);
+        this.groups.delete(key);
+      }
+    }
+
+    // Queue new chunks for staggered creation (1 per frame)
+    this._pendingChunks = [];
+    for (const key of needed) {
+      if (!this.groups.has(key)) {
+        const [x, z] = key.split(',').map(Number);
+        this._pendingChunks.push({ key, x, z });
+      }
+    }
+  }
+
+  preloadPrepareAround(playerPos) {
+    const cx = Math.round(playerPos.x / this.chunkSize);
+    const cz = Math.round(playerPos.z / this.chunkSize);
+    this.lastChunkX = cx;
+    this.lastChunkZ = cz;
+    this._rebuildPendingAround(cx, cz);
+  }
+
+  preloadDrain(maxCount, cancelToken) {
+    if (maxCount <= 0) return 0;
+    let built = 0;
+    while (this._pendingChunks.length > 0 && built < maxCount) {
+      if (cancelToken?.cancelled) break;
+      const { key, x, z } = this._pendingChunks.shift();
+      if (!this.groups.has(key)) {
+        const chunk = this._createFloraChunk(x, z);
+        this.scene.add(chunk);
+        this.groups.set(key, chunk);
+        built++;
+      }
+    }
+    return built;
+  }
+
+  getPendingCount() {
+    return this._pendingChunks.length;
+  }
+
+  getChunkCount() {
+    return this.groups.size;
+  }
+
   update(dt, playerPos) {
     this.time += dt;
 
@@ -215,42 +287,7 @@ export class Flora {
     if (cx !== this.lastChunkX || cz !== this.lastChunkZ) {
       this.lastChunkX = cx;
       this.lastChunkZ = cz;
-
-      const needed = new Set();
-      for (let dx = -2; dx <= 2; dx++) {
-        for (let dz = -2; dz <= 2; dz++) {
-          needed.add(this._getChunkKey(cx + dx, cz + dz));
-        }
-      }
-
-      for (const [key, group] of this.groups) {
-        if (!needed.has(key)) {
-          // Dispose geometries, materials, and lights before removing
-          group.traverse(child => {
-            if (child.geometry) child.geometry.dispose();
-            if (child.material) {
-              if (Array.isArray(child.material)) {
-                child.material.forEach(m => m.dispose());
-              } else {
-                child.material.dispose();
-              }
-            }
-          });
-          this.scene.remove(group);
-          this.groups.delete(key);
-          // Clean up kelp refs
-          this.kelps = this.kelps.filter(k => k.mesh.parent !== group);
-        }
-      }
-
-      // Queue new chunks for staggered creation (1 per frame)
-      this._pendingChunks = [];
-      for (const key of needed) {
-        if (!this.groups.has(key)) {
-          const [x, z] = key.split(',').map(Number);
-          this._pendingChunks.push({ key, x, z });
-        }
-      }
+      this._rebuildPendingAround(cx, cz);
     }
 
     // Animate kelp swaying

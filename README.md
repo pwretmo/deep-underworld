@@ -10,6 +10,15 @@ npm run dev       # Start dev server at http://localhost:5173
 npm run build     # Production build
 ```
 
+## Startup Preload And Cache
+
+- A menu-idle preload phase warms non-audio systems after page load and before Begin Descent.
+- Begin Descent always takes priority and never waits for preload completion.
+- Audio remains gesture-gated and is not resumed/initialized by preload work.
+- Procedural startup metadata stays tiny in localStorage; larger snapshots use IndexedDB when available.
+- Cache key invalidation uses: `gameVersion + worldSeed + qualityTier + schemaVersion`.
+- If storage APIs are unavailable/restricted or quota is exceeded, gameplay continues with memory-only warmup.
+
 ## AI Agent Workflow
 
 This repo includes custom Copilot agents that automate development tasks. You talk to the main chat agent (the orchestrator), and it dispatches specialized subagents for you.
