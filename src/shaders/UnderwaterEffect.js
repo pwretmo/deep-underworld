@@ -89,6 +89,13 @@ const UnderwaterShader = {
       float abyssBlend = smoothstep(depthThresholds.z, depthThresholds.z + 280.0, depth);
       float depthBlend = clamp(midBlend * 0.45 + deepBlend * 0.7 + abyssBlend * 0.35, 0.0, 1.0);
 
+      // Chromatic aberration (increases with depth)
+      float caStr = 0.0015 + depth * 0.000005;
+      float r = texture2D(tDiffuse, uv + vec2(caStr, caStr * 0.3)).r;
+      float b = texture2D(tDiffuse, uv - vec2(caStr, caStr * 0.2)).b;
+      color.r = r;
+      color.b = b;
+
       // Heavy vignette, but avoid crushing edge details into pure black.
       float vigBase = 0.28 + depthBlend * grading.y;
       float vigStr = min(vigBase, 0.9);
