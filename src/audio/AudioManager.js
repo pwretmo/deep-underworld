@@ -160,12 +160,12 @@ export class AudioManager {
     gain.gain.exponentialRampToValueAtTime(0.001, now + 1.5);
 
     // Echo effect
-    const delay1 = this.ctx.createDelay();
+    const delay1 = this.ctx.createDelay(2.0);
     delay1.delayTime.value = 0.6;
     const echoGain1 = this.ctx.createGain();
     echoGain1.gain.value = 0.15;
 
-    const delay2 = this.ctx.createDelay();
+    const delay2 = this.ctx.createDelay(2.0);
     delay2.delayTime.value = 1.2;
     const echoGain2 = this.ctx.createGain();
     echoGain2.gain.value = 0.05;

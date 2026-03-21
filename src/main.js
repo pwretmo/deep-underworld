@@ -7,13 +7,26 @@ window.game = game;
 
 document.getElementById('loading').classList.add('hidden');
 
-document.getElementById('start-btn').addEventListener('click', () => {
+const startBtn = document.getElementById('start-btn');
+const restartBtn = document.getElementById('restart-btn');
+
+startBtn.addEventListener('click', () => {
   game.start();
 });
 
-document.getElementById('restart-btn').addEventListener('click', () => {
+restartBtn.addEventListener('click', () => {
   game.restart();
 });
+
+const activateOnKeyboard = (e) => {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    e.currentTarget.click();
+  }
+};
+
+startBtn.addEventListener('keydown', activateOnKeyboard);
+restartBtn.addEventListener('keydown', activateOnKeyboard);
 
 // Autoplay mode: ?autoplay in URL skips the menu and starts gameplay without pointer lock.
 // This lets automated testing tools (Chrome DevTools MCP) drive the game via keyboard

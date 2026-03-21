@@ -110,9 +110,7 @@ export class Game {
     };
     document.addEventListener('pointerlockerror', () => {
       if (!this.pendingStart) return;
-      this.pendingStart = false;
-      this.running = false;
-      this._pauseAudio();
+      this._beginGameplayWithoutPointerLock();
     });
     this.pauseOverlay.addEventListener('click', () => {
       this.player.lock();
@@ -123,9 +121,27 @@ export class Game {
     if (this.gameOver || this.running || this.pendingStart) return;
     this.pendingStart = true;
     this.pauseOverlay.classList.remove('visible');
-    this.player.lock();
     this.audio.start();
+
+    const lockRequested = this.player.lock();
+    if (!lockRequested) {
+      this._beginGameplayWithoutPointerLock();
+      return;
+    }
+
+    // Do not block start if pointer lock cannot be acquired.
+    window.setTimeout(() => {
+      if (!this.pendingStart || this.running || this.gameOver) return;
+      this._beginGameplayWithoutPointerLock();
+    }, 250);
+
     console.log('[deep-underworld] Game starting...');
+  }
+
+  _beginGameplayWithoutPointerLock() {
+    if (!this.pendingStart || this.running || this.gameOver) return;
+    this.player.locked = true;
+    this._beginGameplay();
   }
 
   /**

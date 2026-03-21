@@ -33,6 +33,12 @@
       color: #88ccff; font-size: 1.2rem; letter-spacing: 0.2em;
       cursor: pointer; transition: all 0.3s; text-transform: uppercase;
     }
+    #menu .start-btn:focus-visible,
+    #game-over .start-btn:focus-visible {
+      outline: 2px solid #88ccff;
+      outline-offset: 3px;
+      box-shadow: 0 0 0 4px #0066ff33;
+    }
     #menu .start-btn:hover {
       background: #0066ff22; border-color: #88ccff;
       box-shadow: 0 0 30px #0066ff44;
@@ -224,8 +230,9 @@
     }
     #controls-help.visible { display: flex; }
     #controls-help .help-panel {
-      background: rgba(0, 14, 28, 0.9); border: 1px solid #22445588;
+      background: rgba(4, 20, 40, 0.96); border: 1px solid #3a6a8a;
       border-radius: 6px; padding: 2rem 2.5rem; max-width: 520px; width: 90%;
+      box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
     }
     #controls-help h2 {
       font-size: 1.1rem; color: #4488aa; letter-spacing: 0.2em;
@@ -237,7 +244,7 @@
       margin-bottom: 1rem;
     }
     #controls-help .help-section h3 {
-      font-size: 0.7rem; color: #448866; letter-spacing: 0.15em;
+      font-size: 0.7rem; color: #7fcda9; letter-spacing: 0.15em;
       text-transform: uppercase; margin-bottom: 0.4rem;
     }
     #controls-help .help-row {
@@ -248,16 +255,16 @@
       min-width: 80px; text-align: right;
     }
     #controls-help .help-key kbd {
-      display: inline-block; background: #ffffff10; border: 1px solid #ffffff18;
+      display: inline-block; background: #ffffff1a; border: 1px solid #ffffff33;
       border-radius: 3px; padding: 2px 7px; font-size: 0.75rem;
-      color: #88ccff; font-family: 'Courier New', monospace;
+      color: #d8edff; font-family: 'Courier New', monospace;
     }
     #controls-help .help-desc {
-      color: #6699aa;
+      color: #b7d8e8;
     }
     #controls-help .help-dismiss {
       text-align: center; margin-top: 1.2rem;
-      font-size: 0.7rem; color: #335566; letter-spacing: 0.1em;
+      font-size: 0.7rem; color: #8fb6ca; letter-spacing: 0.1em;
     }
 
     /* Help hint in HUD */

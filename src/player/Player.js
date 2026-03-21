@@ -130,7 +130,9 @@ export class Player {
   }
 
   lock() {
+    if (!this.domElement?.requestPointerLock) return false;
     this.domElement.requestPointerLock();
+    return true;
   }
 
   unlock() {
