@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { qualityManager } from '../QualityManager.js';
 
 // Soft circular particle texture (avoids hard square pixels)
 function createDustTexture() {
@@ -60,39 +61,18 @@ export class Player {
     this.flashlight.add(this.lightCone);
 
     // Dust particles in the beam
-    const dustCount = 500;
-    const dustGeo = new THREE.BufferGeometry();
-    const dustPositions = new Float32Array(dustCount * 3);
-    const dustSizes = new Float32Array(dustCount);
-    for (let i = 0; i < dustCount; i++) {
-      const z = -Math.random() * coneLength;
-      const maxR = Math.tan(Math.PI / 7) * Math.abs(z) * 0.8;
-      const angle = Math.random() * Math.PI * 2;
-      const r = Math.random() * maxR;
-      dustPositions[i * 3] = Math.cos(angle) * r;
-      dustPositions[i * 3 + 1] = Math.sin(angle) * r;
-      dustPositions[i * 3 + 2] = z;
-      dustSizes[i] = 0.05 + Math.random() * 0.12;
-    }
-    dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPositions, 3));
-    dustGeo.setAttribute('size', new THREE.BufferAttribute(dustSizes, 1));
-    const dustTexture = createDustTexture();
-    this.dustParticles = new THREE.Points(dustGeo, new THREE.PointsMaterial({
-      color: 0x99aacc,
-      size: 0.08,
-      map: dustTexture,
-      transparent: true,
-      opacity: 0.35,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      sizeAttenuation: true,
-    }));
-    this.flashlight.add(this.dustParticles);
-    this._dustBasePositions = dustPositions.slice();
+    const dustCount = qualityManager.getSettings().particleCount;
     this._dustConeLength = coneLength;
+    this._dustTexture = createDustTexture();
+    this._buildDustParticles(dustCount, coneLength);
 
     this.flashlight.visible = false;
     camera.add(this.flashlight);
+
+    // Rebuild particles on quality change
+    window.addEventListener('qualitychange', (e) => {
+      this._rebuildDustParticles(e.detail.settings.particleCount);
+    });
 
     // Submarine ambient glow - dimmer for more contrast
     this.subLight = new THREE.PointLight(0x112233, 0.32, 7);
@@ -106,6 +86,45 @@ export class Player {
     this.bobAmount = 0.03;
 
     this._setupControls();
+  }
+
+  _buildDustParticles(count, coneLength) {
+    const dustGeo = new THREE.BufferGeometry();
+    const dustPositions = new Float32Array(count * 3);
+    const dustSizes = new Float32Array(count);
+    for (let i = 0; i < count; i++) {
+      const z = -Math.random() * coneLength;
+      const maxR = Math.tan(Math.PI / 7) * Math.abs(z) * 0.8;
+      const angle = Math.random() * Math.PI * 2;
+      const r = Math.random() * maxR;
+      dustPositions[i * 3] = Math.cos(angle) * r;
+      dustPositions[i * 3 + 1] = Math.sin(angle) * r;
+      dustPositions[i * 3 + 2] = z;
+      dustSizes[i] = 0.05 + Math.random() * 0.12;
+    }
+    dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPositions, 3));
+    dustGeo.setAttribute('size', new THREE.BufferAttribute(dustSizes, 1));
+    this.dustParticles = new THREE.Points(dustGeo, new THREE.PointsMaterial({
+      color: 0x99aacc,
+      size: 0.08,
+      map: this._dustTexture,
+      transparent: true,
+      opacity: 0.35,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      sizeAttenuation: true,
+    }));
+    this.flashlight.add(this.dustParticles);
+    this._dustBasePositions = dustPositions.slice();
+  }
+
+  _rebuildDustParticles(count) {
+    if (this.dustParticles) {
+      this.flashlight.remove(this.dustParticles);
+      this.dustParticles.geometry.dispose();
+      this.dustParticles.material.dispose();
+    }
+    this._buildDustParticles(count, this._dustConeLength);
   }
 
   _setupControls() {

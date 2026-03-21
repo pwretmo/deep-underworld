@@ -9,6 +9,7 @@ import { AudioManager } from './audio/AudioManager.js';
 import { UnderwaterEffect } from './shaders/UnderwaterEffect.js';
 import { PreloadCoordinator } from './PreloadCoordinator.js';
 import { AbyssEncounter } from './encounters/AbyssEncounter.js';
+import { qualityManager } from './QualityManager.js';
 
 export class Game {
   constructor() {
@@ -22,7 +23,8 @@ export class Game {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.shadowMap.enabled = true;
+    const qSettings = qualityManager.getSettings();
+    this.renderer.shadowMap.enabled = qSettings.shadowMapEnabled;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.76;
@@ -64,8 +66,8 @@ export class Game {
     };
     this._targetExposure = this.renderer.toneMappingExposure;
     this._pointLightBudget = {
-      shallowMax: 10,
-      deepMax: 6,
+      shallowMax: qSettings.maxPointLights,
+      deepMax: Math.max(3, Math.round(qSettings.maxPointLights * 0.6)),
       transitionBand: 3,
       scanInterval: 0.35,
       scanElapsed: 1,
@@ -79,6 +81,14 @@ export class Game {
 
     // Alias so automated tests can use game.creatureManager or game.creatures
     this.creatureManager = this.creatures;
+
+    // Quality tier change listener
+    window.addEventListener('qualitychange', (e) => {
+      const s = e.detail.settings;
+      this.renderer.shadowMap.enabled = s.shadowMapEnabled;
+      this._pointLightBudget.shallowMax = s.maxPointLights;
+      this._pointLightBudget.deepMax = Math.max(3, Math.round(s.maxPointLights * 0.6));
+    });
 
     // FPS tracking for automated testing
     this.fps = 0;
@@ -329,6 +339,7 @@ export class Game {
     requestAnimationFrame(() => this._animate());
 
     const dt = Math.min(this.clock.getDelta(), 0.05);
+    qualityManager.updateFrameTime(dt);
     if (!this.running || this.gameOver || (!this.player.locked && !this.autoplay)) return;
 
     try {

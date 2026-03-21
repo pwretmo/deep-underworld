@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { fbm2D, noise2D } from '../utils/noise.js';
+import { qualityManager } from '../QualityManager.js';
 
 export class Terrain {
   constructor(scene) {
@@ -9,8 +10,15 @@ export class Terrain {
     this.resolution = 40;
     this.lastChunkX = null;
     this.lastChunkZ = null;
-    this.viewDistance = 3; // chunks in each direction
+    this.viewDistance = qualityManager.getSettings().terrainViewDistance;
     this._pendingChunks = []; // queue for staggered generation
+
+    window.addEventListener('qualitychange', (e) => {
+      this.viewDistance = e.detail.settings.terrainViewDistance;
+      if (this.lastChunkX !== null) {
+        this._rebuildPendingAround(this.lastChunkX, this.lastChunkZ);
+      }
+    });
 
     // Shared geometry and material for rocks (avoids per-chunk allocation)
     this._rockGeo = new THREE.DodecahedronGeometry(1, 1);
