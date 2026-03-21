@@ -57,9 +57,9 @@ export class Game {
       },
       exposure: {
         surface: 0.76,
-        mid: 0.66,
-        deep: 0.55,
-        abyss: 0.48,
+        mid: 0.68,
+        deep: 0.60,
+        abyss: 0.56,
         flashlightBoost: 0.16,
         easing: 0.08,
       },
@@ -445,13 +445,13 @@ export class Game {
     const nearDark = THREE.MathUtils.lerp(nearTwilight, 0.45, darkZone);
     let fogNear = THREE.MathUtils.lerp(nearDark, 0.18, abyss);
 
-    const farTwilight = THREE.MathUtils.lerp(220, 82, twilight);
-    const farDark = THREE.MathUtils.lerp(farTwilight, 34, darkZone);
-    let fogFar = THREE.MathUtils.lerp(farDark, 19, abyss);
+    const farTwilight = THREE.MathUtils.lerp(220, 90, twilight);
+    const farDark = THREE.MathUtils.lerp(farTwilight, 48, darkZone);
+    let fogFar = THREE.MathUtils.lerp(farDark, 30, abyss);
 
-    const ambientTwilight = THREE.MathUtils.lerp(0.24, 0.1, twilight);
-    const ambientDark = THREE.MathUtils.lerp(ambientTwilight, 0.025, darkZone);
-    const ambientIntensity = THREE.MathUtils.lerp(ambientDark, 0.006, abyss);
+    const ambientTwilight = THREE.MathUtils.lerp(0.24, 0.12, twilight);
+    const ambientDark = THREE.MathUtils.lerp(ambientTwilight, 0.045, darkZone);
+    const ambientIntensity = THREE.MathUtils.lerp(ambientDark, 0.022, abyss);
 
     // When flashlight is on, push fog back so the beam can illuminate the scene.
     // The push is proportional to depth — stronger at deeper zones where fog is thickest.
@@ -485,7 +485,7 @@ export class Game {
       target += exposure.flashlightBoost;
     }
 
-    this._targetExposure = THREE.MathUtils.clamp(target, 0.42, 0.9);
+    this._targetExposure = THREE.MathUtils.clamp(target, 0.50, 0.9);
     this.renderer.toneMappingExposure = THREE.MathUtils.lerp(
       this.renderer.toneMappingExposure,
       this._targetExposure,

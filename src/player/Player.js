@@ -104,7 +104,7 @@ export class Player {
     });
 
     // Submarine ambient glow — visible cockpit illumination
-    this.subLight = new THREE.PointLight(0x334466, 1.5, 18);
+    this.subLight = new THREE.PointLight(0x445577, 3.5, 45);
     camera.add(this.subLight);
 
     /** Current depth (positive = deeper). Updated by Game._animate(). */
