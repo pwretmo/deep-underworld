@@ -229,10 +229,12 @@ export class Player {
       this.camera.position.y += bob * dt;
     }
 
+    // Shared time for dust particles and beam shader
+    const time = performance.now() * 0.001;
+
     // Animate dust particles in flashlight beam
     if (this.flashlight.visible && this.dustParticles) {
       const pos = this.dustParticles.geometry.attributes.position;
-      const time = performance.now() * 0.001;
 
       for (let i = 0; i < pos.count; i++) {
         const bx = this._dustBasePositions[i * 3];
