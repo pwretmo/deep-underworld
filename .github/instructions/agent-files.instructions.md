@@ -22,3 +22,4 @@ When editing agent customization files, use the **agent-customization** skill fo
 - MCP servers: `io.github.github/github-mcp-server`, `io.github.ChromeDevTools/chrome-devtools-mcp`
 - Labels: `agent-work`, `agent-reviewed`, `agent-approved`
 - Commit messages: conventional commits (`feat:`, `fix:`, `refactor:`, etc.)
+- Completion contract: every successful agent run must end with a short human-readable summary followed immediately by `task_complete`; prompt text alone is not enough, so write instructions as an explicit final-step contract.

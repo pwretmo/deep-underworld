@@ -22,6 +22,23 @@ This is a Three.js deep-ocean exploration horror game built with Vite.
 - **Dev server**: `npm run dev`
 - **No test framework yet** — validate changes by running `npm run build` successfully.
 
+## Completion Contract
+
+These rules are **mandatory** for every agent role in this repository, including the main conversation orchestrator when operating on this repo.
+
+An agent turn is **not complete** until all of the following are true:
+
+1. The requested work is actually finished, or the agent is genuinely blocked and has reported the blocker
+2. The agent has sent a brief plain-language summary of what was accomplished
+3. The agent has immediately called `task_complete`
+
+Additional required behavior:
+
+- **Never** end a successful turn with only a normal chat response. A completion summary must be followed by `task_complete` in the same turn.
+- **Never** treat a question-only answer as exempt. If the user asked for information and the answer has been fully provided, the agent must still call `task_complete`.
+- **Never** call `task_complete` while work remains, while a tool error is unresolved, or while the agent still has open questions it can answer itself.
+- If a completion hook or reminder says `task_complete` was missed, treat that as a real failure and correct it immediately rather than restating the prior answer.
+
 ## Engineering Quality Standards
 
 These rules are **mandatory** for every agent role — workers, reviewers, UX testers, the orchestrator, and cloud agents. No agent may override, weaken, or work around them.
