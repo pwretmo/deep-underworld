@@ -32,34 +32,62 @@ You have access to local dev tools pre-installed in the repo:
 
 ## Workflow
 
+## Mandatory Preflight
+
+Before any file edits, build commands, or git commands, run this preflight inside the terminal and verify every check passes:
+
+```powershell
+$expectedWorktree = '<worktree-path>'
+$expectedBranch = '<branch-name>'
+$currentPath = (Get-Location).Path
+$currentBranch = git branch --show-current
+
+if ($currentPath -ne $expectedWorktree) {
+	throw "ABORT: worker is in the wrong directory. Expected $expectedWorktree but got $currentPath"
+}
+
+if ($currentBranch -ne $expectedBranch) {
+	throw "ABORT: worker is on the wrong branch. Expected $expectedBranch but got $currentBranch"
+}
+
+if ($currentBranch -eq 'main' -or $currentPath -eq 'F:\repos\deep-underworld') {
+	throw 'ABORT: direct work on main is forbidden. Return to the orchestrator immediately.'
+}
+```
+
+If any check fails, stop immediately and report the failure to the orchestrator. Do not inspect, edit, stage, commit, or build anything until the preflight passes.
+
 ### New Task (no review comments)
 
 1. **Navigate** to your worktree: `cd <worktree-path>`
-2. **Implement** the requested changes
-3. **Validate**: run `npm run build` — it must succeed
-4. **Commit** with a conventional commit message: `feat:`, `fix:`, `refactor:`, etc.
-5. **Push**: `git push -u origin <branch-name>`
-6. **Create PR** via MCP targeting `main` — title matches the commit message, body describes the changes. **If implementing a GitHub issue**, include `Fixes #<number>` in the PR body so the reviewer can verify completeness. See the worktree-workflow skill for MCP details.
-7. **Add label** `agent-work` to the PR via MCP
-8. **Report back** to the orchestrator with the PR number and a summary
+2. **Run the mandatory preflight** and confirm it passes
+3. **Implement** the requested changes
+4. **Validate**: run `npm run build` — it must succeed
+5. **Commit** with a conventional commit message: `feat:`, `fix:`, `refactor:`, etc.
+6. **Push**: `git push -u origin <branch-name>`
+7. **Create PR** via MCP targeting `main` — title matches the commit message, body describes the changes. **If implementing a GitHub issue**, include `Fixes #<number>` in the PR body so the reviewer can verify completeness. See the worktree-workflow skill for MCP details.
+8. **Add label** `agent-work` to the PR via MCP
+9. **Report back** to the orchestrator with the PR number and a summary
 
 ### Fixing Review Comments
 
 When re-dispatched with review comments:
 
 1. **Navigate** to your existing worktree: `cd <worktree-path>`
-2. **Sync with latest main** before fixing: `git fetch origin main` then `git rebase origin/main`
-3. **Read** the review comments provided inline in your prompt
-4. **Fix** each issue
-5. **Validate**: run `npm run build`
-6. **Commit** with a message like `fix: address review comments`
-7. **Push**: `git push --force-with-lease` (required after rebase)
-8. **Report back** with a summary of what was fixed — do NOT create a new PR
+2. **Run the mandatory preflight** and confirm it passes
+3. **Sync with latest main** before fixing: `git fetch origin main` then `git rebase origin/main`
+4. **Read** the review comments provided inline in your prompt
+5. **Fix** each issue
+6. **Validate**: run `npm run build`
+7. **Commit** with a message like `fix: address review comments`
+8. **Push**: `git push --force-with-lease` (required after rebase)
+9. **Report back** with a summary of what was fixed — do NOT create a new PR
 
 ## Rules
 
 - **Never** work directly on `main`
 - **Never** touch files outside your worktree
+- If preflight shows `main` or `F:\repos\deep-underworld`, abort immediately and report the violation instead of proceeding
 - Use `git push` in terminal for pushing commits
 - Use conventional commit messages
 - If the build fails, fix the issue before committing

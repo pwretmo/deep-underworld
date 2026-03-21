@@ -73,6 +73,15 @@ If a proper fix is complex, break it into incremental steps — but the end stat
 Local subagents **must** work in a dedicated git worktree, never directly on `main`.
 Worktrees are created at `F:\repos\deep-underworld-worktrees\<slug>` where `<slug>` matches the branch suffix.
 
+Before a Local Worker edits files or runs build/git commands, it must verify all of the following and abort if any check fails:
+
+1. Current directory exactly matches the assigned worktree path
+2. Current branch exactly matches the assigned `agent/<slug>` branch
+3. Current branch is not `main`
+4. Current directory is not `F:\repos\deep-underworld`
+
+This is a hard-stop preflight, not a guideline. If the preflight fails, the worker must report the violation and do no further work.
+
 Cloud agents do not use worktrees — they work directly on their `copilot/` branch.
 
 ### GitHub Operations (Local Agents)
@@ -146,6 +155,8 @@ You are a Local Worker agent for the deep-underworld repo (owner: pwretmo, repo:
 Your worktree is at: F:\repos\deep-underworld-worktrees\<slug>
 Your branch is: agent/<slug>
 
+PRECHECK: Before any edits, builds, or git commands, verify you are exactly in that worktree path and on that branch. If not, abort immediately and report the violation.
+
 TASK: <description>
 ISSUE: #<number> (omit if not implementing a specific issue)
 
@@ -180,6 +191,8 @@ You are a Local Worker agent for the deep-underworld repo (owner: pwretmo, repo:
 Your worktree is at: F:\repos\deep-underworld-worktrees\<slug>
 Your branch is: agent/<slug>
 PR number: #<number>
+
+PRECHECK: Before any edits, builds, or git commands, verify you are exactly in that worktree path and on that branch. If not, abort immediately and report the violation.
 
 ENGINEERING RULE: Never remove, disable, or downgrade a feature to fix a bug. Fix the root cause while preserving all functionality. If the original fix removed functionality, the new fix must restore it AND address the root cause properly.
 

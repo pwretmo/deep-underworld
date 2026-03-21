@@ -32,9 +32,32 @@ Where `<slug>` is a short kebab-case name for the task (e.g., `add-fog`, `fix-ca
 
 ## Working in a Worktree
 
+Before any edits or build steps, the worker must prove it is in the assigned worktree and branch.
+
+```powershell
+$expectedWorktree = 'F:\repos\deep-underworld-worktrees\<slug>'
+$expectedBranch = 'agent/<slug>'
+$currentPath = (Get-Location).Path
+$currentBranch = git branch --show-current
+
+if ($currentPath -ne $expectedWorktree) {
+  throw "ABORT: wrong worktree. Expected $expectedWorktree but got $currentPath"
+}
+
+if ($currentBranch -ne $expectedBranch) {
+  throw "ABORT: wrong branch. Expected $expectedBranch but got $currentBranch"
+}
+
+if ($currentBranch -eq 'main' -or $currentPath -eq 'F:\repos\deep-underworld') {
+  throw 'ABORT: direct work on main is forbidden.'
+}
+```
+
 ```powershell
 # Navigate to the worktree
 cd F:\repos\deep-underworld-worktrees\<slug>
+
+# Run the preflight above before editing or building
 
 # Install dependencies (worktree shares git but not node_modules)
 npm install
@@ -120,6 +143,8 @@ git worktree add F:\repos\deep-underworld-worktrees\<slug> agent/<slug>
 
 The worker then continues with `cd`, edit, build, commit, `git push` — no new PR needed.
 
+After re-entering, run the same preflight again before any edits.
+
 Before implementing review fix-ups, rebase onto the latest `origin/main` to reduce merge conflicts at merge time:
 
 ```powershell
@@ -183,5 +208,6 @@ git branch -d agent/<slug>
 - Each worktree is isolated — changes in one worktree do not affect another
 - Always `npm install` in a new worktree (node_modules is not shared)
 - Never work directly on `main`
+- Fail fast if the current directory is `F:\repos\deep-underworld` or the current branch is `main`
 - Use `git push` in the terminal for pushing — do not use MCP for pushing
 - Use MCP tools for PR creation and label management
