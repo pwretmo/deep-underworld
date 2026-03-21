@@ -15,7 +15,7 @@ const RENDER_PIPELINE_TUNING = Object.freeze({
     vignette: 0.88,
     grain: 0.018,
     scanline: 0.24,
-    darkening: 0.68,
+    darkening: 0.55,
   },
   highlightRoll: {
     start: 0.62,
@@ -51,7 +51,7 @@ const UnderwaterShader = {
     resolution: { value: new THREE.Vector2() },
     depthThresholds: { value: new THREE.Vector3(130, 340, 720) },
     grading: { value: new THREE.Vector4(1.2, 0.88, 0.018, 0.24) },
-    darkening: { value: 0.68 },
+    darkening: { value: 0.55 },
     highlightRoll: { value: new THREE.Vector3(0.62, 0.34, 0.62) },
     bloomParams: { value: new THREE.Vector3(0.28, 0.78, 1.6) },
   },
@@ -117,7 +117,7 @@ const UnderwaterShader = {
 
       // Darken overall based on depth while preserving flashlight readability.
       float depthDarkening = 1.0 - depthBlend * darkening;
-      color.rgb *= max(depthDarkening, 0.28);
+      color.rgb *= max(depthDarkening, 0.35);
 
       // Depth-aware contrast to strengthen separation in mid/deep zones.
       float contrast = mix(1.0, grading.x, depthBlend);
