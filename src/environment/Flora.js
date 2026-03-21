@@ -221,6 +221,17 @@ export class Flora {
 
       for (const [key, group] of this.groups) {
         if (!needed.has(key)) {
+          // Dispose geometries, materials, and lights before removing
+          group.traverse(child => {
+            if (child.geometry) child.geometry.dispose();
+            if (child.material) {
+              if (Array.isArray(child.material)) {
+                child.material.forEach(m => m.dispose());
+              } else {
+                child.material.dispose();
+              }
+            }
+          });
           this.scene.remove(group);
           this.groups.delete(key);
           // Clean up kelp refs
