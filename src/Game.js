@@ -50,6 +50,8 @@ export class Game {
     this.menuOverlay = document.getElementById('menu');
     this.pauseOverlay = document.getElementById('paused');
     this.gameOverOverlay = document.getElementById('game-over');
+    this.controlsHelpOverlay = document.getElementById('controls-help');
+    this.controlsHelpVisible = false;
 
     this._setupEvents();
     this._animate();
@@ -65,6 +67,7 @@ export class Game {
 
     document.addEventListener('keydown', (e) => {
       if (!this.running) return;
+      if (e.code === 'KeyH') this._toggleControlsHelp();
       if (e.code === 'KeyF') this._toggleFlashlight();
       if (e.code === 'KeyE') this._sonarPing();
       if (e.code === 'KeyC') this.hud.toggleLocator();
@@ -123,6 +126,11 @@ export class Game {
     this.player.flashlight.visible = false;
     this.pauseOverlay.classList.remove('visible');
     this.start();
+  }
+
+  _toggleControlsHelp() {
+    this.controlsHelpVisible = !this.controlsHelpVisible;
+    this.controlsHelpOverlay.classList.toggle('visible', this.controlsHelpVisible);
   }
 
   _toggleFlashlight() {

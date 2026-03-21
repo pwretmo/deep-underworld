@@ -193,6 +193,58 @@
     #track-info { display: flex; flex-direction: column; gap: 1px; }
     #track-name { color: #88ccff; font-size: 0.7rem; }
     #track-dist { color: #448866; font-size: 0.65rem; }
+
+    /* Controls Help Overlay */
+    #controls-help {
+      position: fixed; inset: 0; z-index: 95;
+      display: none; align-items: center; justify-content: center;
+      background: rgba(0, 4, 12, 0.88);
+      font-family: 'Courier New', monospace; color: #88ccff;
+      backdrop-filter: blur(6px);
+    }
+    #controls-help.visible { display: flex; }
+    #controls-help .help-panel {
+      background: rgba(0, 14, 28, 0.9); border: 1px solid #22445588;
+      border-radius: 6px; padding: 2rem 2.5rem; max-width: 520px; width: 90%;
+    }
+    #controls-help h2 {
+      font-size: 1.1rem; color: #4488aa; letter-spacing: 0.2em;
+      text-transform: uppercase; margin-bottom: 1.2rem;
+      border-bottom: 1px solid #22445544; padding-bottom: 0.6rem;
+      text-align: center;
+    }
+    #controls-help .help-section {
+      margin-bottom: 1rem;
+    }
+    #controls-help .help-section h3 {
+      font-size: 0.7rem; color: #448866; letter-spacing: 0.15em;
+      text-transform: uppercase; margin-bottom: 0.4rem;
+    }
+    #controls-help .help-row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 4px 0; font-size: 0.8rem;
+    }
+    #controls-help .help-key {
+      min-width: 80px; text-align: right;
+    }
+    #controls-help .help-key kbd {
+      display: inline-block; background: #ffffff10; border: 1px solid #ffffff18;
+      border-radius: 3px; padding: 2px 7px; font-size: 0.75rem;
+      color: #88ccff; font-family: 'Courier New', monospace;
+    }
+    #controls-help .help-desc {
+      color: #6699aa;
+    }
+    #controls-help .help-dismiss {
+      text-align: center; margin-top: 1.2rem;
+      font-size: 0.7rem; color: #335566; letter-spacing: 0.1em;
+    }
+
+    /* Help hint in HUD */
+    #help-hint {
+      position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+      font-size: 0.65rem; color: #33556688; letter-spacing: 0.1em;
+    }
   </style>
 </head>
 <body>
@@ -229,6 +281,7 @@
     <div id="warning-text"></div>
     <div id="crosshair"></div>
     <canvas id="sonar" width="150" height="150"></canvas>
+    <div id="help-hint">[H] CONTROLS</div>
     <div id="creature-locator">
       <h3>Creature Locator [C]</h3>
       <div id="creature-list"></div>
@@ -240,6 +293,33 @@
         <span id="track-name"></span>
         <span id="track-dist"></span>
       </div>
+    </div>
+  </div>
+
+  <div id="controls-help">
+    <div class="help-panel">
+      <h2>Controls</h2>
+      <div class="help-section">
+        <h3>Movement</h3>
+        <div class="help-row"><span class="help-key"><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd></span><span class="help-desc">Navigate</span></div>
+        <div class="help-row"><span class="help-key"><kbd>Mouse</kbd></span><span class="help-desc">Look around</span></div>
+        <div class="help-row"><span class="help-key"><kbd>Space</kbd></span><span class="help-desc">Ascend</span></div>
+        <div class="help-row"><span class="help-key"><kbd>Shift</kbd></span><span class="help-desc">Descend</span></div>
+      </div>
+      <div class="help-section">
+        <h3>Equipment</h3>
+        <div class="help-row"><span class="help-key"><kbd>F</kbd></span><span class="help-desc">Toggle flashlight</span></div>
+        <div class="help-row"><span class="help-key"><kbd>E</kbd></span><span class="help-desc">Sonar ping</span></div>
+      </div>
+      <div class="help-section">
+        <h3>Interface</h3>
+        <div class="help-row"><span class="help-key"><kbd>C</kbd></span><span class="help-desc">Creature locator</span></div>
+        <div class="help-row"><span class="help-key"><kbd>1</kbd>-<kbd>9</kbd></span><span class="help-desc">Track creature</span></div>
+        <div class="help-row"><span class="help-key"><kbd>0</kbd></span><span class="help-desc">Stop tracking</span></div>
+        <div class="help-row"><span class="help-key"><kbd>H</kbd></span><span class="help-desc">Toggle this help</span></div>
+        <div class="help-row"><span class="help-key"><kbd>Esc</kbd></span><span class="help-desc">Release mouse / Pause</span></div>
+      </div>
+      <div class="help-dismiss">Press <kbd>H</kbd> to close</div>
     </div>
   </div>
 
