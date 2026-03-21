@@ -104,6 +104,15 @@ The cycle is slightly different:
 2. The **cloud agent** picks up the comments naturally and pushes fixes
 3. **Orchestrator** re-dispatches the reviewer when the cloud agent signals completion
 
+### Coexisting with External GitHub Copilot Reviews
+
+GitHub may be configured with an external Copilot reviewer that automatically reviews every PR. When this is the case:
+
+- **Poll before reviewing**: The orchestrator should use `mcp_io_github_git_pull_request_read` with `method: "get_reviews"` and `method: "get_review_comments"` to check for external reviews before dispatching the local Reviewer.
+- **Don't duplicate feedback**: If the external reviewer already flagged an issue, the local Reviewer should skip it and focus on anything the external reviewer missed.
+- **Merge readiness**: A PR needs no outstanding `REQUEST_CHANGES` from **any** reviewer (external or local) before it can be merged.
+- **Re-poll after fixes**: When a worker pushes fixes, the external reviewer may run again. The orchestrator should poll for new external reviews before re-dispatching the local Reviewer.
+
 ## Return Format
 
 Always return a structured result to the orchestrator:

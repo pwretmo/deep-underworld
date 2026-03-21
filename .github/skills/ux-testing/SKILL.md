@@ -157,4 +157,78 @@ Then dispatch with a prompt that includes:
 4. Affected file path
 5. Suggested fix
 
-After all workers complete, request a Reviewer for each PR.
+Fix ALL issues — not just major ones. Minor polish matters for UX quality.
+
+## Reviewing PRs
+
+GitHub is configured with an **external Copilot reviewer** that automatically reviews every PR. The orchestrator must account for both external and local reviews.
+
+### Polling for External Reviews
+
+After a worker creates or updates a PR, poll for external reviews before dispatching the local Reviewer:
+
+```
+Tool: mcp_io_github_git_pull_request_read
+Parameters:
+  owner: "pwretmo"
+  repo: "deep-underworld"
+  pullNumber: <number>
+  method: "get_reviews"
+```
+
+Also read any inline comments:
+
+```
+Tool: mcp_io_github_git_pull_request_read
+Parameters:
+  owner: "pwretmo"
+  repo: "deep-underworld"
+  pullNumber: <number>
+  method: "get_review_comments"
+```
+
+Poll every ~30 seconds, up to ~2 minutes, for the external review to appear. If it doesn't arrive, proceed with the local Reviewer anyway.
+
+### Handling External Review Feedback
+
+- If the external reviewer **requests changes**, extract the comments and re-dispatch the Local Worker to fix them — don't dispatch the local Reviewer yet.
+- If the external reviewer **approves** (or doesn't appear), dispatch the local Reviewer as normal.
+- After any fix push, poll again — the push may trigger a new external review round.
+
+### Dispatching the Local Reviewer
+
+```
+runSubagent  agentName: "Reviewer"
+  prompt: "You are a Reviewer agent for the deep-underworld repo (owner: pwretmo, repo: deep-underworld).
+  Review PR #<number>.
+  Follow the review-workflow skill in .github/skills/review-workflow/SKILL.md.
+  ..."
+```
+
+If either the external review or local Reviewer requests changes, re-dispatch the worker with the combined feedback, then re-review. Max 3 rounds per PR.
+
+A PR is ready for merge only when it has **no outstanding `REQUEST_CHANGES` reviews** from any source.
+
+## Merging Approved PRs
+
+After PRs are approved (`agent-approved` label), dispatch the Merger:
+
+```
+runSubagent  agentName: "Merger"
+  prompt: "You are a Merger agent for the deep-underworld repo (owner: pwretmo, repo: deep-underworld).
+  Follow the merge-workflow skill in .github/skills/merge-workflow/SKILL.md.
+  Find all open PRs labeled 'agent-approved' and squash-merge them one at a time.
+  After each merge, pull main locally and run npm run build to verify.
+  Clean up worktrees for any merged local branches."
+```
+
+If a merge causes a build failure, stop and report — do not continue merging.
+
+## Post-Merge Verification
+
+After merges are done:
+
+1. Kill and restart the dev server: `npm run dev`
+2. Reload the game in the browser
+3. Re-test the specific areas where fixes were applied
+4. Confirm each fix is working and note any regressions
