@@ -212,6 +212,7 @@ export class Game {
     if (this.oxygen <= 0) {
       this.gameOver = true;
       this.running = false;
+      this.hud.closeLocator();
       this.gameOverOverlay.classList.add('visible');
       this._pauseAudio();
       this.player.unlock();
