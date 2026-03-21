@@ -37,7 +37,7 @@ export class Game {
     this.scene.add(this.camera);
 
     // Systems
-    this.player = new Player(this.camera, this.renderer.domElement);
+    this.player = new Player(this.camera, this.renderer.domElement, this.renderer);
     this.ocean = new Ocean(this.scene);
     this.terrain = new Terrain(this.scene);
     this.flora = new Flora(this.scene);
@@ -337,6 +337,10 @@ export class Game {
 
     // Update systems
     this.player.update(dt);
+    // Sync fog into volumetric beam shaders so they fade with scene fog
+    if (this.flashlightOn) {
+      this.player.updateFogUniforms(this._fog);
+    }
     this.ocean.update(dt, depth, this.player.position);
     this.terrain.update(this.player.position);
     this.flora.update(dt, this.player.position);

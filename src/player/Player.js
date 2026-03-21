@@ -1,4 +1,9 @@
 import * as THREE from 'three';
+import {
+  createVolumetricBeamMaterial,
+  createFallbackBeamMaterial,
+  createVolumetricDustMaterial,
+} from '../shaders/VolumetricBeamMaterial.js';
 
 // Soft circular particle texture (avoids hard square pixels)
 function createDustTexture() {
@@ -18,8 +23,29 @@ function createDustTexture() {
   return tex;
 }
 
+/**
+ * Detect if the GPU can handle volumetric shaders.
+ * Falls back on OES_standard_derivatives absence or low max texture units.
+ */
+function canUseVolumetricBeam(renderer) {
+  if (!renderer) return false;
+  const gl = renderer.getContext();
+  if (!gl) return false;
+  // Require at least 8 texture units and standard derivatives
+  const maxTexUnits = gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS);
+  if (maxTexUnits < 8) return false;
+  // WebGL2 always supports derivatives; for WebGL1, check extension
+  if (!gl.getExtension || gl instanceof WebGL2RenderingContext) return true;
+  return !!gl.getExtension('OES_standard_derivatives');
+}
+
 export class Player {
-  constructor(camera, domElement) {
+  /**
+   * @param {THREE.PerspectiveCamera} camera
+   * @param {HTMLElement} domElement
+   * @param {THREE.WebGLRenderer} [renderer] - optional, used for GPU capability detection
+   */
+  constructor(camera, domElement, renderer) {
     this.camera = camera;
     this.domElement = domElement;
     this.position = camera.position;
@@ -35,6 +61,9 @@ export class Player {
     this.locked = false;
     this.mouseSensitivity = 0.002;
 
+    // Volumetric quality: true = shader-based beam, false = flat fallback
+    this._volumetricEnabled = canUseVolumetricBeam(renderer);
+
     // Submarine flashlight
     this.flashlight = new THREE.Group();
     const spotlight = new THREE.SpotLight(0xccddff, 72, 108, Math.PI / 7, 0.3, 1.55);
@@ -43,27 +72,29 @@ export class Player {
     this.flashlight.add(spotlight);
     this.flashlight.add(spotlight.target);
 
-    // Volumetric light cone
+    // Volumetric light cone — uses shader or flat fallback based on GPU capability
     const coneLength = 50;
     const coneRadius = Math.tan(Math.PI / 7) * coneLength;
-    const coneGeo = new THREE.ConeGeometry(coneRadius, coneLength, 32, 1, true);
+    const coneGeo = new THREE.ConeGeometry(coneRadius, coneLength, 32, 8, true);
     coneGeo.translate(0, -coneLength / 2, 0);
     coneGeo.rotateX(Math.PI / 2);
-    this.lightCone = new THREE.Mesh(coneGeo, new THREE.MeshBasicMaterial({
-      color: 0x8899bb,
-      transparent: true,
-      opacity: 0.022,
-      blending: THREE.AdditiveBlending,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    }));
+
+    if (this._volumetricEnabled) {
+      this._beamMaterial = createVolumetricBeamMaterial();
+      this._beamMaterial.uniforms.beamLength.value = coneLength;
+    } else {
+      this._beamMaterial = createFallbackBeamMaterial();
+    }
+    this.lightCone = new THREE.Mesh(coneGeo, this._beamMaterial);
     this.flashlight.add(this.lightCone);
 
     // Dust particles in the beam
-    const dustCount = 500;
+    const dustCount = 600;
     const dustGeo = new THREE.BufferGeometry();
     const dustPositions = new Float32Array(dustCount * 3);
     const dustSizes = new Float32Array(dustCount);
+    const dustPhases = new Float32Array(dustCount);
+    const dustSpeeds = new Float32Array(dustCount);
     for (let i = 0; i < dustCount; i++) {
       const z = -Math.random() * coneLength;
       const maxR = Math.tan(Math.PI / 7) * Math.abs(z) * 0.8;
@@ -72,23 +103,38 @@ export class Player {
       dustPositions[i * 3] = Math.cos(angle) * r;
       dustPositions[i * 3 + 1] = Math.sin(angle) * r;
       dustPositions[i * 3 + 2] = z;
-      dustSizes[i] = 0.05 + Math.random() * 0.12;
+      dustSizes[i] = 0.6 + Math.random() * 1.4;
+      dustPhases[i] = Math.random();
+      // Particles deeper in the beam drift more slowly (depth cue)
+      const depthT = Math.abs(z) / coneLength;
+      dustSpeeds[i] = 0.3 + (1.0 - depthT) * 0.7;
     }
     dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPositions, 3));
     dustGeo.setAttribute('size', new THREE.BufferAttribute(dustSizes, 1));
+    dustGeo.setAttribute('phase', new THREE.BufferAttribute(dustPhases, 1));
+
     const dustTexture = createDustTexture();
-    this.dustParticles = new THREE.Points(dustGeo, new THREE.PointsMaterial({
-      color: 0x99aacc,
-      size: 0.08,
-      map: dustTexture,
-      transparent: true,
-      opacity: 0.35,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      sizeAttenuation: true,
-    }));
+
+    if (this._volumetricEnabled) {
+      this._dustMaterial = createVolumetricDustMaterial(dustTexture);
+      this._dustMaterial.uniforms.beamLength.value = coneLength;
+    } else {
+      this._dustMaterial = new THREE.PointsMaterial({
+        color: 0x99aacc,
+        size: 0.08,
+        map: dustTexture,
+        transparent: true,
+        opacity: 0.35,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        sizeAttenuation: true,
+      });
+    }
+
+    this.dustParticles = new THREE.Points(dustGeo, this._dustMaterial);
     this.flashlight.add(this.dustParticles);
     this._dustBasePositions = dustPositions.slice();
+    this._dustSpeeds = dustSpeeds;
     this._dustConeLength = coneLength;
 
     this.flashlight.visible = false;
@@ -187,15 +233,49 @@ export class Player {
     if (this.flashlight.visible && this.dustParticles) {
       const pos = this.dustParticles.geometry.attributes.position;
       const time = performance.now() * 0.001;
+
       for (let i = 0; i < pos.count; i++) {
         const bx = this._dustBasePositions[i * 3];
         const by = this._dustBasePositions[i * 3 + 1];
         const bz = this._dustBasePositions[i * 3 + 2];
-        pos.setX(i, bx + Math.sin(time * 0.3 + i * 0.7) * 0.15);
-        pos.setY(i, by + Math.cos(time * 0.4 + i * 0.5) * 0.15);
-        pos.setZ(i, bz + Math.sin(time * 0.2 + i * 0.3) * 0.1);
+        const spd = this._dustSpeeds[i];
+
+        // Turbulent drift: speed varies per particle, deeper ones drift slower
+        pos.setX(i, bx + Math.sin(time * 0.3 * spd + i * 0.7) * 0.18 * spd);
+        pos.setY(i, by + Math.cos(time * 0.4 * spd + i * 0.5) * 0.18 * spd);
+        pos.setZ(i, bz + Math.sin(time * 0.2 * spd + i * 0.3) * 0.12 * spd);
       }
       pos.needsUpdate = true;
+
+      // Update volumetric dust shader time
+      if (this._volumetricEnabled && this._dustMaterial.uniforms) {
+        this._dustMaterial.uniforms.time.value = time;
+      }
+    }
+
+    // Update volumetric beam shader uniforms
+    if (this.flashlight.visible && this._volumetricEnabled && this._beamMaterial.uniforms) {
+      this._beamMaterial.uniforms.time.value = performance.now() * 0.001;
+    }
+  }
+
+  /**
+   * Sync fog uniforms from the scene fog so the beam and particles fade properly.
+   * Called by Game._animate() each frame when flashlight is on.
+   * @param {THREE.Fog} fog
+   */
+  updateFogUniforms(fog) {
+    if (!this._volumetricEnabled || !fog) return;
+    const beamU = this._beamMaterial.uniforms;
+    beamU.fogColor.value.copy(fog.color);
+    beamU.fogNear.value = fog.near;
+    beamU.fogFar.value = fog.far;
+
+    if (this._dustMaterial.uniforms) {
+      const dustU = this._dustMaterial.uniforms;
+      dustU.fogColor.value.copy(fog.color);
+      dustU.fogNear.value = fog.near;
+      dustU.fogFar.value = fog.far;
     }
   }
 }
