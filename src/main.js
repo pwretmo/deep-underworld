@@ -9,6 +9,5 @@ document.getElementById('start-btn').addEventListener('click', () => {
 });
 
 document.getElementById('restart-btn').addEventListener('click', () => {
-  document.getElementById('game-over').classList.remove('visible');
   game.restart();
 });

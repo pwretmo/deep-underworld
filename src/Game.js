@@ -98,7 +98,6 @@ export class Game {
       this._pauseAudio();
     });
     this.pauseOverlay.addEventListener('click', () => {
-      this.pauseOverlay.classList.remove('visible');
       this.player.lock();
     });
   }
@@ -118,6 +117,7 @@ export class Game {
     this.flashlightOn = false;
     this.pendingStart = false;
     this.running = false;
+    this.gameOverOverlay.classList.add('visible');
     this.player.reset();
     this.creatures.reset();
     this.player.flashlight.visible = false;
@@ -140,6 +140,7 @@ export class Game {
     this.pendingStart = false;
     this.running = true;
     this.menuOverlay.classList.add('hidden');
+    this.gameOverOverlay.classList.remove('visible');
     this.pauseOverlay.classList.remove('visible');
     this._resumeAudio();
     this.clock.start();
