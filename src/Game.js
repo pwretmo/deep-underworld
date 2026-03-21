@@ -145,6 +145,7 @@ export class Game {
   }
 
   restart() {
+    this.hud.closeLocator();
     this.oxygen = 100;
     this.battery = 100;
     this.gameOver = false;
@@ -206,6 +207,7 @@ export class Game {
     const dt = Math.min(this.clock.getDelta(), 0.05);
     if (!this.running || this.gameOver || (!this.player.locked && !this.autoplay)) return;
 
+    try {
     // FPS counter
     this._fpsFrames++;
     this._fpsTime += dt;
@@ -267,6 +269,9 @@ export class Game {
 
     // Render with post-processing
     this.underwaterEffect.render(depth);
+    } catch (err) {
+      console.error('[deep-underworld] Animation frame error:', err);
+    }
   }
 
   _initEnvironmentColors() {

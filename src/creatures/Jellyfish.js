@@ -301,6 +301,10 @@ export class Jellyfish {
     }
   }
 
+  getPosition() {
+    return this.group.position;
+  }
+
   getPositions() {
     return this.jellies.map(j => j.group.position);
   }
