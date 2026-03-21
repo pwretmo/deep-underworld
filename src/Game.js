@@ -156,7 +156,11 @@ export class Game {
     this.creatures.reset();
     this.player.flashlight.visible = false;
     this.pauseOverlay.classList.remove('visible');
-    this.start();
+    if (this.autoplay) {
+      this.startAutoplay();
+    } else {
+      this.start();
+    }
   }
 
   _toggleControlsHelp() {
