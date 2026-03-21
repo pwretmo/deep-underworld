@@ -172,6 +172,7 @@ export class Game {
   startAutoplay() {
     if (this.running) return;
     this.preload.cancel('autoplay-start');
+    this.preload.startDescentAssistFromSnapshot();
     this._startTransition.startRequested = false;
     this._startTransition.started = true;
     this.autoplay = true;
@@ -224,6 +225,7 @@ export class Game {
     this._startTransition.startRequested = false;
     this._startTransition.started = true;
     this.pendingStart = false;
+    this.preload.startDescentAssistFromSnapshot();
     this.menuOverlay.classList.add('hidden');
     this.gameOverOverlay.classList.remove('visible');
     this.pauseOverlay.classList.remove('visible');
@@ -294,6 +296,7 @@ export class Game {
 
     // Update descent transition overlay
     if (this._descentActive) {
+      this.preload.pumpDescentAssist();
       const progress = this.creatures.getLoadProgress();
       if (progress.total > 0) {
         const pct = Math.min(100, (progress.loaded / progress.total) * 100);

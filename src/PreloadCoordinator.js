@@ -10,6 +10,7 @@ const MAX_PRELOADED_CREATURES = 12;
 const MAX_PRELOADED_TERRAIN_CHUNKS = 6;
 const MAX_PRELOADED_FLORA_CHUNKS = 5;
 const FRAME_BUDGET_MS = 6;
+const DESCENT_ASSIST_FRAME_BUDGET_MS = 5;
 const WRITE_THROTTLE_MS = 5000;
 const ENTRY_TTL_MS = 1000 * 60 * 60 * 24;
 const INDEXED_DB_SIZE_CEILING = 3 * 1024 * 1024;
@@ -32,6 +33,15 @@ export class PreloadCoordinator {
     this.cacheKey = this._buildCacheKey();
     this.runtimeCache = new Map();
     this.persistenceDisabledForSession = false;
+    this._advisorySnapshot = null;
+    this._skipLookupWarmupFromSnapshot = false;
+    this._descentAssist = {
+      active: false,
+      prepared: false,
+      targetCreaturePreload: 0,
+      targetTerrainChunks: 0,
+      targetFloraChunks: 0,
+    };
 
     this._cache = new ProceduralStartupCache({
       cacheKey: this.cacheKey,
@@ -59,12 +69,53 @@ export class PreloadCoordinator {
     this.state = 'cancelled';
   }
 
+  startDescentAssistFromSnapshot() {
+    if (!this._advisorySnapshot) {
+      this._descentAssist.active = false;
+      return false;
+    }
+
+    this._descentAssist.active = true;
+    this._descentAssist.prepared = false;
+    this._descentAssist.targetCreaturePreload = this._advisorySnapshot.creaturePreloaded;
+    this._descentAssist.targetTerrainChunks = this._advisorySnapshot.terrainChunks;
+    this._descentAssist.targetFloraChunks = this._advisorySnapshot.floraChunks;
+    return true;
+  }
+
+  pumpDescentAssist() {
+    if (!this._descentAssist.active) return;
+
+    if (!this._descentAssist.prepared) {
+      this.creatures.prepareInitialQueue(this.player.position);
+      this.terrain.preloadPrepareAround(this.player.position);
+      this.flora.preloadPrepareAround(this.player.position);
+      this._descentAssist.prepared = true;
+    }
+
+    const start = performance.now();
+    while (performance.now() - start < DESCENT_ASSIST_FRAME_BUDGET_MS) {
+      let didWork = false;
+
+      didWork = this._pumpDescentCreatureAssist() || didWork;
+      didWork = this._pumpDescentTerrainAssist() || didWork;
+      didWork = this._pumpDescentFloraAssist() || didWork;
+
+      if (!didWork) break;
+    }
+
+    if (this._isDescentAssistComplete()) {
+      this._descentAssist.active = false;
+    }
+  }
+
   async _runWarmup(token) {
     try {
       await this._cache.init();
       const cached = await this._cache.readSnapshot();
-      if (cached) {
-        this.runtimeCache.set('startupSnapshot', cached);
+      const advisorySnapshot = this._normalizeSnapshot(cached);
+      if (advisorySnapshot) {
+        this._applyAdvisorySnapshot(advisorySnapshot);
       }
 
       await this._runBudgeted(token, () => this._warmGpuOnce(token));
@@ -170,6 +221,7 @@ export class PreloadCoordinator {
 
   _warmNonAudioLookups(token) {
     if (token.cancelled) return true;
+    if (this._skipLookupWarmupFromSnapshot) return true;
 
     if (!this._lookupPlan) {
       this._lookupPlan = this._buildLookupPlan();
@@ -192,6 +244,83 @@ export class PreloadCoordinator {
       }
     }
     return plan;
+  }
+
+  _pumpDescentCreatureAssist() {
+    const target = this._descentAssist.targetCreaturePreload;
+    if (target <= 0) return false;
+
+    const progress = this.creatures.getLoadProgress();
+    if (progress.loaded >= target) return false;
+    if (this.creatures.getSpawnQueueLength() === 0) return false;
+
+    this.creatures.preloadDrain(1);
+    return true;
+  }
+
+  _pumpDescentTerrainAssist() {
+    const target = this._descentAssist.targetTerrainChunks;
+    if (target <= 0) return false;
+    if (this.terrain.getChunkCount() >= target) return false;
+    if (this.terrain.getPendingCount() === 0) return false;
+
+    this.terrain.preloadDrain(1);
+    return true;
+  }
+
+  _pumpDescentFloraAssist() {
+    const target = this._descentAssist.targetFloraChunks;
+    if (target <= 0) return false;
+    if (this.flora.getChunkCount() >= target) return false;
+    if (this.flora.getPendingCount() === 0) return false;
+
+    this.flora.preloadDrain(1);
+    return true;
+  }
+
+  _isDescentAssistComplete() {
+    const creatureDone =
+      this.creatures.getLoadProgress().loaded >= this._descentAssist.targetCreaturePreload ||
+      this.creatures.getSpawnQueueLength() === 0;
+    const terrainDone =
+      this.terrain.getChunkCount() >= this._descentAssist.targetTerrainChunks ||
+      this.terrain.getPendingCount() === 0;
+    const floraDone =
+      this.flora.getChunkCount() >= this._descentAssist.targetFloraChunks ||
+      this.flora.getPendingCount() === 0;
+
+    return creatureDone && terrainDone && floraDone;
+  }
+
+  _normalizeSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') return null;
+    if (snapshot.cacheKey !== this.cacheKey) return null;
+    if (snapshot.schemaVersion !== SCHEMA_VERSION) return null;
+    if (snapshot.worldSeed !== this.worldSeed) return null;
+    if (snapshot.qualityTier !== this.qualityTier) return null;
+
+    return {
+      cacheKey: snapshot.cacheKey,
+      schemaVersion: snapshot.schemaVersion,
+      worldSeed: snapshot.worldSeed,
+      qualityTier: snapshot.qualityTier,
+      creaturePreloaded: this._clampInt(snapshot.creaturePreloaded, 0, MAX_PRELOADED_CREATURES),
+      terrainChunks: this._clampInt(snapshot.terrainChunks, 0, MAX_PRELOADED_TERRAIN_CHUNKS),
+      floraChunks: this._clampInt(snapshot.floraChunks, 0, MAX_PRELOADED_FLORA_CHUNKS),
+      lookupChecksum: Number.isFinite(snapshot.lookupChecksum) ? snapshot.lookupChecksum : null,
+      createdAt: this._clampInt(snapshot.createdAt, 0, Number.MAX_SAFE_INTEGER),
+    };
+  }
+
+  _applyAdvisorySnapshot(snapshot) {
+    this._advisorySnapshot = snapshot;
+    this.runtimeCache.set('startupSnapshot', snapshot);
+    this._skipLookupWarmupFromSnapshot = snapshot.lookupChecksum !== null;
+  }
+
+  _clampInt(value, min, max) {
+    if (!Number.isFinite(value)) return min;
+    return Math.max(min, Math.min(max, Math.floor(value)));
   }
 
   _createSnapshot() {
