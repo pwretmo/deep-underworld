@@ -24,6 +24,8 @@ export class Game {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.8;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.domElement.id = 'game-canvas';
+    this.renderer.domElement.dataset.testid = 'game-canvas';
     document.body.appendChild(this.renderer.domElement);
 
     // Camera
@@ -41,12 +43,22 @@ export class Game {
     this.audio = new AudioManager();
     this.underwaterEffect = new UnderwaterEffect(this.renderer, this.scene, this.camera);
 
+    // Alias so automated tests can use game.creatureManager or game.creatures
+    this.creatureManager = this.creatures;
+
+    // FPS tracking for automated testing
+    this.fps = 0;
+    this._fpsFrames = 0;
+    this._fpsTime = 0;
+
     // Game state
     this.oxygen = 100;
     this.battery = 100;
     this.flashlightOn = false;
     this.gameOver = false;
     this.maxDepth = 0;
+    this.depth = 0;
+    this.autoplay = false;
     this.menuOverlay = document.getElementById('menu');
     this.pauseOverlay = document.getElementById('paused');
     this.gameOverOverlay = document.getElementById('game-over');
@@ -112,6 +124,24 @@ export class Game {
     this.pauseOverlay.classList.remove('visible');
     this.player.lock();
     this.audio.start();
+    console.log('[deep-underworld] Game starting...');
+  }
+
+  /**
+   * Start in autoplay mode — skips pointer lock so Chrome DevTools MCP can
+   * drive the game via press_key / evaluate_script without user gestures.
+   */
+  startAutoplay() {
+    if (this.running) return;
+    this.autoplay = true;
+    this.player.locked = true; // simulate lock without real pointer lock
+    this.menuOverlay.classList.add('hidden');
+    this.gameOverOverlay.classList.remove('visible');
+    this.pauseOverlay.classList.remove('visible');
+    this.running = true;
+    this.audio.start();
+    this.clock.start();
+    console.log('[deep-underworld] Autoplay mode active');
   }
 
   restart() {
@@ -126,7 +156,11 @@ export class Game {
     this.creatures.reset();
     this.player.flashlight.visible = false;
     this.pauseOverlay.classList.remove('visible');
-    this.start();
+    if (this.autoplay) {
+      this.startAutoplay();
+    } else {
+      this.start();
+    }
   }
 
   _toggleControlsHelp() {
@@ -153,6 +187,7 @@ export class Game {
     this.pauseOverlay.classList.remove('visible');
     this._resumeAudio();
     this.clock.start();
+    console.log('[deep-underworld] Gameplay started');
   }
 
   _pauseAudio() {
@@ -169,9 +204,20 @@ export class Game {
     requestAnimationFrame(() => this._animate());
 
     const dt = Math.min(this.clock.getDelta(), 0.05);
-    if (!this.running || this.gameOver || !this.player.locked) return;
+    if (!this.running || this.gameOver || (!this.player.locked && !this.autoplay)) return;
+
+    // FPS counter
+    this._fpsFrames++;
+    this._fpsTime += dt;
+    if (this._fpsTime >= 1) {
+      this.fps = Math.round(this._fpsFrames / this._fpsTime);
+      this._fpsFrames = 0;
+      this._fpsTime = 0;
+    }
 
     const depth = Math.max(0, -this.player.position.y);
+    this.depth = depth;
+    this.player.depth = depth;
 
     // Update systems
     this.player.update(dt);
@@ -216,6 +262,7 @@ export class Game {
       this.gameOverOverlay.classList.add('visible');
       this._pauseAudio();
       this.player.unlock();
+      console.log('[deep-underworld] Game over — oxygen depleted at depth ' + Math.floor(depth) + 'm');
     }
 
     // Render with post-processing

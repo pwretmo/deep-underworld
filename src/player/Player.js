@@ -100,6 +100,9 @@ export class Player {
     this.subLight = new THREE.PointLight(0x112233, 0.2, 5);
     camera.add(this.subLight);
 
+    /** Current depth (positive = deeper). Updated by Game._animate(). */
+    this.depth = 0;
+
     // Head bobbing
     this.bobTime = 0;
     this.bobAmount = 0.03;
