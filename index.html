@@ -46,6 +46,31 @@
       50% { opacity: 0.7; }
     }
 
+    #descent-transition {
+      position: fixed; inset: 0; z-index: 150;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: radial-gradient(ellipse at center, #0a1628ee 0%, #020408f5 70%, #000 100%);
+      color: #88ccff; font-family: 'Segoe UI', sans-serif;
+      opacity: 0; visibility: hidden; pointer-events: none;
+      transition: opacity 0.8s ease, visibility 0s linear 0.8s;
+    }
+    #descent-transition.visible { opacity: 1; visibility: visible; pointer-events: auto; transition: opacity 0.8s ease, visibility 0s linear 0s; }
+    #descent-transition.fade-out { opacity: 0; visibility: hidden; transition: opacity 0.8s ease, visibility 0s linear 0.8s; }
+    #descent-transition h2 {
+      font-size: 1.8rem; letter-spacing: 0.3em; text-transform: uppercase;
+      text-shadow: 0 0 30px #0066ff66, 0 0 60px #0044aa33;
+      animation: pulse 2.5s ease-in-out infinite;
+    }
+    #descent-progress-track {
+      margin-top: 2rem; width: 180px; height: 2px;
+      background: #ffffff08; border-radius: 1px; overflow: hidden;
+    }
+    #descent-progress-bar {
+      height: 100%; width: 0%; background: #4488aa;
+      box-shadow: 0 0 6px #22aaff44; border-radius: 1px;
+      transition: width 0.15s ease;
+    }
+
     #hud {
       position: fixed; inset: 0; z-index: 50; pointer-events: none;
       font-family: 'Courier New', monospace; color: #88ccff;
@@ -245,6 +270,11 @@
 </head>
 <body>
   <div id="loading" role="status" aria-label="Loading">INITIALIZING SYSTEMS...</div>
+
+  <div id="descent-transition">
+    <h2>Descending...</h2>
+    <div id="descent-progress-track"><div id="descent-progress-bar"></div></div>
+  </div>
 
   <div id="menu" role="dialog" aria-label="Main menu">
     <h1>Deep Underworld</h1>

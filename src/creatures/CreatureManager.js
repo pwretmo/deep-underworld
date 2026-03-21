@@ -44,6 +44,9 @@ export class CreatureManager {
     this.spawnTimer = 0;
     this.lastDepth = 0;
     this.initialized = false;
+    this._spawnQueue = [];
+    this._spawnTotal = 0;
+    this._spawnedCount = 0;
   }
 
   _rndPos(playerPos, hRange, yBase, yRange) {
@@ -67,173 +70,224 @@ export class CreatureManager {
     this.creatures.push({ type, instance, depthMin, depthMax });
   }
 
+  _queueAdd(type, createFn, depthMin, depthMax) {
+    this._spawnQueue.push({ type, createFn, depthMin, depthMax });
+  }
+
   _spawnInitialCreatures(playerPos) {
     // ── Original creatures ──
 
     // Jellyfish – twilight zone
-    this._add('jellyfish',
-      new Jellyfish(this.scene, new THREE.Vector3(playerPos.x + 20, -80, playerPos.z + 20), 6),
+    this._queueAdd('jellyfish',
+      () => new Jellyfish(this.scene, new THREE.Vector3(playerPos.x + 20, -80, playerPos.z + 20), 6),
       30, 400);
-    this._add('jellyfish',
-      new Jellyfish(this.scene, new THREE.Vector3(playerPos.x - 30, -150, playerPos.z - 40), 5),
+    this._queueAdd('jellyfish',
+      () => new Jellyfish(this.scene, new THREE.Vector3(playerPos.x - 30, -150, playerPos.z - 40), 5),
       30, 400);
 
     // Anglerfish – dark zone
     for (let i = 0; i < 3; i++) {
       const a = (i / 3) * Math.PI * 2;
-      this._add('anglerfish',
-        new Anglerfish(this.scene, new THREE.Vector3(
-          playerPos.x + Math.cos(a) * 50, -200 - Math.random() * 200, playerPos.z + Math.sin(a) * 50)),
+      const ax = playerPos.x + Math.cos(a) * 50;
+      const ay = -200 - Math.random() * 200;
+      const az = playerPos.z + Math.sin(a) * 50;
+      this._queueAdd('anglerfish',
+        () => new Anglerfish(this.scene, new THREE.Vector3(ax, ay, az)),
         150, 800);
     }
 
     // Ghost sharks
     for (let i = 0; i < 2; i++) {
-      this._add('ghostshark',
-        new GhostShark(this.scene, this._rndPos(playerPos, 80, -100, 200)),
+      const p = this._rndPos(playerPos, 80, -100, 200);
+      this._queueAdd('ghostshark',
+        () => new GhostShark(this.scene, p),
         50, 600);
     }
 
     // Leviathans
-    this._add('leviathan',
-      new Leviathan(this.scene, new THREE.Vector3(playerPos.x, -400, playerPos.z)),
+    this._queueAdd('leviathan',
+      () => new Leviathan(this.scene, new THREE.Vector3(playerPos.x, -400, playerPos.z)),
       300, 2000);
-    this._add('leviathan',
-      new Leviathan(this.scene, new THREE.Vector3(playerPos.x + 100, -600, playerPos.z + 100)),
+    this._queueAdd('leviathan',
+      () => new Leviathan(this.scene, new THREE.Vector3(playerPos.x + 100, -600, playerPos.z + 100)),
       400, 2000);
 
     // Deep Ones
-    this._add('deepone',
-      new DeepOne(this.scene, new THREE.Vector3(playerPos.x - 60, -350, playerPos.z + 80)),
+    this._queueAdd('deepone',
+      () => new DeepOne(this.scene, new THREE.Vector3(playerPos.x - 60, -350, playerPos.z + 80)),
       250, 2000);
-    this._add('deepone',
-      new DeepOne(this.scene, new THREE.Vector3(playerPos.x + 80, -550, playerPos.z - 60)),
+    this._queueAdd('deepone',
+      () => new DeepOne(this.scene, new THREE.Vector3(playerPos.x + 80, -550, playerPos.z - 60)),
       400, 2000);
 
     // ── Giger biomechanical creatures ──
 
     // Shallow / wide-depth creatures
-    for (let i = 0; i < 2; i++)
-      this._add('needlefish',
-        new NeedleFish(this.scene, this._rndPos(playerPos, 90, -60, 150)),
+    for (let i = 0; i < 2; i++) {
+      const p = this._rndPos(playerPos, 90, -60, 150);
+      this._queueAdd('needlefish',
+        () => new NeedleFish(this.scene, p),
         30, 600);
+    }
 
-    for (let i = 0; i < 2; i++)
-      this._add('parasite',
-        new Parasite(this.scene, this._rndPos(playerPos, 70, -80, 200)),
+    for (let i = 0; i < 2; i++) {
+      const p = this._rndPos(playerPos, 70, -80, 200);
+      this._queueAdd('parasite',
+        () => new Parasite(this.scene, p),
         50, 800);
+    }
 
-    this._add('biomechcrab',
-      new BioMechCrab(this.scene, this._rndPos(playerPos, 60, -100, 120)),
-      60, 500);
+    { const p = this._rndPos(playerPos, 60, -100, 120);
+    this._queueAdd('biomechcrab',
+      () => new BioMechCrab(this.scene, p),
+      60, 500); }
 
-    this._add('sporecloud',
-      new SporeCloud(this.scene, this._rndPos(playerPos, 80, -70, 100)),
-      40, 500);
+    { const p = this._rndPos(playerPos, 80, -70, 100);
+    this._queueAdd('sporecloud',
+      () => new SporeCloud(this.scene, p),
+      40, 500); }
 
     // Mid-depth
-    this._add('boneworm',
-      new BoneWorm(this.scene, this._rndPos(playerPos, 70, -180, 150)),
-      120, 700);
+    { const p = this._rndPos(playerPos, 70, -180, 150);
+    this._queueAdd('boneworm',
+      () => new BoneWorm(this.scene, p),
+      120, 700); }
 
-    this._add('spinaleel',
-      new SpinalEel(this.scene, this._rndPos(playerPos, 80, -200, 200)),
-      150, 800);
+    { const p = this._rndPos(playerPos, 80, -200, 200);
+    this._queueAdd('spinaleel',
+      () => new SpinalEel(this.scene, p),
+      150, 800); }
 
-    this._add('sirenSkull',
-      new SirenSkull(this.scene, this._rndPos(playerPos, 80, -180, 150)),
-      120, 700);
+    { const p = this._rndPos(playerPos, 80, -180, 150);
+    this._queueAdd('sirenSkull',
+      () => new SirenSkull(this.scene, p),
+      120, 700); }
 
-    this._add('lamprey',
-      new Lamprey(this.scene, this._rndPos(playerPos, 70, -200, 200)),
-      150, 800);
+    { const p = this._rndPos(playerPos, 70, -200, 200);
+    this._queueAdd('lamprey',
+      () => new Lamprey(this.scene, p),
+      150, 800); }
 
-    this._add('voidjelly',
-      new VoidJelly(this.scene, this._rndPos(playerPos, 80, -160, 200)),
-      100, 700);
+    { const p = this._rndPos(playerPos, 80, -160, 200);
+    this._queueAdd('voidjelly',
+      () => new VoidJelly(this.scene, p),
+      100, 700); }
 
-    this._add('chaindragger',
-      new ChainDragger(this.scene, this._rndPos(playerPos, 70, -200, 150)),
-      150, 800);
+    { const p = this._rndPos(playerPos, 70, -200, 150);
+    this._queueAdd('chaindragger',
+      () => new ChainDragger(this.scene, p),
+      150, 800); }
 
-    this._add('mechoctopus',
-      new MechOctopus(this.scene, this._rndPos(playerPos, 90, -220, 200)),
-      160, 900);
+    { const p = this._rndPos(playerPos, 90, -220, 200);
+    this._queueAdd('mechoctopus',
+      () => new MechOctopus(this.scene, p),
+      160, 900); }
 
     // Deep creatures
-    this._add('tendrilhunter',
-      new TendrilHunter(this.scene, this._rndPos(playerPos, 80, -350, 200)),
-      250, 1200);
+    { const p = this._rndPos(playerPos, 80, -350, 200);
+    this._queueAdd('tendrilhunter',
+      () => new TendrilHunter(this.scene, p),
+      250, 1200); }
 
-    this._add('harvester',
-      new Harvester(this.scene, this._rndPos(playerPos, 70, -380, 200)),
-      280, 1200);
+    { const p = this._rndPos(playerPos, 70, -380, 200);
+    this._queueAdd('harvester',
+      () => new Harvester(this.scene, p),
+      280, 1200); }
 
-    this._add('abysswraith',
-      new AbyssWraith(this.scene, this._rndPos(playerPos, 90, -400, 200)),
-      300, 1500);
+    { const p = this._rndPos(playerPos, 90, -400, 200);
+    this._queueAdd('abysswraith',
+      () => new AbyssWraith(this.scene, p),
+      300, 1500); }
 
-    this._add('birthsac',
-      new BirthSac(this.scene, this._rndPos(playerPos, 60, -350, 150)),
-      250, 1200);
+    { const p = this._rndPos(playerPos, 60, -350, 150);
+    this._queueAdd('birthsac',
+      () => new BirthSac(this.scene, p),
+      250, 1200); }
 
     // Abyss creatures
-    this._add('facelessone',
-      new FacelessOne(this.scene, this._rndPos(playerPos, 80, -500, 200)),
-      400, 2000);
+    { const p = this._rndPos(playerPos, 80, -500, 200);
+    this._queueAdd('facelessone',
+      () => new FacelessOne(this.scene, p),
+      400, 2000); }
 
-    this._add('amalgam',
-      new Amalgam(this.scene, this._rndPos(playerPos, 70, -550, 200)),
-      450, 2000);
+    { const p = this._rndPos(playerPos, 70, -550, 200);
+    this._queueAdd('amalgam',
+      () => new Amalgam(this.scene, p),
+      450, 2000); }
 
-    this._add('sentinel',
-      new Sentinel(this.scene, this._rndPos(playerPos, 80, -500, 200)),
-      400, 2000);
+    { const p = this._rndPos(playerPos, 80, -500, 200);
+    this._queueAdd('sentinel',
+      () => new Sentinel(this.scene, p),
+      400, 2000); }
 
-    this._add('abyssalmaw',
-      new AbyssalMaw(this.scene, this._rndPos(playerPos, 90, -550, 250)),
-      450, 2000);
+    { const p = this._rndPos(playerPos, 90, -550, 250);
+    this._queueAdd('abyssalmaw',
+      () => new AbyssalMaw(this.scene, p),
+      450, 2000); }
 
-    this._add('ironwhale',
-      new IronWhale(this.scene, this._rndPos(playerPos, 120, -600, 300)),
-      500, 2000);
+    { const p = this._rndPos(playerPos, 120, -600, 300);
+    this._queueAdd('ironwhale',
+      () => new IronWhale(this.scene, p),
+      500, 2000); }
 
-    for (let i = 0; i < 2; i++)
-      this._add('husk',
-        new Husk(this.scene, this._rndPos(playerPos, 80, -450, 300)),
+    for (let i = 0; i < 2; i++) {
+      const p = this._rndPos(playerPos, 80, -450, 300);
+      this._queueAdd('husk',
+        () => new Husk(this.scene, p),
         350, 2000);
+    }
 
     // Stationary creatures – placed around starting area at fixed depths
-    this._add('pipeorgan',
-      new PipeOrgan(this.scene, new THREE.Vector3(playerPos.x + 40, -280, playerPos.z + 30)),
+    this._queueAdd('pipeorgan',
+      () => new PipeOrgan(this.scene, new THREE.Vector3(playerPos.x + 40, -280, playerPos.z + 30)),
       200, 1500);
-    this._add('pipeorgan',
-      new PipeOrgan(this.scene, new THREE.Vector3(playerPos.x - 50, -420, playerPos.z - 60)),
+    this._queueAdd('pipeorgan',
+      () => new PipeOrgan(this.scene, new THREE.Vector3(playerPos.x - 50, -420, playerPos.z - 60)),
       350, 1500);
 
-    this._add('tubecluster',
-      new TubeCluster(this.scene, new THREE.Vector3(playerPos.x + 30, -220, playerPos.z - 40)),
+    this._queueAdd('tubecluster',
+      () => new TubeCluster(this.scene, new THREE.Vector3(playerPos.x + 30, -220, playerPos.z - 40)),
       150, 1200);
-    this._add('tubecluster',
-      new TubeCluster(this.scene, new THREE.Vector3(playerPos.x - 40, -340, playerPos.z + 50)),
+    this._queueAdd('tubecluster',
+      () => new TubeCluster(this.scene, new THREE.Vector3(playerPos.x - 40, -340, playerPos.z + 50)),
       250, 1200);
-    this._add('tubecluster',
-      new TubeCluster(this.scene, new THREE.Vector3(playerPos.x + 60, -500, playerPos.z + 70)),
+    this._queueAdd('tubecluster',
+      () => new TubeCluster(this.scene, new THREE.Vector3(playerPos.x + 60, -500, playerPos.z + 70)),
       400, 1500);
 
-    this._add('ribcage',
-      new RibCage(this.scene, new THREE.Vector3(playerPos.x - 30, -360, playerPos.z - 30)),
+    this._queueAdd('ribcage',
+      () => new RibCage(this.scene, new THREE.Vector3(playerPos.x - 30, -360, playerPos.z - 30)),
       280, 1500);
-    this._add('ribcage',
-      new RibCage(this.scene, new THREE.Vector3(playerPos.x + 50, -520, playerPos.z + 40)),
+    this._queueAdd('ribcage',
+      () => new RibCage(this.scene, new THREE.Vector3(playerPos.x + 50, -520, playerPos.z + 40)),
       420, 1500);
 
+    this._spawnTotal = this._spawnQueue.length;
+    this._spawnedCount = 0;
     this.initialized = true;
+  }
+
+  isFullyLoaded() {
+    return this.initialized && this._spawnQueue.length === 0;
+  }
+
+  getLoadProgress() {
+    return { loaded: this._spawnedCount, total: this._spawnTotal };
   }
 
   update(dt, playerPos, depth) {
     if (!this.initialized) {
       this._spawnInitialCreatures(playerPos);
+    }
+
+    // Drain spawn queue: 3 creatures per frame
+    if (this._spawnQueue.length > 0) {
+      const batch = Math.min(3, this._spawnQueue.length);
+      for (let i = 0; i < batch; i++) {
+        const entry = this._spawnQueue.shift();
+        this._add(entry.type, entry.createFn(), entry.depthMin, entry.depthMax);
+        this._spawnedCount++;
+      }
     }
 
     this.lastDepth = depth;
@@ -393,5 +447,8 @@ export class CreatureManager {
     this.creatures = [];
     this.initialized = false;
     this.spawnTimer = 0;
+    this._spawnQueue = [];
+    this._spawnTotal = 0;
+    this._spawnedCount = 0;
   }
 }
