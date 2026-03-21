@@ -9,40 +9,34 @@ How to play-test the deep-underworld game in a browser, find UX issues, and disp
 
 ## Tool Discovery (Required First Step)
 
-The Chrome DevTools MCP tools are **deferred** — they won't be available until you load them. Before any browser interaction, run:
+Chrome DevTools MCP is configured in `.vscode/mcp.json`. Before any browser interaction, verify the MCP server is running.
 
-```
-tool_search_tool_regex  pattern: "mcp_io_github_chr"
-```
+The Chrome DevTools MCP is accessed via **Playwright code** using the `run_playwright_code` tool. You write raw Playwright JavaScript to interact with the browser — no separate MCP tools per action.
 
-This loads all Chrome DevTools tools (screenshots, clicks, keyboard, console, performance, Lighthouse, etc.). Verify that `mcp_io_github_chr_new_page` appears in the results before proceeding.
-
-If the search returns no matching tools, the Chrome DevTools MCP server is not running or not configured. **STOP immediately** — output the following and call `task_complete`:
+If the Chrome DevTools MCP process fails to start, VS Code will log errors. **STOP immediately** — output the following and call `task_complete`:
 
 > **UX TEST ABORTED — Chrome DevTools MCP unavailable.**
-> `tool_search_tool_regex` returned no results for `mcp_io_github_chr`.
-> Check `.vscode/mcp.json` and restart the VS Code MCP session, then retry.
+> Chrome DevTools MCP server failed to start or is not reachable.
+> Check `.vscode/mcp.json` configuration and MCP server logs in VS Code output panel.
+> Restart the VS Code extension host and retry.
 
 Do NOT fall back to code-based analysis, file searching, or any substitute for live browser testing.
 
-Once the tools are confirmed present, do a liveness check — open `about:blank` to verify the browser is actually reachable:
+Once ready, do a liveness check — open `about:blank` to verify the browser is actually reachable via Playwright:
 
-```
-mcp_io_github_chr_new_page
-  url: "about:blank"
+```javascript
+// Liveness check
+async (page) => {
+  await page.goto('about:blank');
+  return 'Browser is reachable';
+}
 ```
 
-If this call fails or times out, **STOP immediately** — output the following and call `task_complete`:
+If this fails or times out, **STOP immediately** — output the following and call `task_complete`:
 
 > **UX TEST ABORTED — Chrome DevTools MCP browser unreachable.**
-> The liveness check (`mcp_io_github_chr_new_page about:blank`) failed even though tools were discovered.
+> Playwright could not navigate to `about:blank`.
 > Restart the Chrome DevTools MCP server process and retry.
-
-If you also need GitHub MCP tools (for PR polling), load them too:
-
-```
-tool_search_tool_regex  pattern: "mcp_io_github_git"
-```
 
 ## Starting the Dev Server
 
@@ -57,47 +51,92 @@ Wait ~3 seconds, then open the game.
 
 ## Browser Interaction Patterns
 
+All interactions use `run_playwright_code` tool with raw Playwright JavaScript.
+
 ### Opening the game
 
-Use `?autoplay` to skip the menu and bypass pointer lock — the game starts immediately and accepts keyboard input from Chrome DevTools without needing a real user click:
-
+```javascript
+// Without autoplay (requires manual Start button click)
+async (page) => {
+  await page.goto('http://localhost:5173');
+  return 'Game loaded';
+}
 ```
-mcp_io_github_chr_new_page
-  url: "http://localhost:5173?autoplay"
-```
 
-Without `?autoplay`, you must click the Start button and handle pointer lock manually:
+Or with `?autoplay` to skip the menu:
 
-```
-mcp_io_github_chr_new_page
-  url: "http://localhost:5173"
+```javascript
+// With autoplay — game starts immediately in headless mode
+async (page) => {
+  await page.goto('http://localhost:5173?autoplay');
+  await page.waitForTimeout(2000); // Game init + creature spawn
+  return 'Game running in autoplay mode';
+}
 ```
 
 ### Taking a screenshot
 
-```
-mcp_io_github_chr_take_screenshot
-```
-
-### Reading what's on screen
-
-```
-mcp_io_github_chr_take_snapshot
+```javascript
+async (page) => {
+  const buffer = await page.screenshot();
+  // Screenshot is captured; describe what you see
+  return 'Screenshot captured (binary data)';
+}
 ```
 
-Returns the accessibility tree with element references for clickable elements.
+### Reading console errors
+
+```javascript
+async (page) => {
+  const logs = [];
+  page.on('console', msg => logs.push(`[${msg.type()}] ${msg.text()}`));
+  page.on('pageerror', err => logs.push(`[ERROR] ${err.message}`));
+  
+  // Keep page open and let errors accumulate for ~2 seconds
+  await page.waitForTimeout(2000);
+  
+  return logs.join('\n');
+}
+```
 
 ### Playing the game
 
+```javascript
+async (page) => {
+  // Move forward (W key)
+  await page.keyboard.press('w');
+  
+  // Look left/right (arrow keys)
+  await page.keyboard.press('arrowleft');
+  
+  // Wait a bit for movement animation
+  await page.waitForTimeout(500);
+  
+  return 'Input sent to game';
+}
 ```
-# Click the canvas to capture pointer lock (not needed in autoplay mode)
-mcp_io_github_chr_click  element: "#game-canvas"
 
-# Move forward
-mcp_io_github_chr_press_key  key: "w"
+### Clicking the canvas (if not autoplay)
 
-# Look around
-mcp_io_github_chr_press_key  key: "ArrowLeft"
+```javascript
+async (page) => {
+  const canvas = await page.$('#game-canvas') || await page.$('canvas');
+  if (canvas) {
+    await canvas.click();
+    await page.waitForTimeout(500);
+    return 'Canvas clicked (pointer lock acquired)';
+  }
+  return 'Canvas not found';
+}
+```
+
+### Lighthouse performance audit
+
+Use the built-in `lighthouse-mcp` tool (if available) or run via npx:
+
+```bash
+npx lighthouse http://localhost:5173?autoplay --view
+```
 
 # Open menu
 mcp_io_github_chr_press_key  key: "Escape"
