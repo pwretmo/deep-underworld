@@ -283,6 +283,16 @@ export class Game {
 
     this.preload.startDescentAssistFromSnapshot();
 
+    // Dismiss descent overlay now that priming is complete.
+    // The depth-gated spawn queue may never fully drain at shallow depth,
+    // so we dismiss here rather than waiting for isFullyLoaded().
+    this._descentActive = false;
+    this.descentOverlay.classList.add('fade-out');
+    setTimeout(() => {
+      this.descentOverlay.classList.remove('visible');
+      this.descentOverlay.classList.remove('fade-out');
+    }, 800);
+
     // Warm-up render to force shader compilation before gameplay.
     this.underwaterEffect.render(0);
 
@@ -368,18 +378,15 @@ export class Game {
     // Keep descent assist pumping in both regular and autoplay starts.
     this.preload.pumpDescentAssist();
 
-    // Update descent transition overlay
+    // Safety-net: dismiss descent overlay if still active (normally handled in _primeAndEnterGameplay)
     if (this._descentActive) {
-      const progress = this.creatures.getLoadProgress();
       this._updateDescentProgress();
-      if (this.creatures.isFullyLoaded()) {
-        this._descentActive = false;
-        this.descentOverlay.classList.add('fade-out');
-        setTimeout(() => {
-          this.descentOverlay.classList.remove('visible');
-          this.descentOverlay.classList.remove('fade-out');
-        }, 800);
-      }
+      this._descentActive = false;
+      this.descentOverlay.classList.add('fade-out');
+      setTimeout(() => {
+        this.descentOverlay.classList.remove('visible');
+        this.descentOverlay.classList.remove('fade-out');
+      }, 800);
     }
 
     // Render with post-processing
