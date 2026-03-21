@@ -24,7 +24,7 @@ export class Game {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.8;
+    this.renderer.toneMappingExposure = 0.76;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.domElement.id = 'game-canvas';
     this.renderer.domElement.dataset.testid = 'game-canvas';
@@ -45,6 +45,23 @@ export class Game {
     this.audio = new AudioManager();
     this.underwaterEffect = new UnderwaterEffect(this.renderer, this.scene, this.camera);
     this.abyssEncounter = new AbyssEncounter();
+
+    this.renderTuning = {
+      depthThresholds: {
+        mid: 120,
+        deep: 340,
+        abyss: 700,
+      },
+      exposure: {
+        surface: 0.76,
+        mid: 0.66,
+        deep: 0.55,
+        abyss: 0.48,
+        flashlightBoost: 0.08,
+        easing: 0.08,
+      },
+    };
+    this._targetExposure = this.renderer.toneMappingExposure;
 
     // Alias so automated tests can use game.creatureManager or game.creatures
     this.creatureManager = this.creatures;
@@ -295,6 +312,7 @@ export class Game {
 
     // Update underwater fog based on depth, then let encounter override if active
     this._updateEnvironmentForDepth(depth);
+    this._updateRenderPipelineForDepth(depth);
     this.abyssEncounter.update(dt, depth, this.player, this.scene, this._fog, this.ocean.ambientLight, this.hud);
 
     // Keep descent assist pumping in both regular and autoplay starts.
@@ -318,7 +336,10 @@ export class Game {
     }
 
     // Render with post-processing
-    this.underwaterEffect.render(depth);
+    this.underwaterEffect.render(depth, {
+      flashlightOn: this.flashlightOn,
+      exposure: this.renderer.toneMappingExposure,
+    });
     } catch (err) {
       console.error('[deep-underworld] Animation frame error:', err);
     }
@@ -368,5 +389,30 @@ export class Game {
     this._fog.far = fogFar;
     this.scene.background.copy(this._fogColor);
     this.ocean.ambientLight.intensity = ambientIntensity;
+  }
+
+  _updateRenderPipelineForDepth(depth) {
+    const thresholds = this.renderTuning.depthThresholds;
+    const exposure = this.renderTuning.exposure;
+
+    const midBlend = THREE.MathUtils.smoothstep(depth, thresholds.mid, thresholds.deep);
+    const deepBlend = THREE.MathUtils.smoothstep(depth, thresholds.deep, thresholds.abyss);
+
+    let target = THREE.MathUtils.lerp(exposure.surface, exposure.mid, midBlend);
+    target = THREE.MathUtils.lerp(target, exposure.deep, deepBlend);
+
+    const abyssBlend = THREE.MathUtils.smoothstep(depth, thresholds.abyss, thresholds.abyss + 280);
+    target = THREE.MathUtils.lerp(target, exposure.abyss, abyssBlend);
+
+    if (this.flashlightOn) {
+      target += exposure.flashlightBoost;
+    }
+
+    this._targetExposure = THREE.MathUtils.clamp(target, 0.42, 0.9);
+    this.renderer.toneMappingExposure = THREE.MathUtils.lerp(
+      this.renderer.toneMappingExposure,
+      this._targetExposure,
+      exposure.easing
+    );
   }
 }
