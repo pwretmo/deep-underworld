@@ -1,8 +1,11 @@
+import { MusicSystem } from './MusicSystem.js';
+
 export class AudioManager {
   constructor() {
     this.ctx = null;
     this.started = false;
     this.masterGain = null;
+    this.music = null;
 
     // Oscillator nodes
     this.drones = [];
@@ -26,6 +29,10 @@ export class AudioManager {
 
     // Sub bass rumble
     this._createDrone(25, 'sine', 0.06);
+
+    // Adaptive music system
+    this.music = new MusicSystem(this.ctx, this.masterGain);
+    this.music.start();
   }
 
   _createDrone(freq, type, vol) {
@@ -175,8 +182,13 @@ export class AudioManager {
     }
   }
 
-  update(dt, depth, nearestCreatureDist) {
+  update(dt, depth, nearestCreatureDist, oxygen) {
     if (!this.ctx) return;
+
+    // Update adaptive music
+    if (this.music) {
+      this.music.update(dt, depth, nearestCreatureDist, oxygen);
+    }
 
     // Adjust drone frequencies based on depth
     for (const drone of this.drones) {
