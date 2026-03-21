@@ -333,6 +333,7 @@ export class Jellyfish {
       driftX: (Math.random() - 0.5) * 0.4,
       driftZ: (Math.random() - 0.5) * 0.4,
       pulseSpeed: 0.8 + Math.random() * 0.4,
+      lastActiveTierName: null,
     };
   }
 
@@ -412,6 +413,12 @@ export class Jellyfish {
       const distToPlayer = jelly.group.position.distanceTo(playerPos);
       const activeTierName = this._getLodTierName(distToPlayer);
       const activeTier = jelly.tiers[activeTierName];
+
+      // Keep newly visible tiers in sync so LOD transitions don't reveal stale appendage geometry.
+      if (jelly.lastActiveTierName !== activeTierName) {
+        this._animateTierAppendages(jelly, activeTier, pulse, t);
+        jelly.lastActiveTierName = activeTierName;
+      }
 
       const squishX = 1 + pulse * 0.12;
       const squishY = 1 - pulse * 0.1;
