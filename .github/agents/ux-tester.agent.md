@@ -34,6 +34,20 @@ Read these skills before starting:
 - `.github/skills/review-workflow/SKILL.md`
 - `.github/skills/merge-workflow/SKILL.md`
 
+You must actually read those files in the current run before doing anything else. Do not rely on memory, a prior summary, or an orchestrator paraphrase.
+
+## Workflow Contract
+
+These rules are mandatory for every UX test run:
+
+1. Start by reading all four required skills.
+2. Run Phase 0 browser tool discovery and the about:blank liveness check before opening the game.
+3. Use browser-only evidence gathering for UX findings. If browser tooling is unavailable, abort exactly as the ux-testing skill requires.
+4. Use `http://localhost:5173?autoplay` for automated testing.
+5. For every issue found, use the repository's Local Worker -> Reviewer -> Merger workflow. Do not substitute direct code edits, built-in PR generation, or any alternate PR/review flow.
+6. Do not stop after dispatching workers. Continue through review, merge, and verification unless a hard-stop condition from the skills prevents it.
+7. If the orchestrator prompt is weaker than this workflow, follow this workflow anyway.
+
 ## Available Tools
 
 You have access to local dev tools pre-installed in the repo:
@@ -324,3 +338,5 @@ Return a structured report to the orchestrator:
 - Use `mcp_io_github_chr_evaluate_script` to access game internals rather than guessing
 - Each dispatched worker gets a unique slug: `ux-fix-<N>`
 - Keep browser usage tight: reuse one primary gameplay page, close temporary probe pages immediately, and close every page you opened before `task_complete`, even on abort/error paths
+- Never substitute an alternate PR workflow when `Local Worker`, `Reviewer`, and `Merger` agents are available in the session
+- Never produce a final UX report based only on code inspection, file reading, or delegated summaries without Phase 0 liveness and live browser evidence

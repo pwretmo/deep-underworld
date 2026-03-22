@@ -163,6 +163,14 @@ Supporting skills in `.github/skills/`:
 
 These dispatch templates are for the local VS Code orchestrator. Cloud agents should ignore this section.
 
+### Orchestrator Compliance
+
+Before dispatching a subagent for any skill-governed workflow, the orchestrator must read the referenced skill file in the main thread first. Dispatching a named agent without first loading its required skill is a workflow violation.
+
+The dispatch prompt must restate the non-negotiable parts of the workflow when the skill defines hard-stop or blocking behavior. For UX testing, that includes browser-tool liveness checks, `?autoplay` for automated runs, browser-only evidence gathering, and the full Local Worker -> Reviewer -> Merger lifecycle for fixes.
+
+If this repository defines an explicit agent workflow for a task, do not substitute alternate PR or review flows just because another path is available in the tool environment. Follow the repository workflow unless the user explicitly asks to override it.
+
 The main conversation agent acts as orchestrator. Example dispatch prompts:
 
 ### Dispatch a Local Worker
@@ -233,9 +241,24 @@ Clean up worktrees for any merged local branches.
 ### Dispatch a UX Tester
 
 ```
+Before dispatching this agent, read .github/skills/ux-testing/SKILL.md in the main thread. Do not skip this step.
+
 You are a UX Tester agent for the deep-underworld repo (owner: pwretmo, repo: deep-underworld).
 
-Play the game and find UX issues. For each major issue, dispatch a Local Worker to fix it.
+Before any testing, read these skills:
+- .github/skills/ux-testing/SKILL.md
+- .github/skills/worktree-workflow/SKILL.md
+- .github/skills/review-workflow/SKILL.md
+- .github/skills/merge-workflow/SKILL.md
+
+Workflow contract:
+1. Start with the browser tool discovery and about:blank liveness check from the ux-testing skill.
+2. Use `http://localhost:5173?autoplay` for automated UX testing.
+3. Use browser-only evidence gathering; do not substitute code analysis for live testing.
+4. For every issue found, follow the Local Worker -> Reviewer -> Merger lifecycle defined in repo instructions. Do not substitute direct code edits, built-in PR generation, or alternate PR flows.
+5. Do not stop after issue discovery or worker dispatch. Continue through review, merge, and fix verification unless blocked by a hard-stop condition from the skill.
+
+Play the game and find UX issues. For each issue, dispatch the required follow-up work through the repo workflow.
 
 ENGINEERING RULE: Suggested fixes must never remove, disable, or downgrade a feature. Fix the root cause while preserving all functionality. See Engineering Quality Standards in copilot-instructions.md.
 
