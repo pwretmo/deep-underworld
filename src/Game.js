@@ -139,9 +139,12 @@ export class Game {
     });
 
     document.addEventListener('keydown', (e) => {
-      // Autoplay mode: ESC toggles pause regardless of running state
-      if (e.code === 'Escape' && this.autoplay && !this.gameOver) {
-        this._toggleAutoplayPause();
+      // Autoplay mode: ESC toggles pause, but only after priming is complete
+      if (e.code === 'Escape' && this.autoplay && !this.gameOver && !this.startPreparing) {
+        const pauseVisible = this.pauseOverlay.classList.contains('visible');
+        if (this.running || pauseVisible) {
+          this._toggleAutoplayPause();
+        }
         return;
       }
       if (!this.running) return;
@@ -185,7 +188,7 @@ export class Game {
     });
     this.pauseOverlay.addEventListener('click', () => {
       if (this.autoplay) {
-        this._toggleAutoplayPause();
+        if (!this.startPreparing) this._toggleAutoplayPause();
       } else {
         this.player.lock();
       }
