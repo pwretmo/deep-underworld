@@ -12,7 +12,7 @@ const MAX_PRELOADED_TERRAIN_CHUNKS = 6;
 const MAX_PRELOADED_FLORA_CHUNKS = 5;
 const FRAME_BUDGET_MS = 6;
 const DESCENT_ASSIST_FRAME_BUDGET_MS = 5;
-const START_PRIME_FRAME_BUDGET_MS = 12;
+const START_PRIME_FRAME_BUDGET_MS = 4;
 const START_PRIME_TIMEOUT_MS = 1000 * 6;
 const START_PRIME_DEPTH = 320;
 const WRITE_THROTTLE_MS = 5000;
@@ -118,6 +118,10 @@ export class PreloadCoordinator {
 
   async primeStartBaseline({ onProgress } = {}) {
     const token = { cancelled: false };
+
+    // Yield before any heavy synchronous work so the browser can paint the
+    // descent overlay (achieving FCP) before shader compilation begins.
+    await new Promise(resolve => window.requestAnimationFrame(() => resolve()));
 
     this.creatures.prepareInitialQueue(this.player.position);
     this.terrain.preloadPrepareAround(this.player.position);
@@ -372,9 +376,10 @@ export class PreloadCoordinator {
   async _warmDepthBandRenders() {
     if (!this.prepareDepthState) return;
 
-    const sampleDepths = [0, 20, 35, 50, 70, 95, 120, 160, 220, 320];
-    const sampleYawAngles = [0, Math.PI * 0.5, Math.PI, Math.PI * 1.5];
-    const samplePitchAngles = [0, -0.32, -0.6];
+    // Reduced warmup set (3 depths × 2 yaws). Shaders already compiled in _warmGpuOnce();
+    // fog/lighting are uniform updates, not shader variants, so no recompilation needed.
+    const sampleDepths = [0, 120, 320];
+    const sampleYawAngles = [0, Math.PI];
     const originalPosition = this.player.position.clone();
     const originalQuaternion = this.player.camera.quaternion.clone();
     const originalEuler = this.player.euler.clone();
@@ -386,17 +391,14 @@ export class PreloadCoordinator {
       this.player.depth = depth;
       this.prepareDepthState(depth);
 
-      for (const pitch of samplePitchAngles) {
-        for (const yaw of sampleYawAngles) {
-          this.player.euler.set(pitch, yaw, 0, 'YXZ');
-          this.player.camera.quaternion.setFromEuler(this.player.euler);
-          this.renderer.compile(this.underwaterEffect.scene, this.underwaterEffect.camera);
-          this.underwaterEffect.render(depth, {
-            flashlightOn: false,
-            exposure: this.renderer.toneMappingExposure,
-          });
-          await new Promise(resolve => window.requestAnimationFrame(() => resolve()));
-        }
+      for (const yaw of sampleYawAngles) {
+        this.player.euler.set(0, yaw, 0, 'YXZ');
+        this.player.camera.quaternion.setFromEuler(this.player.euler);
+        this.underwaterEffect.render(depth, {
+          flashlightOn: false,
+          exposure: this.renderer.toneMappingExposure,
+        });
+        await new Promise(resolve => window.requestAnimationFrame(() => resolve()));
       }
     }
 
