@@ -139,6 +139,14 @@ export class Game {
     });
 
     document.addEventListener('keydown', (e) => {
+      // Autoplay mode: ESC toggles pause, but only after priming is complete
+      if (e.code === 'Escape' && this.autoplay && !this.gameOver && !this.startPreparing) {
+        const pauseVisible = this.pauseOverlay.classList.contains('visible');
+        if (this.running || pauseVisible) {
+          this._toggleAutoplayPause();
+        }
+        return;
+      }
       if (!this.running) return;
       if (e.code === 'KeyH') this._toggleControlsHelp();
       if (e.code === 'KeyF') this._toggleFlashlight();
@@ -179,7 +187,11 @@ export class Game {
       this._beginGameplayWithoutPointerLock();
     });
     this.pauseOverlay.addEventListener('click', () => {
-      this.player.lock();
+      if (this.autoplay) {
+        if (!this.startPreparing) this._toggleAutoplayPause();
+      } else {
+        this.player.lock();
+      }
     });
   }
 
@@ -249,6 +261,18 @@ export class Game {
   _toggleControlsHelp() {
     this.controlsHelpVisible = !this.controlsHelpVisible;
     this.controlsHelpOverlay.classList.toggle('visible', this.controlsHelpVisible);
+  }
+
+  _toggleAutoplayPause() {
+    if (this.running) {
+      this.running = false;
+      this.pauseOverlay.classList.add('visible');
+      this._pauseAudio();
+    } else {
+      this.running = true;
+      this.pauseOverlay.classList.remove('visible');
+      this._resumeAudio();
+    }
   }
 
   _toggleFlashlight() {
