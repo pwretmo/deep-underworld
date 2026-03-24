@@ -67,7 +67,7 @@ export class Leviathan {
     });
 
     if (useFarMat) {
-      bodyMat = toStandardMaterial(bodyMat); bodyMat.dispose?.();
+      const origBody = bodyMat; bodyMat = toStandardMaterial(bodyMat); origBody.dispose();
       const origBone = boneMat; boneMat = toStandardMaterial(boneMat); origBone.dispose();
       const origFlesh = fleshMat; fleshMat = toStandardMaterial(fleshMat); origFlesh.dispose();
     }
