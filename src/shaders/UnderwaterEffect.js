@@ -123,10 +123,11 @@ const UnderwaterShader = {
       float litAmount = smoothstep(0.02, 0.15, preTintLuma);
       color.rgb *= mix(tint, vec3(1.0), litAmount);
 
-        // Keep the existing deep-ocean darkening, but avoid crushing nearby
-        // surfaces when they are directly lit by the flashlight.
-        float depthDarkening = 1.0 - depthBlend * darkening;
-        color.rgb *= mix(vec3(max(depthDarkening, 0.35)), vec3(1.0), litAmount);
+      // Keep the deep-ocean depth darkening, but avoid crushing flashlight-lit
+      // nearby surfaces that should remain readable.
+      float depthDarkening = 1.0 - depthBlend * darkening;
+      float ambientDarkening = max(depthDarkening, 0.35);
+      color.rgb *= mix(vec3(ambientDarkening), vec3(1.0), litAmount);
 
       // Depth-aware contrast to strengthen separation in mid/deep zones.
       float contrast = mix(1.0, grading.x, depthBlend);
