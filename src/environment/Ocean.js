@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { qualityManager } from '../QualityManager.js';
 
 export class Ocean {
   constructor(scene) {
@@ -14,7 +15,8 @@ export class Ocean {
     this.sunLight = new THREE.DirectionalLight(0x6699aa, 0.4);
     this.sunLight.position.set(50, 100, 30);
     this.sunLight.castShadow = true;
-    this.sunLight.shadow.mapSize.set(1024, 1024);
+    const shadowSize = qualityManager.getSettings().shadowMapSize || 1024;
+    this.sunLight.shadow.mapSize.set(shadowSize, shadowSize);
     this.sunLight.shadow.camera.near = 10;
     this.sunLight.shadow.camera.far = 150;
     this.sunLight.shadow.camera.left = -60;
@@ -41,6 +43,16 @@ export class Ocean {
     // Initial fog
     scene.fog = new THREE.Fog(0x006994, 5, 300);
     scene.background = new THREE.Color(0x006994);
+
+    // React to quality tier changes for shadow map size
+    window.addEventListener('qualitychange', (e) => {
+      const size = e.detail.settings.shadowMapSize || 1024;
+      this.sunLight.shadow.mapSize.set(size, size);
+      if (this.sunLight.shadow.map) {
+        this.sunLight.shadow.map.dispose();
+        this.sunLight.shadow.map = null;
+      }
+    });
   }
 
   _createWaterSurface() {

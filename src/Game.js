@@ -25,7 +25,11 @@ export class Game {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     const qSettings = qualityManager.getSettings();
     this.renderer.shadowMap.enabled = qSettings.shadowMapEnabled;
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.shadowMap.type = qualityManager.tier === 'ultra'
+      ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+    if (qualityManager.tier === 'ultra') {
+      this.renderer.setPixelRatio(window.devicePixelRatio);
+    }
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.76;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -48,6 +52,14 @@ export class Game {
     this.audio = new AudioManager();
     this.underwaterEffect = new UnderwaterEffect(this.renderer, this.scene, this.camera);
     this.abyssEncounter = new AbyssEncounter();
+
+    // Detect high-end GPU for potential ultra tier auto-select
+    qualityManager.detectGPU(this.renderer);
+    // If GPU detection switched to ultra, apply renderer settings now
+    if (qualityManager.tier === 'ultra') {
+      this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      this.renderer.setPixelRatio(window.devicePixelRatio);
+    }
 
     this.renderTuning = {
       depthThresholds: {
@@ -85,9 +97,18 @@ export class Game {
     // Quality tier change listener
     window.addEventListener('qualitychange', (e) => {
       const s = e.detail.settings;
+      const tier = e.detail.tier;
       this.renderer.shadowMap.enabled = s.shadowMapEnabled;
       this._pointLightBudget.shallowMax = s.maxPointLights;
       this._pointLightBudget.deepMax = Math.max(3, Math.round(s.maxPointLights * 0.6));
+      // Ultra tier: soft shadows + uncapped pixel ratio
+      if (tier === 'ultra') {
+        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        this.renderer.setPixelRatio(window.devicePixelRatio);
+      } else {
+        this.renderer.shadowMap.type = THREE.PCFShadowMap;
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      }
     });
 
     // FPS tracking for automated testing

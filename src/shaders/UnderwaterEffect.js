@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { qualityManager } from '../QualityManager.js';
 
 const RENDER_PIPELINE_TUNING = Object.freeze({
@@ -209,6 +210,10 @@ export class UnderwaterEffect {
     );
     this.composer.addPass(this.underwaterPass);
 
+    // UnrealBloomPass for ultra tier
+    this._bloomPass = null;
+    this._setupBloom(qualityManager.tier);
+
     // Adaptive render guard:
     // creature-dense scenes can cause heavy post-processing stalls on some GPUs.
     this._renderEmaMs = 16;
@@ -219,7 +224,27 @@ export class UnderwaterEffect {
       this._postProcessMaxScale = e.detail.settings.postProcessScale;
       this._composerScale = Math.min(this._composerScale, this._postProcessMaxScale);
       this._applyComposerScale(true);
+      this._setupBloom(e.detail.tier);
     });
+  }
+
+  /**
+   * Add or remove the UnrealBloomPass based on quality tier.
+   * Ultra tier gets a real multi-pass bloom; other tiers use the
+   * cheaper single-sample bloom baked into the underwater shader.
+   */
+  _setupBloom(tier) {
+    if (tier === 'ultra' && !this._bloomPass) {
+      const res = new THREE.Vector2(window.innerWidth, window.innerHeight);
+      this._bloomPass = new UnrealBloomPass(res, 0.4, 0.6, 0.78);
+      // Insert bloom pass before the underwater shader pass
+      const idx = this.composer.passes.indexOf(this.underwaterPass);
+      this.composer.insertPass(this._bloomPass, idx);
+    } else if (tier !== 'ultra' && this._bloomPass) {
+      this.composer.removePass(this._bloomPass);
+      this._bloomPass.dispose();
+      this._bloomPass = null;
+    }
   }
 
   resize() {
@@ -280,9 +305,26 @@ export class UnderwaterEffect {
     );
 
     const bloomParams = this.underwaterPass.uniforms.bloomParams.value;
-    bloomParams.x = THREE.MathUtils.lerp(bloomParams.x, targetStrength, 0.09);
+    // When ultra bloom pass is active, reduce in-shader bloom contribution
+    // to avoid double-blooming; the real UnrealBloomPass handles the heavy lift.
+    const shaderBloomScale = this._bloomPass ? 0.3 : 1.0;
+    bloomParams.x = THREE.MathUtils.lerp(bloomParams.x, targetStrength * shaderBloomScale, 0.09);
     bloomParams.y = THREE.MathUtils.lerp(bloomParams.y, targetThreshold, 0.09);
     bloomParams.z = THREE.MathUtils.lerp(bloomParams.z, targetRadius, 0.09);
+
+    // Update UnrealBloomPass parameters with depth if active
+    if (this._bloomPass) {
+      this._bloomPass.strength = THREE.MathUtils.lerp(
+        this.tuning.bloom.surfaceStrength,
+        this.tuning.bloom.deepStrength,
+        depthNorm
+      ) * (flashlightOn ? 0.88 : 1.0);
+      this._bloomPass.threshold = THREE.MathUtils.lerp(
+        this.tuning.bloom.surfaceThreshold,
+        this.tuning.bloom.deepThreshold,
+        depthNorm
+      ) + (flashlightOn ? 0.08 : 0.0);
+    }
 
     this.composer.render();
 
