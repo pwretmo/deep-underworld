@@ -547,7 +547,14 @@ export class Game {
     target = THREE.MathUtils.lerp(target, exposure.abyss, abyssBlend);
 
     if (this.flashlightOn) {
-      target += exposure.flashlightBoost;
+      // Compensate a bit more at depth so flashlight readability remains consistent
+      // while fog attenuation and ambient falloff become stronger.
+      const flashlightComp = THREE.MathUtils.lerp(
+        exposure.flashlightBoost,
+        exposure.flashlightBoost * 1.3,
+        THREE.MathUtils.smoothstep(depth, thresholds.mid, thresholds.abyss + 180)
+      );
+      target += flashlightComp;
     }
 
     this._targetExposure = THREE.MathUtils.clamp(target, 0.50, 0.9);
