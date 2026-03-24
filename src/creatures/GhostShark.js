@@ -17,28 +17,28 @@ export class GhostShark {
 
   _buildModel() {
     // Giger materials
-    const bodyMat = new THREE.MeshPhysicalMaterial({
-      color: 0x0a0a14,
-      roughness: 0.2,
-      metalness: 0.3,
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color: 0x1a1a30,
+      roughness: 0.35,
+      metalness: 0.1,
       transparent: true,
       opacity: 0.75,
-      clearcoat: 1.0,
-      clearcoatRoughness: 0.1,
+      emissive: 0x283858,
+      emissiveIntensity: 0.5,
     });
-    const boneMat = new THREE.MeshPhysicalMaterial({
-      color: 0x2a2218,
-      roughness: 0.3,
-      metalness: 0.2,
-      clearcoat: 0.8,
-      clearcoatRoughness: 0.2,
+    const boneMat = new THREE.MeshStandardMaterial({
+      color: 0x504030,
+      roughness: 0.4,
+      metalness: 0.1,
+      emissive: 0x5a4838,
+      emissiveIntensity: 0.35,
     });
-    const metalMat = new THREE.MeshPhysicalMaterial({
-      color: 0x151515,
-      roughness: 0.12,
-      metalness: 0.9,
-      clearcoat: 1.0,
-      clearcoatRoughness: 0.08,
+    const metalMat = new THREE.MeshStandardMaterial({
+      color: 0x282838,
+      roughness: 0.25,
+      metalness: 0.35,
+      emissive: 0x384058,
+      emissiveIntensity: 0.35,
     });
 
     // Streamlined body with biomechanical ribbing
@@ -120,13 +120,14 @@ export class GhostShark {
 
     // Biomechanical dorsal fin with exposed struts
     const finGeo = new THREE.PlaneGeometry(1.2, 1.4, 6, 6);
-    const finMat = new THREE.MeshPhysicalMaterial({
-      color: 0x0a0a14,
+    const finMat = new THREE.MeshStandardMaterial({
+      color: 0x1a1a30,
       side: THREE.DoubleSide,
       transparent: true,
       opacity: 0.55,
-      roughness: 0.3,
-      clearcoat: 0.6,
+      roughness: 0.4,
+      emissive: 0x203050,
+      emissiveIntensity: 0.35,
     });
     const dorsal = new THREE.Mesh(finGeo, finMat);
     dorsal.position.set(0, 1.1, 0);

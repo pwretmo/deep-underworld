@@ -50,8 +50,8 @@ export class DeepOne {
       color: 0x1a1a2e,
       roughness: 0.9,
       metalness: 0.1,
-      emissive: 0x050510,
-      emissiveIntensity: 0.1,
+      emissive: 0x203858,
+      emissiveIntensity: 0.6,
     });
     this.head = new THREE.Mesh(headGeo, headMat);
     this.head.position.y = 1.5;
@@ -82,11 +82,13 @@ export class DeepOne {
 
       const finGeo = new THREE.ShapeGeometry(finShape, 8);
       const fin = new THREE.Mesh(finGeo, new THREE.MeshStandardMaterial({
-        color: 0x151528,
+        color: 0x1a1a38,
         roughness: 0.95,
         side: THREE.DoubleSide,
         transparent: true,
         opacity: 0.8,
+        emissive: 0x203858,
+        emissiveIntensity: 0.3,
       }));
       fin.position.set(side * 0.8, 0.5, 0);
       fin.rotation.z = side * 0.3;
@@ -131,8 +133,8 @@ export class DeepOne {
         color: 0x1a1a30,
         roughness: 0.85,
         metalness: 0.05,
-        emissive: 0x080815,
-        emissiveIntensity: 0.05,
+        emissive: 0x203858,
+        emissiveIntensity: 0.5,
       });
 
       const tentacle = new THREE.Mesh(tubeGeo, tentacleMat);

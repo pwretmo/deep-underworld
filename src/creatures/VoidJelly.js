@@ -18,14 +18,15 @@ export class VoidJelly {
   }
 
   _buildModel() {
-    const voidMat = new THREE.MeshPhysicalMaterial({
-      color: 0x020204, roughness: 0.1, metalness: 0.7,
-      clearcoat: 1.0, clearcoatRoughness: 0.05,
+    const voidMat = new THREE.MeshStandardMaterial({
+      color: 0x0a0a18, roughness: 0.2, metalness: 0.2,
+      emissive: 0x180828, emissiveIntensity: 0.4,
     });
-    const membraneMat = new THREE.MeshPhysicalMaterial({
-      color: 0x030308, roughness: 0.15, metalness: 0.5,
-      clearcoat: 0.8, transparent: true, opacity: 0.6,
+    const membraneMat = new THREE.MeshStandardMaterial({
+      color: 0x100818, roughness: 0.3, metalness: 0.1,
+      transparent: true, opacity: 0.6,
       side: THREE.DoubleSide,
+      emissive: 0x1a0a30, emissiveIntensity: 0.35,
     });
 
     // Bell - dark, light-absorbing dome
@@ -68,9 +69,9 @@ export class VoidJelly {
     this.group.add(this.voidLight);
 
     // Just a faint purple edge glow
-    const rimMat = new THREE.MeshPhysicalMaterial({
-      color: 0x000000, emissive: 0x110022, emissiveIntensity: 0.3,
-      transparent: true, opacity: 0.3,
+    const rimMat = new THREE.MeshStandardMaterial({
+      color: 0x000000, emissive: 0x4422aa, emissiveIntensity: 0.8,
+      transparent: true, opacity: 0.6,
     });
     const rimGeo = new THREE.TorusGeometry(1.0, 0.05, 6, 20);
     const rim = new THREE.Mesh(rimGeo, rimMat);
@@ -79,7 +80,7 @@ export class VoidJelly {
     this.group.add(rim);
 
     // Faint point light for minimal visibility
-    this.glow = new THREE.PointLight(0x110022, 0.3, 6);
+    this.glow = new THREE.PointLight(0x2a1155, 0.8, 8);
     this.group.add(this.glow);
 
     const s = 1.5 + Math.random() * 2;

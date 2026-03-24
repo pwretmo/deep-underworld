@@ -18,17 +18,17 @@ export class Harvester {
   }
 
   _buildModel() {
-    const bodyMat = new THREE.MeshPhysicalMaterial({
-      color: 0x0a0808, roughness: 0.15, metalness: 0.8,
-      clearcoat: 1.0, clearcoatRoughness: 0.08,
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color: 0x2a2028, roughness: 0.3, metalness: 0.3,
+      emissive: 0x3a3050, emissiveIntensity: 0.4,
     });
-    const metalMat = new THREE.MeshPhysicalMaterial({
-      color: 0x181818, roughness: 0.1, metalness: 0.92,
-      clearcoat: 1.0,
+    const metalMat = new THREE.MeshStandardMaterial({
+      color: 0x303040, roughness: 0.25, metalness: 0.4,
+      emissive: 0x404868, emissiveIntensity: 0.35,
     });
-    const organicMat = new THREE.MeshPhysicalMaterial({
-      color: 0x150810, roughness: 0.3, metalness: 0.3,
-      clearcoat: 0.7,
+    const organicMat = new THREE.MeshStandardMaterial({
+      color: 0x351828, roughness: 0.45, metalness: 0.05,
+      emissive: 0x602040, emissiveIntensity: 0.4,
     });
 
     // Central body - industrial oval with plating

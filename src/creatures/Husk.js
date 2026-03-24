@@ -19,14 +19,14 @@ export class Husk {
 
   _buildModel() {
     const shellMat = new THREE.MeshPhysicalMaterial({
-      color: 0x181410, roughness: 0.25, metalness: 0.5,
+      color: 0x201810, roughness: 0.25, metalness: 0,
       clearcoat: 0.7, clearcoatRoughness: 0.2,
-      emissive: 0x08060a, emissiveIntensity: 0.4,
+      emissive: 0x403020, emissiveIntensity: 0.7,
     });
     const innerMat = new THREE.MeshPhysicalMaterial({
-      color: 0x060406, roughness: 0.3, metalness: 0.3,
+      color: 0x100810, roughness: 0.3, metalness: 0,
       side: THREE.DoubleSide,
-      emissive: 0x0c0412, emissiveIntensity: 0.6,
+      emissive: 0x301850, emissiveIntensity: 0.8,
     });
 
     // Split shell halves - like a molted exoskeleton
@@ -74,6 +74,7 @@ export class Husk {
       const jointGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.5, 6);
       const joint = new THREE.Mesh(jointGeo, new THREE.MeshPhysicalMaterial({
         color: 0x101010, roughness: 0.1, metalness: 0.9, clearcoat: 1.0,
+        emissive: 0x203848, emissiveIntensity: 0.3,
       }));
       joint.position.set(
         (Math.random() - 0.5) * 1.2,
