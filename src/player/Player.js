@@ -33,6 +33,7 @@ export class Player {
     this.moveSpeed = 15;
     this.dampening = 3;
     this.keys = {};
+    this.autoplayInput = { forward: 0, right: 0, vertical: 0 };
 
     // Mouse look
     this.euler = new THREE.Euler(0, 0, 0, 'YXZ');
@@ -122,12 +123,23 @@ export class Player {
   reset() {
     this.position.set(0, -5, 0);
     this.velocity.set(0, 0, 0);
+    this.clearAutoplayInput();
     this.euler.set(0, 0, 0);
     this.camera.quaternion.setFromEuler(this.euler);
     // Sync physics body to reset position
     if (this._physicsBody) {
       this._physicsBody.setNextKinematicTranslation({ x: 0, y: -5, z: 0 });
     }
+  }
+
+  setAutoplayInput({ forward = 0, right = 0, vertical = 0 } = {}) {
+    this.autoplayInput.forward = THREE.MathUtils.clamp(forward, -1, 1);
+    this.autoplayInput.right = THREE.MathUtils.clamp(right, -1, 1);
+    this.autoplayInput.vertical = THREE.MathUtils.clamp(vertical, -1, 1);
+  }
+
+  clearAutoplayInput() {
+    this.setAutoplayInput();
   }
 
   update(dt) {
@@ -139,12 +151,27 @@ export class Player {
 
     this._accel.set(0, 0, 0);
 
-    if (this.keys['KeyW']) this._accel.add(this._forward);
-    if (this.keys['KeyS']) this._accel.sub(this._forward);
-    if (this.keys['KeyA']) this._accel.sub(this._right);
-    if (this.keys['KeyD']) this._accel.add(this._right);
-    if (this.keys['Space']) this._accel.add(this._up);
-    if (this.keys['ShiftLeft'] || this.keys['ShiftRight']) this._accel.sub(this._up);
+    const forwardInput = THREE.MathUtils.clamp(
+      (this.keys['KeyW'] ? 1 : 0) - (this.keys['KeyS'] ? 1 : 0) + this.autoplayInput.forward,
+      -1,
+      1
+    );
+    const rightInput = THREE.MathUtils.clamp(
+      (this.keys['KeyD'] ? 1 : 0) - (this.keys['KeyA'] ? 1 : 0) + this.autoplayInput.right,
+      -1,
+      1
+    );
+    const verticalInput = THREE.MathUtils.clamp(
+      (this.keys['Space'] ? 1 : 0)
+        - ((this.keys['ShiftLeft'] || this.keys['ShiftRight']) ? 1 : 0)
+        + this.autoplayInput.vertical,
+      -1,
+      1
+    );
+
+    if (forwardInput !== 0) this._accel.addScaledVector(this._forward, forwardInput);
+    if (rightInput !== 0) this._accel.addScaledVector(this._right, rightInput);
+    if (verticalInput !== 0) this._accel.addScaledVector(this._up, verticalInput);
 
     if (this._accel.length() > 0) {
       this._accel.normalize().multiplyScalar(this.moveSpeed);
