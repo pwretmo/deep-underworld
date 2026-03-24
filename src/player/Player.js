@@ -150,15 +150,48 @@ export class Player {
       this._dustMaterial = createVolumetricDustMaterial(this._dustTexture);
       this._dustMaterial.uniforms.beamLength.value = coneLength;
     } else {
-      this._dustMaterial = new THREE.PointsMaterial({
-        color: 0x99aacc,
-        size: 0.08,
-        map: this._dustTexture,
+      // GPU-driven dust ShaderMaterial: drift computed in vertex shader
+      this._dustMaterial = new THREE.ShaderMaterial({
+        uniforms: {
+          time: { value: 0 },
+          map: { value: this._dustTexture },
+        },
+        vertexShader: /* glsl */ `
+          attribute float size;
+          attribute float phase;
+          uniform float time;
+          varying float vAlpha;
+
+          void main() {
+            // GPU-driven drift around base position using phase + seed
+            vec3 pos = position;
+            float spd = 0.3 + (1.0 - clamp(-pos.z / 50.0, 0.0, 1.0)) * 0.7;
+            float idx = phase * 1000.0;
+            pos.x += sin(time * 0.3 * spd + idx * 0.7) * 0.18 * spd;
+            pos.y += cos(time * 0.4 * spd + idx * 0.5) * 0.18 * spd;
+            pos.z += sin(time * 0.2 * spd + idx * 0.3) * 0.12 * spd;
+
+            // Fade based on distance along beam
+            float depthT = clamp(-pos.z / 50.0, 0.0, 1.0);
+            vAlpha = 0.35 * (0.3 + 0.7 * (1.0 - depthT));
+
+            vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+            gl_PointSize = size * 0.08 * (300.0 / -mvPosition.z);
+            gl_Position = projectionMatrix * mvPosition;
+          }
+        `,
+        fragmentShader: /* glsl */ `
+          uniform sampler2D map;
+          varying float vAlpha;
+
+          void main() {
+            vec4 texColor = texture2D(map, gl_PointCoord);
+            gl_FragColor = vec4(0.6, 0.667, 0.8, vAlpha) * texColor;
+          }
+        `,
         transparent: true,
-        opacity: 0.35,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
-        sizeAttenuation: true,
       });
     }
 
@@ -256,23 +289,22 @@ export class Player {
 
     // Animate dust particles in flashlight beam
     if (this.flashlight.visible && this.dustParticles) {
-      const pos = this.dustParticles.geometry.attributes.position;
-
-      for (let i = 0; i < pos.count; i++) {
-        const bx = this._dustBasePositions[i * 3];
-        const by = this._dustBasePositions[i * 3 + 1];
-        const bz = this._dustBasePositions[i * 3 + 2];
-        const spd = this._dustSpeeds[i];
-
-        // Turbulent drift: speed varies per particle, deeper ones drift slower
-        pos.setX(i, bx + Math.sin(time * 0.3 * spd + i * 0.7) * 0.18 * spd);
-        pos.setY(i, by + Math.cos(time * 0.4 * spd + i * 0.5) * 0.18 * spd);
-        pos.setZ(i, bz + Math.sin(time * 0.2 * spd + i * 0.3) * 0.12 * spd);
-      }
-      pos.needsUpdate = true;
-
-      // Update volumetric dust shader time
-      if (this._volumetricEnabled && this._dustMaterial.uniforms) {
+      if (this._volumetricEnabled) {
+        // Volumetric path still uses CPU drift + shader uniforms
+        const pos = this.dustParticles.geometry.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+          const bx = this._dustBasePositions[i * 3];
+          const by = this._dustBasePositions[i * 3 + 1];
+          const bz = this._dustBasePositions[i * 3 + 2];
+          const spd = this._dustSpeeds[i];
+          pos.setX(i, bx + Math.sin(time * 0.3 * spd + i * 0.7) * 0.18 * spd);
+          pos.setY(i, by + Math.cos(time * 0.4 * spd + i * 0.5) * 0.18 * spd);
+          pos.setZ(i, bz + Math.sin(time * 0.2 * spd + i * 0.3) * 0.12 * spd);
+        }
+        pos.needsUpdate = true;
+        this._dustMaterial.uniforms.time.value = time;
+      } else {
+        // Non-volumetric path: drift runs entirely on GPU via ShaderMaterial
         this._dustMaterial.uniforms.time.value = time;
       }
     }

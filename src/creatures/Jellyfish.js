@@ -140,7 +140,7 @@ export class Jellyfish {
   }
 
   _createAppendageDescriptor(mesh, options) {
-    mesh.frustumCulled = false;
+    mesh.frustumCulled = true;
 
     const geometry = mesh.geometry;
     const positionAttr = geometry.attributes.position;
@@ -222,6 +222,7 @@ export class Jellyfish {
     positions.needsUpdate = true;
     appendage.geometry.computeVertexNormals();
     appendage.geometry.attributes.normal.needsUpdate = true;
+    appendage.geometry.computeBoundingSphere();
   }
 
   _createFlowingAppendages(group, color, size, profile) {
