@@ -80,6 +80,7 @@ export class ExternalLightingSystem {
         beamMaterial = createAdvancedVolumetricBeamMaterial();
         beamMaterial.uniforms.beamLength.value = cfg.beamLength;
         beamMaterial.uniforms.baseOpacity.value = cfg.beamBaseOpacity;
+        beamMaterial.uniforms.coneTanHalfAngle.value = Math.tan(cfg.coneAngle);
       } else {
         beamMaterial = createFallbackBeamMaterial();
         beamMaterial.userData.baseOpacity = cfg.beamBaseOpacity * 0.55;

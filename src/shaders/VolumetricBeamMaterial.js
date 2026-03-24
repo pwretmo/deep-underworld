@@ -184,6 +184,7 @@ const AdvancedVolumetricBeamShader = {
     fogColor: { value: new THREE.Color(0x000000) },
     fogNear: { value: 1.0 },
     fogFar: { value: 300.0 },
+    coneTanHalfAngle: { value: Math.tan(Math.PI / 7) },
   },
 
   vertexShader: /* glsl */ `
@@ -194,6 +195,7 @@ const AdvancedVolumetricBeamShader = {
     varying float vRadialT;
 
     uniform float beamLength;
+    uniform float coneTanHalfAngle;
 
     void main() {
       vLocalPos = position;
@@ -202,7 +204,7 @@ const AdvancedVolumetricBeamShader = {
       vBeamDirWorld = normalize(mat3(modelMatrix) * vec3(0.0, 0.0, -1.0));
 
       vAxialT = clamp(-position.z / beamLength, 0.0, 1.0);
-      float maxRadius = tan(${(Math.PI / 7).toFixed(6)}) * abs(position.z);
+      float maxRadius = coneTanHalfAngle * abs(position.z);
       float radialDist = length(position.xy);
       vRadialT = maxRadius > 0.001 ? clamp(radialDist / maxRadius, 0.0, 1.0) : 0.0;
 
