@@ -111,6 +111,11 @@ export class Terrain {
 
   _addRocks(parent, offsetX, offsetZ, size) {
     const count = 8 + Math.floor(Math.random() * 8);
+    const dummy = new THREE.Object3D();
+    const instancedRocks = new THREE.InstancedMesh(this._rockGeo, this._rockMat, count);
+    instancedRocks.castShadow = true;
+    instancedRocks.receiveShadow = true;
+
     for (let i = 0; i < count; i++) {
       const rx = (Math.random() - 0.5) * size * 0.8;
       const rz = (Math.random() - 0.5) * size * 0.8;
@@ -120,14 +125,15 @@ export class Terrain {
       const baseDepth = -80 - Math.abs(fbm2D(worldX * 0.001, worldZ * 0.001)) * 600;
 
       const scale = 1 + Math.random() * 4;
-      const rock = new THREE.Mesh(this._rockGeo, this._rockMat);
-      rock.position.set(rx, baseDepth + h + scale * 0.3, rz);
-      rock.scale.set(scale, scale * (0.5 + Math.random() * 0.8), scale);
-      rock.rotation.set(Math.random(), Math.random(), Math.random());
-      rock.castShadow = true;
-      rock.receiveShadow = true;
-      parent.add(rock);
+      dummy.position.set(rx, baseDepth + h + scale * 0.3, rz);
+      dummy.scale.set(scale, scale * (0.5 + Math.random() * 0.8), scale);
+      dummy.rotation.set(Math.random(), Math.random(), Math.random());
+      dummy.updateMatrix();
+      instancedRocks.setMatrixAt(i, dummy.matrix);
     }
+
+    instancedRocks.instanceMatrix.needsUpdate = true;
+    parent.add(instancedRocks);
   }
 
   _rebuildPendingAround(cx, cz) {
