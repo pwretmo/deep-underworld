@@ -157,7 +157,9 @@ class QualityManager {
     } else if (this._frameTimeEma < AUTO_UPGRADE_MS) {
       this._downgradeDuration = 0;
       this._upgradeDuration += dt;
-      if (this._upgradeDuration >= AUTO_UPGRADE_SECS && idx < TIER_ORDER.length - 1) {
+      const ultraIdx = TIER_ORDER.indexOf('ultra');
+      const maxGenericIdx = ultraIdx >= 0 ? ultraIdx - 1 : TIER_ORDER.length - 1;
+      if (this._upgradeDuration >= AUTO_UPGRADE_SECS && idx < maxGenericIdx) {
         this._applyAutoTier(TIER_ORDER[idx + 1]);
       }
       // Frame-time-based auto-upgrade to ultra: if sitting on high with
