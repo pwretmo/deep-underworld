@@ -106,17 +106,27 @@ const UnderwaterShader = {
       float vignette = 1.0 - smoothstep(0.12, 0.42, vigDist) * vigStr;
       color.rgb *= max(vignette, 0.2);
 
-      // Color grading - deep ocean tint
+      // Water column absorption shifts ambient light toward blue with depth.
+      // Direct flashlight illumination travels a short path through water,
+      // so nearby lit surfaces keep their natural color.
       float depthT = clamp(depth / (depthThresholds.z * 0.75), 0.0, 1.0);
-      vec3 shallowTint = vec3(0.65, 0.8, 1.0);
-      vec3 deepTint = vec3(0.12, 0.19, 0.27);
-      vec3 abyssTint = vec3(0.038, 0.068, 0.1);
+        vec3 shallowTint = vec3(0.65, 0.8, 1.0);
+        vec3 deepTint = vec3(0.12, 0.19, 0.27);
+        vec3 abyssTint = vec3(0.038, 0.068, 0.1);
       vec3 tint = depthT < 0.5
         ? mix(shallowTint, deepTint, depthT * 2.0)
         : mix(deepTint, abyssTint, (depthT - 0.5) * 2.0);
-      color.rgb *= tint;
 
-      // Keep perceived darkness driven by lighting and fog, not post luminance crush.
+      // Exempt flashlight-illuminated pixels from the depth tint.
+      // Bright = short-path flashlight light, dark = long-path ambient.
+      float preTintLuma = max(max(color.r, color.g), color.b);
+      float litAmount = smoothstep(0.02, 0.15, preTintLuma);
+      color.rgb *= mix(tint, vec3(1.0), litAmount);
+
+        // Keep the existing deep-ocean darkening, but avoid crushing nearby
+        // surfaces when they are directly lit by the flashlight.
+        float depthDarkening = 1.0 - depthBlend * darkening;
+        color.rgb *= mix(vec3(max(depthDarkening, 0.35)), vec3(1.0), litAmount);
 
       // Depth-aware contrast to strengthen separation in mid/deep zones.
       float contrast = mix(1.0, grading.x, depthBlend);
