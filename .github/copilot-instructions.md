@@ -76,6 +76,22 @@ If a proper fix is complex, break it into incremental steps — but the end stat
 - **UX Testers**: Suggested fixes in issue reports must comply with these rules. Never suggest removing a feature as a fix.
 - **Orchestrator**: When re-dispatching a worker with review comments, reinforce these rules if the rejected fix involved a feature removal.
 
+### Browser Hygiene — Mandatory
+
+These rules are **mandatory** for every agent role and the orchestrator. Violations drain system resources, degrade game performance, and make testing unreliable.
+
+1. **One browser page at a time.** Never have more than one game page open simultaneously. Do not open the game in both an external browser (Edge, Chrome) and the VS Code Simple Browser. Before opening a new page, check for and close any existing game pages.
+2. **`npm run dev` may auto-open a browser tab.** If Vite opens a tab automatically and you intend to use a different browser page (e.g., via browser automation tools), close the auto-opened tab immediately.
+3. **Close every page you open.** Any browser page or tab opened during a session must be closed before calling `task_complete`, including on abort and error exits. Keep a running list of opened pages and close all of them at the end.
+4. **Reuse, don't duplicate.** If a game page is already open, reload or re-navigate it instead of opening a second one. Only open a fresh page if no existing page can be reused.
+5. **Probe pages are temporary.** If you open `about:blank` or any temporary page for a liveness check, close it immediately after the check.
+
+#### Applying Browser Hygiene by Role
+
+- **Orchestrator**: Before starting `npm run dev`, check for existing browser pages. If Vite auto-opens a tab, close it if browser automation tools will be used instead. Never open the game URL manually AND via automation.
+- **UX Testers**: Follow the Browser Session Hygiene section in the ux-testing skill. Maintain exactly one gameplay page. Close all pages before `task_complete`.
+- **Workers / Reviewers / Mergers**: If you need to open the game for any reason (e.g., visual verification), use one page, close it when done.
+
 ## Agent Workflow Conventions
 
 ### Branch Naming
@@ -255,8 +271,9 @@ Workflow contract:
 1. Start with the browser tool discovery and about:blank liveness check from the ux-testing skill.
 2. Use `http://localhost:5173?autoplay` for automated UX testing.
 3. Use browser-only evidence gathering; do not substitute code analysis for live testing.
-4. For every issue found, follow the Local Worker -> Reviewer -> Merger lifecycle defined in repo instructions. Do not substitute direct code edits, built-in PR generation, or alternate PR flows.
-5. Do not stop after issue discovery or worker dispatch. Continue through review, merge, and fix verification unless blocked by a hard-stop condition from the skill.
+4. BROWSER HYGIENE IS MANDATORY: One browser page at a time. If npm run dev auto-opens a tab, close it before opening your automation page. Never open the game in both an external browser and VS Code Simple Browser. Track all pages and close ALL of them before task_complete. See Browser Hygiene in copilot-instructions.md.
+5. For every issue found, follow the Local Worker -> Reviewer -> Merger lifecycle defined in repo instructions. Do not substitute direct code edits, built-in PR generation, or alternate PR flows.
+6. Do not stop after issue discovery or worker dispatch. Continue through review, merge, and fix verification unless blocked by a hard-stop condition from the skill.
 
 Play the game and find UX issues. For each issue, dispatch the required follow-up work through the repo workflow.
 

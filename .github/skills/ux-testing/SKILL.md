@@ -53,16 +53,21 @@ cd F:\repos\deep-underworld
 npm run dev
 ```
 
+**Important**: Vite may auto-open a browser tab when starting the dev server. If you intend to use browser automation tools (e.g., `open_browser_page`, `mcp_io_github_chr_new_page`) to open the game, you must close the auto-opened tab immediately — do not leave it running alongside the automation page. Check for new pages right after `npm run dev` starts and close any that are not your automation page.
+
 Wait ~3 seconds, then open the game.
 
 ## Browser Session Hygiene
 
-- Keep exactly one gameplay page open for `http://localhost:5173?autoplay` during a UX run.
-- Before opening a new game page, inspect existing pages/tabs when listing tools are available and reuse an existing autoplay page if one is already open.
+**These rules are mandatory — not guidelines. Violations drain system resources, degrade game performance, and produce unreliable test results.**
+
+- **One gameplay page, period.** Keep exactly one gameplay page open for `http://localhost:5173?autoplay` during a UX run. Never have two game pages open at the same time — not in the same browser, not across browsers, not in VS Code Simple Browser alongside an external browser.
+- Before opening a new game page, inspect existing pages/tabs (use `mcp_io_github_chr_list_pages` or equivalent) and reuse an existing autoplay page if one is already open.
 - Treat the first gameplay page you open as the primary page for the whole run. Reuse that page ID/tab for screenshots, console checks, audits, and re-tests.
+- **Close auto-opened tabs.** If `npm run dev` auto-opens a browser tab and you are using a different page for automation, close the auto-opened tab immediately.
 - If you must open a temporary second page for a probe or isolated check, close it immediately after that step completes.
 - After restarting the dev server or re-testing fixes, reload or re-navigate the existing gameplay page instead of opening a fresh tab.
-- Keep a short list of every page/tab you opened during the session and close all of them before `task_complete`, including abort and error exits.
+- **Track and close all pages.** Keep a running list of every page/tab you opened during the session. Close ALL of them before calling `task_complete`, including on abort and error exits. No orphaned tabs.
 
 ## Browser Interaction Patterns
 

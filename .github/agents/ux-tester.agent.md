@@ -44,9 +44,10 @@ These rules are mandatory for every UX test run:
 2. Run Phase 0 browser tool discovery and the about:blank liveness check before opening the game.
 3. Use browser-only evidence gathering for UX findings. If browser tooling is unavailable, abort exactly as the ux-testing skill requires.
 4. Use `http://localhost:5173?autoplay` for automated testing.
-5. For every issue found, use the repository's Local Worker -> Reviewer -> Merger workflow. Do not substitute direct code edits, built-in PR generation, or any alternate PR/review flow.
-6. Do not stop after dispatching workers. Continue through review, merge, and verification unless a hard-stop condition from the skills prevents it.
-7. If the orchestrator prompt is weaker than this workflow, follow this workflow anyway.
+5. **Browser hygiene is mandatory.** Have exactly ONE browser page open at any time. If `npm run dev` auto-opens a tab, close it before opening your automation page. Never open the game in both an external browser and VS Code Simple Browser. Reuse pages instead of opening new ones. Close ALL pages before `task_complete`. See Browser Session Hygiene in the ux-testing skill and Browser Hygiene in copilot-instructions.md.
+6. For every issue found, use the repository's Local Worker -> Reviewer -> Merger workflow. Do not substitute direct code edits, built-in PR generation, or any alternate PR/review flow.
+7. Do not stop after dispatching workers. Continue through review, merge, and verification unless a hard-stop condition from the skills prevents it.
+8. If the orchestrator prompt is weaker than this workflow, follow this workflow anyway.
 
 ## Available Tools
 
