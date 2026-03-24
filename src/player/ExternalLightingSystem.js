@@ -82,7 +82,8 @@ export class ExternalLightingSystem {
         beamMaterial.uniforms.baseOpacity.value = cfg.beamBaseOpacity;
       } else {
         beamMaterial = createFallbackBeamMaterial();
-        beamMaterial.opacity = cfg.beamBaseOpacity * 0.55;
+        beamMaterial.userData.baseOpacity = cfg.beamBaseOpacity * 0.55;
+        beamMaterial.opacity = beamMaterial.userData.baseOpacity;
       }
 
       const beam = new THREE.Mesh(beamGeo, beamMaterial);
@@ -136,10 +137,15 @@ export class ExternalLightingSystem {
 
     for (let i = 0; i < this._beamMaterials.length; i++) {
       const mat = this._beamMaterials[i];
-      if (!mat.uniforms) continue;
-      mat.uniforms.time.value = time;
-      mat.uniforms.depthAttenuation.value = intensityAttenuation;
-      mat.uniforms.depthOpacityScale.value = beamOpacityScale;
+      if (mat.uniforms) {
+        mat.uniforms.time.value = time;
+        mat.uniforms.depthAttenuation.value = intensityAttenuation;
+        mat.uniforms.depthOpacityScale.value = beamOpacityScale;
+        continue;
+      }
+
+      const baseOpacity = mat.userData.baseOpacity ?? mat.opacity;
+      mat.opacity = baseOpacity * beamOpacityScale;
     }
   }
 
