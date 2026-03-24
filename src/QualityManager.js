@@ -41,9 +41,21 @@ const QUALITY_TIERS = {
     creatureCullDistance: 180,
     creatureDespawnDistance: 250,
   },
+  ultra: {
+    shadowMapEnabled: true,
+    shadowMapSize: 4096,
+    particleCount: 2000,
+    floraDensityScale: 1.5,
+    maxCreatures: 120,
+    maxPointLights: 20,
+    postProcessScale: 1.0,
+    terrainViewDistance: 4,
+    creatureCullDistance: 300,
+    creatureDespawnDistance: 400,
+  },
 };
 
-const TIER_ORDER = ['low', 'medium', 'high'];
+const TIER_ORDER = ['low', 'medium', 'high', 'ultra'];
 const STORAGE_KEY = 'qualityTier';
 
 // Auto-quality thresholds
@@ -51,7 +63,15 @@ const AUTO_DOWNGRADE_MS = 33;   // < 30 fps
 const AUTO_DOWNGRADE_SECS = 3;
 const AUTO_UPGRADE_MS = 20;     // > 50 fps
 const AUTO_UPGRADE_SECS = 5;
+const AUTO_ULTRA_UPGRADE_MS = 12;   // < 12ms = ~83+ fps headroom for ultra
+const AUTO_ULTRA_UPGRADE_SECS = 10;
 const EMA_ALPHA = 2 / (30 + 1); // ~30-frame EMA
+
+// GPU patterns that qualify for automatic ultra tier selection
+const HIGH_END_GPU_PATTERNS = [
+  /RTX\s*40/i, /RTX\s*50/i, /RTX\s*4090/i, /RTX\s*4080/i,
+  /RX\s*7900/i, /RX\s*9070/i, /RTX\s*5090/i, /RTX\s*5080/i,
+];
 
 class QualityManager {
   constructor() {
@@ -69,6 +89,7 @@ class QualityManager {
     this._frameTimeEma = 16;
     this._downgradeDuration = 0;
     this._upgradeDuration = 0;
+    this._ultraUpgradeDuration = 0;
   }
 
   /** Current tier name. */
@@ -83,6 +104,25 @@ class QualityManager {
     return this._settings;
   }
 
+  /**
+   * Detect GPU capabilities from the renderer and auto-select ultra tier
+   * if a high-end GPU is detected and autoQuality is enabled.
+   * Call this once after the renderer is created.
+   */
+  detectGPU(renderer) {
+    if (!this._autoQuality) return;
+    try {
+      const gl = renderer.getContext();
+      const ext = gl.getExtension('WEBGL_debug_renderer_info');
+      if (!ext) return;
+      const gpuRenderer = gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) || '';
+      const isHighEnd = HIGH_END_GPU_PATTERNS.some((p) => p.test(gpuRenderer));
+      if (isHighEnd) {
+        this._applyAutoTier('ultra');
+      }
+    } catch (_) { /* GPU detection not available */ }
+  }
+
   /** Switch to a specific tier. Persists to localStorage. */
   setTier(tier) {
     if (!QUALITY_TIERS[tier] || tier === this._tier) return;
@@ -91,6 +131,7 @@ class QualityManager {
     this._autoQuality = false;
     this._downgradeDuration = 0;
     this._upgradeDuration = 0;
+    this._ultraUpgradeDuration = 0;
     try { localStorage.setItem(STORAGE_KEY, tier); } catch (_) { /* noop */ }
     window.dispatchEvent(new CustomEvent('qualitychange', { detail: { tier, settings: this._settings } }));
   }
@@ -116,12 +157,25 @@ class QualityManager {
     } else if (this._frameTimeEma < AUTO_UPGRADE_MS) {
       this._downgradeDuration = 0;
       this._upgradeDuration += dt;
-      if (this._upgradeDuration >= AUTO_UPGRADE_SECS && idx < TIER_ORDER.length - 1) {
+      const ultraIdx = TIER_ORDER.indexOf('ultra');
+      const maxGenericIdx = ultraIdx >= 0 ? ultraIdx - 1 : TIER_ORDER.length - 1;
+      if (this._upgradeDuration >= AUTO_UPGRADE_SECS && idx < maxGenericIdx) {
         this._applyAutoTier(TIER_ORDER[idx + 1]);
+      }
+      // Frame-time-based auto-upgrade to ultra: if sitting on high with
+      // very low frame times, promote to ultra after sustained headroom.
+      if (this._tier === 'high' && this._frameTimeEma < AUTO_ULTRA_UPGRADE_MS) {
+        this._ultraUpgradeDuration += dt;
+        if (this._ultraUpgradeDuration >= AUTO_ULTRA_UPGRADE_SECS) {
+          this._applyAutoTier('ultra');
+        }
+      } else {
+        this._ultraUpgradeDuration = 0;
       }
     } else {
       this._downgradeDuration = 0;
       this._upgradeDuration = 0;
+      this._ultraUpgradeDuration = 0;
     }
   }
 
@@ -132,6 +186,7 @@ class QualityManager {
     this._settings = { ...QUALITY_TIERS[tier] };
     this._downgradeDuration = 0;
     this._upgradeDuration = 0;
+    this._ultraUpgradeDuration = 0;
     // Don't persist auto changes to localStorage
     window.dispatchEvent(new CustomEvent('qualitychange', { detail: { tier, settings: this._settings } }));
   }
