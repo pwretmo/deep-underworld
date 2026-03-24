@@ -16,15 +16,15 @@ export class PipeOrgan {
   _buildModel() {
     const metalMat = new THREE.MeshStandardMaterial({
       color: 0x2a2838, roughness: 0.3, metalness: 0.4,
-      emissive: 0x4a3870, emissiveIntensity: 0.4,
+      emissive: 0x204060, emissiveIntensity: 0.5,
     });
     const boneMat = new THREE.MeshStandardMaterial({
-      color: 0x504030, roughness: 0.4, metalness: 0.15,
-      emissive: 0x6a5540, emissiveIntensity: 0.35,
+      color: 0x504030, roughness: 0.4, metalness: 0,
+      emissive: 0x504030, emissiveIntensity: 0.4,
     });
     const fleshMat = new THREE.MeshStandardMaterial({
-      color: 0x3a1828, roughness: 0.5, metalness: 0.05,
-      emissive: 0x6b2848, emissiveIntensity: 0.4,
+      color: 0x3a2838, roughness: 0.5, metalness: 0,
+      emissive: 0x203858, emissiveIntensity: 0.5,
     });
 
     // Base - fleshy organic mound

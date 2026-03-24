@@ -49,8 +49,8 @@ export class DeepOne {
     const headMat = new THREE.MeshStandardMaterial({
       color: 0x1a1a2e,
       roughness: 0.9,
-      metalness: 0.1,
-      emissive: 0x203858,
+      metalness: 0,
+      emissive: 0x502040,
       emissiveIntensity: 0.6,
     });
     this.head = new THREE.Mesh(headGeo, headMat);
@@ -87,8 +87,8 @@ export class DeepOne {
         side: THREE.DoubleSide,
         transparent: true,
         opacity: 0.8,
-        emissive: 0x203858,
-        emissiveIntensity: 0.3,
+        emissive: 0x502040,
+        emissiveIntensity: 0.4,
       }));
       fin.position.set(side * 0.8, 0.5, 0);
       fin.rotation.z = side * 0.3;
@@ -132,8 +132,8 @@ export class DeepOne {
       const tentacleMat = new THREE.MeshStandardMaterial({
         color: 0x1a1a30,
         roughness: 0.85,
-        metalness: 0.05,
-        emissive: 0x203858,
+        metalness: 0,
+        emissive: 0x502040,
         emissiveIntensity: 0.5,
       });
 

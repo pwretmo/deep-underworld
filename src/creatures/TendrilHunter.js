@@ -19,16 +19,19 @@ export class TendrilHunter {
 
   _buildModel() {
     const bodyMat = new THREE.MeshPhysicalMaterial({
-      color: 0x080610, roughness: 0.2, metalness: 0.65,
+      color: 0x1a1028, roughness: 0.2, metalness: 0,
       clearcoat: 1.0, clearcoatRoughness: 0.1,
+      emissive: 0x502040, emissiveIntensity: 0.6,
     });
     const metalMat = new THREE.MeshPhysicalMaterial({
       color: 0x141414, roughness: 0.1, metalness: 0.9,
       clearcoat: 1.0,
+      emissive: 0x203858, emissiveIntensity: 0.3,
     });
     const organicMat = new THREE.MeshPhysicalMaterial({
-      color: 0x1a0812, roughness: 0.3, metalness: 0.3,
+      color: 0x201020, roughness: 0.3, metalness: 0,
       clearcoat: 0.8,
+      emissive: 0x602040, emissiveIntensity: 0.5,
     });
 
     // Central body - elongated with mechanical ridging

@@ -19,12 +19,12 @@ export class ChainDragger {
 
   _buildModel() {
     const bodyMat = new THREE.MeshStandardMaterial({
-      color: 0x3a2848, roughness: 0.5, metalness: 0.25,
-      emissive: 0x6b3fa0, emissiveIntensity: 0.35,
+      color: 0x2a2838, roughness: 0.5, metalness: 0,
+      emissive: 0x203858, emissiveIntensity: 0.5,
     });
     const chainMat = new THREE.MeshStandardMaterial({
-      color: 0x4a3860, roughness: 0.4, metalness: 0.35,
-      emissive: 0x8855bb, emissiveIntensity: 0.3,
+      color: 0x383848, roughness: 0.4, metalness: 0.35,
+      emissive: 0x204060, emissiveIntensity: 0.4,
     });
 
     // Compact biomechanical body

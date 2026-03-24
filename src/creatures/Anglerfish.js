@@ -23,18 +23,22 @@ export class Anglerfish {
   _buildModel() {
     // Shared Giger materials
     const bodyMat = new THREE.MeshPhysicalMaterial({
-      color: 0x080610,
+      color: 0x102020,
       roughness: 0.25,
-      metalness: 0.35,
+      metalness: 0,
       clearcoat: 1.0,
       clearcoatRoughness: 0.15,
+      emissive: 0x105020,
+      emissiveIntensity: 0.6,
     });
     const boneMat = new THREE.MeshPhysicalMaterial({
-      color: 0x2a2218,
+      color: 0x3a3228,
       roughness: 0.3,
-      metalness: 0.2,
+      metalness: 0,
       clearcoat: 0.8,
       clearcoatRoughness: 0.2,
+      emissive: 0x504030,
+      emissiveIntensity: 0.4,
     });
     const metalMat = new THREE.MeshPhysicalMaterial({
       color: 0x181818,
@@ -42,13 +46,17 @@ export class Anglerfish {
       metalness: 0.9,
       clearcoat: 1.0,
       clearcoatRoughness: 0.1,
+      emissive: 0x105020,
+      emissiveIntensity: 0.2,
     });
     const fleshMat = new THREE.MeshPhysicalMaterial({
-      color: 0x1a0818,
+      color: 0x1a1820,
       roughness: 0.35,
-      metalness: 0.15,
+      metalness: 0,
       clearcoat: 0.9,
       clearcoatRoughness: 0.2,
+      emissive: 0x105020,
+      emissiveIntensity: 0.5,
     });
 
     // Body - biomechanical elongated mass with rib deformation
@@ -126,9 +134,11 @@ export class Anglerfish {
     const toothMat = new THREE.MeshPhysicalMaterial({
       color: 0xddddc8,
       roughness: 0.15,
-      metalness: 0.6,
+      metalness: 0.1,
       clearcoat: 1.0,
       clearcoatRoughness: 0.1,
+      emissive: 0x504030,
+      emissiveIntensity: 0.3,
     });
     for (let i = 0; i < 14; i++) {
       const angle = (i / 14) * Math.PI;

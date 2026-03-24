@@ -45,14 +45,17 @@ export class Amalgam {
     const limbs = [];
 
     let fleshMat = new THREE.MeshPhysicalMaterial({
-      color: 0x120810, roughness: 0.25, metalness: 0.3,
+      color: 0x201018, roughness: 0.25, metalness: 0,
       clearcoat: 0.9, clearcoatRoughness: 0.15,
+      emissive: 0x502040, emissiveIntensity: 0.7,
     });
     let metalMat = new THREE.MeshPhysicalMaterial({
       color: 0x0a0a0a, roughness: 0.12, metalness: 0.85, clearcoat: 1.0,
+      emissive: 0x203858, emissiveIntensity: 0.3,
     });
     let boneMat = new THREE.MeshPhysicalMaterial({
-      color: 0x2a2218, roughness: 0.25, metalness: 0.4, clearcoat: 0.8,
+      color: 0x3a3228, roughness: 0.25, metalness: 0, clearcoat: 0.8,
+      emissive: 0x504030, emissiveIntensity: 0.5,
     });
     if (useFarMat) {
       fleshMat = toStandardMaterial(fleshMat);

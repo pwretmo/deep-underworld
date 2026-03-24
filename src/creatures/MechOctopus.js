@@ -19,16 +19,19 @@ export class MechOctopus {
 
   _buildModel() {
     const bodyMat = new THREE.MeshPhysicalMaterial({
-      color: 0x0a0810, roughness: 0.15, metalness: 0.7,
+      color: 0x182028, roughness: 0.15, metalness: 0,
       clearcoat: 1.0, clearcoatRoughness: 0.08,
+      emissive: 0x203858, emissiveIntensity: 0.6,
     });
     const metalMat = new THREE.MeshPhysicalMaterial({
       color: 0x141414, roughness: 0.1, metalness: 0.9,
       clearcoat: 1.0,
+      emissive: 0x204060, emissiveIntensity: 0.3,
     });
     const organicMat = new THREE.MeshPhysicalMaterial({
-      color: 0x180810, roughness: 0.3, metalness: 0.25,
+      color: 0x201828, roughness: 0.3, metalness: 0,
       clearcoat: 0.7,
+      emissive: 0x203858, emissiveIntensity: 0.5,
     });
 
     // Mantle dome - riveted industrial look

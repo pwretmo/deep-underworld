@@ -52,21 +52,22 @@ export class FacelessOne {
 
     // --- Materials ---
     let skinMat = new THREE.MeshPhysicalMaterial({
-      color: 0x0a0810, roughness: 0.15, metalness: 0.3,
+      color: 0x1a1020, roughness: 0.15, metalness: 0,
       clearcoat: 1.0, clearcoatRoughness: 0.05,
-      emissive: 0x0c0618, emissiveIntensity: 0.6,
+      emissive: 0x502040, emissiveIntensity: 0.7,
       sheen: 1.0, sheenColor: new THREE.Color(0x1a0a2e), sheenRoughness: 0.4,
       iridescence: 0.15, iridescenceIOR: 1.3,
     });
     let metalMat = new THREE.MeshPhysicalMaterial({
       color: 0x141414, roughness: 0.1, metalness: 0.9,
       clearcoat: 1.0, clearcoatRoughness: 0.03,
-      emissive: 0x0a0412, emissiveIntensity: 0.4,
+      emissive: 0x203858, emissiveIntensity: 0.3,
       sheen: 0.5, sheenColor: new THREE.Color(0x0a0818), sheenRoughness: 0.3,
     });
     let boneMat = new THREE.MeshPhysicalMaterial({
-      color: 0x2a2218, roughness: 0.35, metalness: 0.4,
+      color: 0x3a3228, roughness: 0.35, metalness: 0,
       clearcoat: 0.6, clearcoatRoughness: 0.15,
+      emissive: 0x504030, emissiveIntensity: 0.5,
     });
     if (useFarMat) {
       skinMat = toStandardMaterial(skinMat);
@@ -146,10 +147,11 @@ export class FacelessOne {
     // --- Near-only details ---
     if (profile.tendrils) {
       let tendrilMat = new THREE.MeshPhysicalMaterial({
-        color: 0x0c0a14, roughness: 0.12, metalness: 0.25,
+        color: 0x1c1828, roughness: 0.12, metalness: 0,
         clearcoat: 1.0, clearcoatRoughness: 0.04,
         sheen: 1.0, sheenColor: new THREE.Color(0x1a0a2e), sheenRoughness: 0.3,
         iridescence: 0.2, iridescenceIOR: 1.3,
+        emissive: 0x502040, emissiveIntensity: 0.5,
       });
       const tendrilConfigs = [
         { origin: [0.3, 2.45, 0.12], length: 1.2, radius: 0.03, phase: 0 },
@@ -220,8 +222,8 @@ export class FacelessOne {
 
     if (profile.veins) {
       const veinMat = new THREE.MeshPhysicalMaterial({
-        color: 0x1a0520, emissive: 0x2a0835, emissiveIntensity: 0.4,
-        roughness: 0.3, metalness: 0.2, transparent: true, opacity: 0.7,
+        color: 0x1a0520, emissive: 0x502040, emissiveIntensity: 0.5,
+        roughness: 0.3, metalness: 0, transparent: true, opacity: 0.7,
       });
       for (let i = 0; i < 4; i++) {
         const veinGeo = new THREE.CylinderGeometry(0.008, 0.005, 0.6 + Math.random() * 0.4, 4);
@@ -245,8 +247,9 @@ export class FacelessOne {
 
     // Trailing veil
     let veilMat = new THREE.MeshPhysicalMaterial({
-      color: 0x080610, roughness: 0.3, metalness: 0.3,
+      color: 0x181428, roughness: 0.3, metalness: 0,
       transparent: true, opacity: 0.25, side: THREE.DoubleSide,
+      emissive: 0x502040, emissiveIntensity: 0.5,
     });
     if (useFarMat) veilMat = toStandardMaterial(veilMat);
     const veilGeo = new THREE.PlaneGeometry(1.5, 2, useFarMat ? 2 : 4, useFarMat ? 4 : 8);

@@ -21,12 +21,12 @@ export class Husk {
     const shellMat = new THREE.MeshPhysicalMaterial({
       color: 0x201810, roughness: 0.25, metalness: 0,
       clearcoat: 0.7, clearcoatRoughness: 0.2,
-      emissive: 0x403020, emissiveIntensity: 0.7,
+      emissive: 0x502040, emissiveIntensity: 0.7,
     });
     const innerMat = new THREE.MeshPhysicalMaterial({
       color: 0x100810, roughness: 0.3, metalness: 0,
       side: THREE.DoubleSide,
-      emissive: 0x301850, emissiveIntensity: 0.8,
+      emissive: 0x502040, emissiveIntensity: 0.8,
     });
 
     // Split shell halves - like a molted exoskeleton

@@ -18,13 +18,14 @@ export class NeedleFish {
 
   _buildModel() {
     const metalMat = new THREE.MeshPhysicalMaterial({
-      color: 0x101018, roughness: 0.1, metalness: 0.9,
+      color: 0x181828, roughness: 0.1, metalness: 0,
       clearcoat: 1.0, clearcoatRoughness: 0.05,
-      emissive: 0x080210, emissiveIntensity: 0.4,
+      emissive: 0x502040, emissiveIntensity: 0.6,
     });
     const spineMat = new THREE.MeshPhysicalMaterial({
-      color: 0x302820, roughness: 0.2, metalness: 0.5,
+      color: 0x3a3228, roughness: 0.2, metalness: 0,
       clearcoat: 0.9,
+      emissive: 0x504030, emissiveIntensity: 0.4,
     });
 
     // Ultra-thin elongated body
@@ -89,8 +90,9 @@ export class NeedleFish {
     // Thin tail fin
     const tailGeo = new THREE.PlaneGeometry(0.3, 0.15, 1, 1);
     const tailMat = new THREE.MeshPhysicalMaterial({
-      color: 0x101018, roughness: 0.1, metalness: 0.8,
+      color: 0x181828, roughness: 0.1, metalness: 0,
       clearcoat: 1.0, side: THREE.DoubleSide,
+      emissive: 0x502040, emissiveIntensity: 0.4,
     });
     const tail = new THREE.Mesh(tailGeo, tailMat);
     tail.position.x = -2.1;

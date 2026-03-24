@@ -47,13 +47,15 @@ export class IronWhale {
     let hullMat = new THREE.MeshPhysicalMaterial({
       color: 0x0a0a0c, roughness: 0.2, metalness: 0.75,
       clearcoat: 1.0, clearcoatRoughness: 0.1,
-      emissive: 0x040610, emissiveIntensity: 0.3,
+      emissive: 0x203858, emissiveIntensity: 0.5,
     });
     let barnMat = new THREE.MeshPhysicalMaterial({
-      color: 0x2a2218, roughness: 0.35, metalness: 0.4, clearcoat: 0.6,
+      color: 0x3a3228, roughness: 0.35, metalness: 0, clearcoat: 0.6,
+      emissive: 0x504030, emissiveIntensity: 0.5,
     });
     let metalMat = new THREE.MeshPhysicalMaterial({
       color: 0x181818, roughness: 0.1, metalness: 0.92, clearcoat: 1.0,
+      emissive: 0x204060, emissiveIntensity: 0.3,
     });
     if (useFarMat) {
       hullMat = toStandardMaterial(hullMat);

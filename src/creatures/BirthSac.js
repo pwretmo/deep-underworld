@@ -17,13 +17,15 @@ export class BirthSac {
 
   _buildModel() {
     const sacMat = new THREE.MeshPhysicalMaterial({
-      color: 0x180810, roughness: 0.2, metalness: 0.2,
+      color: 0x201018, roughness: 0.2, metalness: 0,
       clearcoat: 0.9, transparent: true, opacity: 0.7,
       transmission: 0.3, thickness: 0.5,
+      emissive: 0x502040, emissiveIntensity: 0.6,
     });
     const veinMat = new THREE.MeshPhysicalMaterial({
-      color: 0x0c0808, roughness: 0.15, metalness: 0.7,
+      color: 0x1a1018, roughness: 0.15, metalness: 0,
       clearcoat: 1.0,
+      emissive: 0x602040, emissiveIntensity: 0.6,
     });
     const innerMat = new THREE.MeshPhysicalMaterial({
       color: 0x330011, emissive: 0x220008, emissiveIntensity: 1,

@@ -19,17 +19,19 @@ export class BioMechCrab {
 
   _buildModel() {
     const shellMat = new THREE.MeshPhysicalMaterial({
-      color: 0x0c0a08, roughness: 0.2, metalness: 0.7,
+      color: 0x182028, roughness: 0.2, metalness: 0,
       clearcoat: 1.0, clearcoatRoughness: 0.1,
-      emissive: 0x0a0402, emissiveIntensity: 0.4,
+      emissive: 0x203858, emissiveIntensity: 0.6,
     });
     const metalMat = new THREE.MeshPhysicalMaterial({
       color: 0x181818, roughness: 0.15, metalness: 0.9,
       clearcoat: 1.0,
+      emissive: 0x204060, emissiveIntensity: 0.3,
     });
     const jointMat = new THREE.MeshPhysicalMaterial({
-      color: 0x201810, roughness: 0.3, metalness: 0.5,
+      color: 0x302820, roughness: 0.3, metalness: 0,
       clearcoat: 0.8,
+      emissive: 0x203858, emissiveIntensity: 0.5,
     });
 
     // Carapace - flattened dome with industrial ribbing

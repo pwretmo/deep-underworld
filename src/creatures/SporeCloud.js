@@ -19,9 +19,9 @@ export class SporeCloud {
 
   _buildModel() {
     const sporeMat = new THREE.MeshPhysicalMaterial({
-      color: 0x0a100a, roughness: 0.2, metalness: 0.4,
+      color: 0x102018, roughness: 0.2, metalness: 0,
       clearcoat: 0.8, transparent: true, opacity: 0.7,
-      emissive: 0x002200, emissiveIntensity: 0.5,
+      emissive: 0x105020, emissiveIntensity: 0.7,
     });
     const coreMat = new THREE.MeshPhysicalMaterial({
       color: 0x00ff44, emissive: 0x00aa22, emissiveIntensity: 2,
