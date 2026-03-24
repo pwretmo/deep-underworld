@@ -1,28 +1,5 @@
 import * as THREE from 'three';
-import { qualityManager } from '../QualityManager.js';
-import {
-  createVolumetricBeamMaterial,
-  createFallbackBeamMaterial,
-  createVolumetricDustMaterial,
-} from '../shaders/VolumetricBeamMaterial.js';
-
-// Soft circular particle texture (avoids hard square pixels)
-function createDustTexture() {
-  const size = 32;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  gradient.addColorStop(0, 'rgba(255,255,255,0.8)');
-  gradient.addColorStop(0.4, 'rgba(255,255,255,0.3)');
-  gradient.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, size, size);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.needsUpdate = true;
-  return tex;
-}
+import { ExternalLightingSystem } from './ExternalLightingSystem.js';
 
 /**
  * Detect if the GPU can handle volumetric shaders.
@@ -65,43 +42,13 @@ export class Player {
     // Volumetric quality: true = shader-based beam, false = flat fallback
     this._volumetricEnabled = canUseVolumetricBeam(renderer);
 
-    // Submarine flashlight
-    this.flashlight = new THREE.Group();
-    const spotlight = new THREE.SpotLight(0xccddff, 200, 120, Math.PI / 7, 0.3, 1.4);
-    spotlight.position.set(0, 0, 0);
-    spotlight.target.position.set(0, 0, -1);
-    this.flashlight.add(spotlight);
-    this.flashlight.add(spotlight.target);
-
-    // Volumetric light cone — uses shader or flat fallback based on GPU capability
-    const coneLength = 50;
-    const coneRadius = Math.tan(Math.PI / 7) * coneLength;
-    const coneGeo = new THREE.ConeGeometry(coneRadius, coneLength, 32, 8, true);
-    coneGeo.translate(0, -coneLength / 2, 0);
-    coneGeo.rotateX(Math.PI / 2);
-
-    if (this._volumetricEnabled) {
-      this._beamMaterial = createVolumetricBeamMaterial();
-      this._beamMaterial.uniforms.beamLength.value = coneLength;
-    } else {
-      this._beamMaterial = createFallbackBeamMaterial();
-    }
-    this.lightCone = new THREE.Mesh(coneGeo, this._beamMaterial);
-    this.flashlight.add(this.lightCone);
-
-    // Dust particles in the beam
-    const dustCount = qualityManager.getSettings().particleCount;
-    this._dustConeLength = coneLength;
-    this._dustTexture = createDustTexture();
-    this._buildDustParticles(dustCount, coneLength);
+    this.externalLighting = new ExternalLightingSystem({
+      volumetricEnabled: this._volumetricEnabled,
+    });
+    this.flashlight = this.externalLighting.group;
 
     this.flashlight.visible = false;
     camera.add(this.flashlight);
-
-    // Rebuild particles on quality change
-    window.addEventListener('qualitychange', (e) => {
-      this._rebuildDustParticles(e.detail.settings.particleCount);
-    });
 
     // Submarine ambient glow — visible cockpit illumination
     this.subLight = new THREE.PointLight(0x445577, 8, 65);
@@ -126,93 +73,6 @@ export class Player {
     this._physicsBody = null;
 
     this._setupControls();
-  }
-
-  _buildDustParticles(count, coneLength) {
-    const dustGeo = new THREE.BufferGeometry();
-    const dustPositions = new Float32Array(count * 3);
-    const dustSizes = new Float32Array(count);
-    const dustPhases = new Float32Array(count);
-    const dustSpeeds = new Float32Array(count);
-    for (let i = 0; i < count; i++) {
-      const z = -Math.random() * coneLength;
-      const maxR = Math.tan(Math.PI / 7) * Math.abs(z) * 0.8;
-      const angle = Math.random() * Math.PI * 2;
-      const r = Math.random() * maxR;
-      dustPositions[i * 3] = Math.cos(angle) * r;
-      dustPositions[i * 3 + 1] = Math.sin(angle) * r;
-      dustPositions[i * 3 + 2] = z;
-      dustSizes[i] = 0.6 + Math.random() * 1.4;
-      dustPhases[i] = Math.random();
-      const depthT = Math.abs(z) / coneLength;
-      dustSpeeds[i] = 0.3 + (1.0 - depthT) * 0.7;
-    }
-    dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPositions, 3));
-    dustGeo.setAttribute('size', new THREE.BufferAttribute(dustSizes, 1));
-    dustGeo.setAttribute('phase', new THREE.BufferAttribute(dustPhases, 1));
-
-    if (this._volumetricEnabled) {
-      this._dustMaterial = createVolumetricDustMaterial(this._dustTexture);
-      this._dustMaterial.uniforms.beamLength.value = coneLength;
-    } else {
-      // GPU-driven dust ShaderMaterial: drift computed in vertex shader
-      this._dustMaterial = new THREE.ShaderMaterial({
-        uniforms: {
-          time: { value: 0 },
-          map: { value: this._dustTexture },
-        },
-        vertexShader: /* glsl */ `
-          attribute float size;
-          attribute float phase;
-          uniform float time;
-          varying float vAlpha;
-
-          void main() {
-            // GPU-driven drift around base position using phase + seed
-            vec3 pos = position;
-            float spd = 0.3 + (1.0 - clamp(-pos.z / 50.0, 0.0, 1.0)) * 0.7;
-            float idx = phase * 1000.0;
-            pos.x += sin(time * 0.3 * spd + idx * 0.7) * 0.18 * spd;
-            pos.y += cos(time * 0.4 * spd + idx * 0.5) * 0.18 * spd;
-            pos.z += sin(time * 0.2 * spd + idx * 0.3) * 0.12 * spd;
-
-            // Fade based on distance along beam
-            float depthT = clamp(-pos.z / 50.0, 0.0, 1.0);
-            vAlpha = 0.35 * (0.3 + 0.7 * (1.0 - depthT));
-
-            vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
-            gl_PointSize = size * 0.08 * (300.0 / -mvPosition.z);
-            gl_Position = projectionMatrix * mvPosition;
-          }
-        `,
-        fragmentShader: /* glsl */ `
-          uniform sampler2D map;
-          varying float vAlpha;
-
-          void main() {
-            vec4 texColor = texture2D(map, gl_PointCoord);
-            gl_FragColor = vec4(0.6, 0.667, 0.8, vAlpha) * texColor;
-          }
-        `,
-        transparent: true,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      });
-    }
-
-    this.dustParticles = new THREE.Points(dustGeo, this._dustMaterial);
-    this.flashlight.add(this.dustParticles);
-    this._dustBasePositions = dustPositions.slice();
-    this._dustSpeeds = dustSpeeds;
-  }
-
-  _rebuildDustParticles(count) {
-    if (this.dustParticles) {
-      this.flashlight.remove(this.dustParticles);
-      this.dustParticles.geometry.dispose();
-      this.dustParticles.material.dispose();
-    }
-    this._buildDustParticles(count, this._dustConeLength);
   }
 
   _setupControls() {
@@ -342,35 +202,11 @@ export class Player {
       this.camera.position.y += bob * dt;
     }
 
-    // Shared time for dust particles and beam shader
+    this.externalLighting.setEnabled(this.flashlight.visible);
+
+    // Shared time for beam shader animation
     const time = performance.now() * 0.001;
-
-    // Animate dust particles in flashlight beam
-    if (this.flashlight.visible && this.dustParticles) {
-      if (this._volumetricEnabled) {
-        // Volumetric path still uses CPU drift + shader uniforms
-        const pos = this.dustParticles.geometry.attributes.position;
-        for (let i = 0; i < pos.count; i++) {
-          const bx = this._dustBasePositions[i * 3];
-          const by = this._dustBasePositions[i * 3 + 1];
-          const bz = this._dustBasePositions[i * 3 + 2];
-          const spd = this._dustSpeeds[i];
-          pos.setX(i, bx + Math.sin(time * 0.3 * spd + i * 0.7) * 0.18 * spd);
-          pos.setY(i, by + Math.cos(time * 0.4 * spd + i * 0.5) * 0.18 * spd);
-          pos.setZ(i, bz + Math.sin(time * 0.2 * spd + i * 0.3) * 0.12 * spd);
-        }
-        pos.needsUpdate = true;
-        this._dustMaterial.uniforms.time.value = time;
-      } else {
-        // Non-volumetric path: drift runs entirely on GPU via ShaderMaterial
-        this._dustMaterial.uniforms.time.value = time;
-      }
-    }
-
-    // Update volumetric beam shader uniforms
-    if (this.flashlight.visible && this._volumetricEnabled && this._beamMaterial.uniforms) {
-      this._beamMaterial.uniforms.time.value = time;
-    }
+    this.externalLighting.update(dt, this.depth, time);
   }
 
   /**
@@ -379,17 +215,7 @@ export class Player {
    * @param {THREE.Fog} fog
    */
   updateFogUniforms(fog) {
-    if (!this._volumetricEnabled || !fog) return;
-    const beamU = this._beamMaterial.uniforms;
-    beamU.fogColor.value.copy(fog.color);
-    beamU.fogNear.value = fog.near;
-    beamU.fogFar.value = fog.far;
-
-    if (this._dustMaterial.uniforms) {
-      const dustU = this._dustMaterial.uniforms;
-      dustU.fogColor.value.copy(fog.color);
-      dustU.fogNear.value = fog.near;
-      dustU.fogFar.value = fog.far;
-    }
+    if (!fog) return;
+    this.externalLighting.updateFogUniforms(fog);
   }
 }
