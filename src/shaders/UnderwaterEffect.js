@@ -113,6 +113,8 @@ const UnderwaterShader = {
         : mix(deepTint, abyssTint, (depthT - 0.5) * 2.0);
       color.rgb *= tint;
 
+      // Keep perceived darkness driven by lighting and fog, not post luminance crush.
+
       // Depth-aware contrast to strengthen separation in mid/deep zones.
       float contrast = mix(1.0, grading.x, depthBlend);
       color.rgb = (color.rgb - 0.18) * contrast + 0.18;

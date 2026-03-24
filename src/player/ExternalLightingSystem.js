@@ -114,11 +114,11 @@ export class ExternalLightingSystem {
     this.group.visible = enabled;
   }
 
-  update(_dt, depth, time) {
-    const depthFactor = THREE.MathUtils.smoothstep(depth, 35, 900);
-    const intensityAttenuation = THREE.MathUtils.lerp(1.0, 0.48, depthFactor);
-    const rangeAttenuation = THREE.MathUtils.lerp(1.0, 0.64, depthFactor);
-    const beamOpacityScale = THREE.MathUtils.lerp(1.0, 0.52, depthFactor);
+  update(_dt, _depth, time) {
+    // Keep lamp output stable across depth; scene fog/scattering handles perceived attenuation.
+    const intensityAttenuation = 1.0;
+    const rangeAttenuation = 1.0;
+    const beamOpacityScale = 1.0;
 
     for (let i = 0; i < this.headlights.length; i++) {
       const light = this.headlights[i];
@@ -132,8 +132,8 @@ export class ExternalLightingSystem {
       const light = this.hullLights[i];
       const baseIntensity = light.userData.baseIntensity ?? this.config.hullIntensity;
       const baseRange = light.userData.baseRange ?? this.config.hullRange;
-      light.intensity = baseIntensity * THREE.MathUtils.lerp(1.0, 0.38, depthFactor);
-      light.distance = baseRange * THREE.MathUtils.lerp(1.0, 0.58, depthFactor);
+      light.intensity = baseIntensity;
+      light.distance = baseRange;
     }
 
     for (let i = 0; i < this._beamMaterials.length; i++) {
