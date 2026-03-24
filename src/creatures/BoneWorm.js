@@ -20,14 +20,15 @@ export class BoneWorm {
   _buildModel() {
     const segCount = 14;
     const boneMat = new THREE.MeshPhysicalMaterial({
-      color: 0x2a2218, roughness: 0.3, metalness: 0.5,
+      color: 0x3a3228, roughness: 0.3, metalness: 0,
       clearcoat: 1.0, clearcoatRoughness: 0.15,
+      emissive: 0x504030, emissiveIntensity: 0.5,
     });
     const fleshMat = new THREE.MeshPhysicalMaterial({
-      color: 0x1a0a18, roughness: 0.2, metalness: 0.3,
+      color: 0x1a1020, roughness: 0.2, metalness: 0,
       clearcoat: 0.9, clearcoatRoughness: 0.1,
       transparent: true, opacity: 0.7,
-      emissive: 0x1a0620, emissiveIntensity: 0.8,
+      emissive: 0x502040, emissiveIntensity: 0.8,
     });
 
     for (let i = 0; i < segCount; i++) {
@@ -63,8 +64,9 @@ export class BoneWorm {
     const headGeo = new THREE.SphereGeometry(0.7, 16, 12);
     headGeo.scale(1.4, 0.9, 0.9);
     const head = new THREE.Mesh(headGeo, new THREE.MeshPhysicalMaterial({
-      color: 0x100810, roughness: 0.2, metalness: 0.6,
+      color: 0x1a1020, roughness: 0.2, metalness: 0,
       clearcoat: 1.0, clearcoatRoughness: 0.1,
+      emissive: 0x504030, emissiveIntensity: 0.5,
     }));
     head.position.set(0.5, 0, 0);
     this.group.add(head);
@@ -73,7 +75,7 @@ export class BoneWorm {
     for (let i = 0; i < 8; i++) {
       const a = (i / 8) * Math.PI * 2;
       const tGeo = new THREE.ConeGeometry(0.03, 0.3, 4);
-      const tMat = new THREE.MeshPhysicalMaterial({ color: 0xaa9970, roughness: 0.2, metalness: 0.6, clearcoat: 0.8 });
+      const tMat = new THREE.MeshPhysicalMaterial({ color: 0xaa9970, roughness: 0.2, metalness: 0.1, clearcoat: 0.8, emissive: 0x504030, emissiveIntensity: 0.3 });
       const tooth = new THREE.Mesh(tGeo, tMat);
       tooth.position.set(1.1, Math.sin(a) * 0.35, Math.cos(a) * 0.35);
       tooth.rotation.z = Math.PI / 2;

@@ -19,12 +19,14 @@ export class Sentinel {
 
   _buildModel() {
     const bodyMat = new THREE.MeshPhysicalMaterial({
-      color: 0x080810, roughness: 0.15, metalness: 0.75,
+      color: 0x182028, roughness: 0.15, metalness: 0,
       clearcoat: 1.0, clearcoatRoughness: 0.08,
+      emissive: 0x203858, emissiveIntensity: 0.6,
     });
     const boneMat = new THREE.MeshPhysicalMaterial({
-      color: 0x2a2218, roughness: 0.25, metalness: 0.4,
+      color: 0x3a3228, roughness: 0.25, metalness: 0,
       clearcoat: 0.8,
+      emissive: 0x504030, emissiveIntensity: 0.5,
     });
 
     // Head/eye pod - smooth sphere with massive single eye

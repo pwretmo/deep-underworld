@@ -19,9 +19,10 @@ export class SpinalEel {
   _buildModel() {
     const segCount = 18;
     const bodyMat = new THREE.MeshPhysicalMaterial({
-      color: 0x0c0818, roughness: 0.2, metalness: 0.4,
+      color: 0x181030, roughness: 0.2, metalness: 0,
       clearcoat: 1.0, clearcoatRoughness: 0.1,
       transparent: true, opacity: 0.6,
+      emissive: 0x282050, emissiveIntensity: 0.6,
     });
     const spineMat = new THREE.MeshPhysicalMaterial({
       color: 0x88ffaa, emissive: 0x44ff66, emissiveIntensity: 0.8,
@@ -52,8 +53,9 @@ export class SpinalEel {
     const headGeo = new THREE.SphereGeometry(0.5, 16, 12);
     headGeo.scale(1.8, 0.8, 0.8);
     const headMat = new THREE.MeshPhysicalMaterial({
-      color: 0x0a0610, roughness: 0.15, metalness: 0.5,
+      color: 0x181030, roughness: 0.15, metalness: 0,
       clearcoat: 1.0, clearcoatRoughness: 0.1,
+      emissive: 0x281848, emissiveIntensity: 0.6,
     });
     const head = new THREE.Mesh(headGeo, headMat);
     head.position.set(0.6, 0, 0);

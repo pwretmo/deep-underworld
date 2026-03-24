@@ -52,21 +52,22 @@ export class FacelessOne {
 
     // --- Materials ---
     let skinMat = new THREE.MeshPhysicalMaterial({
-      color: 0x0a0810, roughness: 0.15, metalness: 0.3,
+      color: 0x1a1020, roughness: 0.15, metalness: 0,
       clearcoat: 1.0, clearcoatRoughness: 0.05,
-      emissive: 0x0c0618, emissiveIntensity: 0.6,
+      emissive: 0x502040, emissiveIntensity: 0.7,
       sheen: 1.0, sheenColor: new THREE.Color(0x1a0a2e), sheenRoughness: 0.4,
       iridescence: 0.15, iridescenceIOR: 1.3,
     });
     let metalMat = new THREE.MeshPhysicalMaterial({
       color: 0x141414, roughness: 0.1, metalness: 0.9,
       clearcoat: 1.0, clearcoatRoughness: 0.03,
-      emissive: 0x0a0412, emissiveIntensity: 0.4,
+      emissive: 0x203858, emissiveIntensity: 0.3,
       sheen: 0.5, sheenColor: new THREE.Color(0x0a0818), sheenRoughness: 0.3,
     });
     let boneMat = new THREE.MeshPhysicalMaterial({
-      color: 0x2a2218, roughness: 0.35, metalness: 0.4,
+      color: 0x3a3228, roughness: 0.35, metalness: 0,
       clearcoat: 0.6, clearcoatRoughness: 0.15,
+      emissive: 0x504030, emissiveIntensity: 0.5,
     });
     if (useFarMat) {
       skinMat = toStandardMaterial(skinMat);

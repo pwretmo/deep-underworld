@@ -20,25 +20,25 @@ export class GhostShark {
     const bodyMat = new THREE.MeshStandardMaterial({
       color: 0x1a1a30,
       roughness: 0.35,
-      metalness: 0.1,
+      metalness: 0,
       transparent: true,
       opacity: 0.75,
-      emissive: 0x283858,
-      emissiveIntensity: 0.5,
+      emissive: 0x282050,
+      emissiveIntensity: 0.6,
     });
     const boneMat = new THREE.MeshStandardMaterial({
       color: 0x504030,
       roughness: 0.4,
-      metalness: 0.1,
-      emissive: 0x5a4838,
-      emissiveIntensity: 0.35,
+      metalness: 0,
+      emissive: 0x504030,
+      emissiveIntensity: 0.4,
     });
     const metalMat = new THREE.MeshStandardMaterial({
       color: 0x282838,
       roughness: 0.25,
       metalness: 0.35,
-      emissive: 0x384058,
-      emissiveIntensity: 0.35,
+      emissive: 0x282050,
+      emissiveIntensity: 0.4,
     });
 
     // Streamlined body with biomechanical ribbing

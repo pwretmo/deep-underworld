@@ -19,8 +19,9 @@ export class SirenSkull {
 
   _buildModel() {
     const boneMat = new THREE.MeshPhysicalMaterial({
-      color: 0x302820, roughness: 0.3, metalness: 0.4,
+      color: 0x3a3228, roughness: 0.3, metalness: 0,
       clearcoat: 0.9, clearcoatRoughness: 0.15,
+      emissive: 0x504030, emissiveIntensity: 0.5,
     });
 
     // Elongated skull
@@ -83,9 +84,10 @@ export class SirenSkull {
 
     // Trailing membrane tendrils from the back of skull
     const membraneMat = new THREE.MeshPhysicalMaterial({
-      color: 0x180810, roughness: 0.25, metalness: 0.3,
+      color: 0x201020, roughness: 0.25, metalness: 0,
       transparent: true, opacity: 0.4, side: THREE.DoubleSide,
       clearcoat: 0.5,
+      emissive: 0x504030, emissiveIntensity: 0.4,
     });
     for (let i = 0; i < 5; i++) {
       const w = 0.3 + Math.random() * 0.5;

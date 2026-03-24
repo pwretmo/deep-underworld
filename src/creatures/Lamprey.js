@@ -21,15 +21,16 @@ export class Lamprey {
     const metalMat = new THREE.MeshPhysicalMaterial({
       color: 0x0c0a08, roughness: 0.15, metalness: 0.8,
       clearcoat: 1.0, clearcoatRoughness: 0.05,
+      emissive: 0x502040, emissiveIntensity: 0.4,
     });
     const fleshMat = new THREE.MeshPhysicalMaterial({
-      color: 0x1a0810, roughness: 0.3, metalness: 0.3,
+      color: 0x1a1020, roughness: 0.3, metalness: 0,
       clearcoat: 0.8,
-      emissive: 0x100408, emissiveIntensity: 0.5,
+      emissive: 0x602040, emissiveIntensity: 0.6,
     });
     const toothMat = new THREE.MeshPhysicalMaterial({
-      color: 0x403028, roughness: 0.2, metalness: 0.5,
-      clearcoat: 1.0,
+      color: 0x504038, roughness: 0.2, metalness: 0, clearcoat: 1.0,
+      emissive: 0x504030, emissiveIntensity: 0.4,
     });
 
     // Segmented body

@@ -20,16 +20,19 @@ export class AbyssWraith {
 
   _buildModel() {
     const bodyMat = new THREE.MeshPhysicalMaterial({
-      color: 0x060408, roughness: 0.1, metalness: 0.7,
+      color: 0x181030, roughness: 0.1, metalness: 0,
       clearcoat: 1.0, clearcoatRoughness: 0.05,
+      emissive: 0x281848, emissiveIntensity: 0.7,
     });
     const boneMat = new THREE.MeshPhysicalMaterial({
-      color: 0x2a2218, roughness: 0.2, metalness: 0.5,
+      color: 0x3a3228, roughness: 0.2, metalness: 0,
       clearcoat: 0.9,
+      emissive: 0x504030, emissiveIntensity: 0.5,
     });
     const shadowMat = new THREE.MeshPhysicalMaterial({
-      color: 0x020204, roughness: 0.3, metalness: 0.3,
+      color: 0x101020, roughness: 0.3, metalness: 0,
       transparent: true, opacity: 0.3, side: THREE.DoubleSide,
+      emissive: 0x282050, emissiveIntensity: 0.5,
     });
 
     // Elongated skull

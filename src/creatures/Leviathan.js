@@ -53,17 +53,19 @@ export class Leviathan {
 
     // Materials
     let bodyMat = new THREE.MeshPhysicalMaterial({
-      color: 0x080610, roughness: 0.25, metalness: 0.6,
+      color: 0x1a1028, roughness: 0.25, metalness: 0,
       clearcoat: 1.0, clearcoatRoughness: 0.15,
+      emissive: 0x502040, emissiveIntensity: 0.6,
     });
     let boneMat = new THREE.MeshPhysicalMaterial({
-      color: 0x2a2218, roughness: 0.35, metalness: 0.4,
+      color: 0x3a3228, roughness: 0.35, metalness: 0,
       clearcoat: 0.8, clearcoatRoughness: 0.2,
+      emissive: 0x504030, emissiveIntensity: 0.5,
     });
     let fleshMat = new THREE.MeshPhysicalMaterial({
-      color: 0x1a0818, roughness: 0.3, metalness: 0.3,
+      color: 0x1a1020, roughness: 0.3, metalness: 0,
       clearcoat: 0.9, clearcoatRoughness: 0.1,
-      emissive: 0x0a0008, emissiveIntensity: 0.1,
+      emissive: 0x602040, emissiveIntensity: 0.7,
     });
 
     if (useFarMat) {

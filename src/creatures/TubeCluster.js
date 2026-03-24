@@ -17,10 +17,12 @@ export class TubeCluster {
     const metalMat = new THREE.MeshPhysicalMaterial({
       color: 0x0c0c0c, roughness: 0.1, metalness: 0.9,
       clearcoat: 1.0, clearcoatRoughness: 0.05,
+      emissive: 0x203858, emissiveIntensity: 0.3,
     });
     const organicMat = new THREE.MeshPhysicalMaterial({
-      color: 0x150810, roughness: 0.3, metalness: 0.25,
+      color: 0x201020, roughness: 0.3, metalness: 0,
       clearcoat: 0.7,
+      emissive: 0x502040, emissiveIntensity: 0.6,
     });
     const glowMat = new THREE.MeshPhysicalMaterial({
       color: 0x00ffaa, emissive: 0x00aa66, emissiveIntensity: 1.5,

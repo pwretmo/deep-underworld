@@ -19,17 +19,19 @@ export class RibCage {
 
   _buildModel() {
     const boneMat = new THREE.MeshPhysicalMaterial({
-      color: 0x2a2218, roughness: 0.25, metalness: 0.4,
+      color: 0x3a3228, roughness: 0.25, metalness: 0,
       clearcoat: 0.9, clearcoatRoughness: 0.15,
+      emissive: 0x504030, emissiveIntensity: 0.5,
     });
     const organMat = new THREE.MeshPhysicalMaterial({
-      color: 0x220815, roughness: 0.3, metalness: 0.2,
+      color: 0x2a1020, roughness: 0.3, metalness: 0,
       clearcoat: 0.7, transparent: true, opacity: 0.7,
-      emissive: 0x110008, emissiveIntensity: 0.5,
+      emissive: 0x502040, emissiveIntensity: 0.6,
     });
     const metalMat = new THREE.MeshPhysicalMaterial({
       color: 0x101010, roughness: 0.15, metalness: 0.85,
       clearcoat: 1.0,
+      emissive: 0x203858, emissiveIntensity: 0.3,
     });
 
     // Spinal column - central vertical support

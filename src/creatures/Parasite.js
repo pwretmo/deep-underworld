@@ -20,18 +20,20 @@ export class Parasite {
 
   _buildModel() {
     const sacMat = new THREE.MeshPhysicalMaterial({
-      color: 0x1a0810, roughness: 0.2, metalness: 0.2,
+      color: 0x201018, roughness: 0.2, metalness: 0,
       clearcoat: 0.9, transparent: true, opacity: 0.8,
       transmission: 0.2, thickness: 0.3,
-      emissive: 0x180610, emissiveIntensity: 0.7,
+      emissive: 0x502040, emissiveIntensity: 0.7,
     });
     const metalMat = new THREE.MeshPhysicalMaterial({
       color: 0x101010, roughness: 0.1, metalness: 0.85,
       clearcoat: 1.0,
+      emissive: 0x203858, emissiveIntensity: 0.3,
     });
     const veinMat = new THREE.MeshPhysicalMaterial({
-      color: 0x0a0608, roughness: 0.2, metalness: 0.5,
+      color: 0x1a1018, roughness: 0.2, metalness: 0,
       clearcoat: 0.8,
+      emissive: 0x602040, emissiveIntensity: 0.6,
     });
 
     // Main body sac

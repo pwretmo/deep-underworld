@@ -50,14 +50,17 @@ export class AbyssalMaw {
     const rings = [];
 
     let bodyMat = new THREE.MeshPhysicalMaterial({
-      color: 0x080610, roughness: 0.2, metalness: 0.6,
+      color: 0x1a1028, roughness: 0.2, metalness: 0,
       clearcoat: 1.0, clearcoatRoughness: 0.1,
+      emissive: 0x502040, emissiveIntensity: 0.6,
     });
     let fleshMat = new THREE.MeshPhysicalMaterial({
-      color: 0x200818, roughness: 0.3, metalness: 0.3, clearcoat: 0.8,
+      color: 0x2a1020, roughness: 0.3, metalness: 0, clearcoat: 0.8,
+      emissive: 0x602040, emissiveIntensity: 0.7,
     });
     let toothMat = new THREE.MeshPhysicalMaterial({
-      color: 0x403028, roughness: 0.2, metalness: 0.5, clearcoat: 1.0,
+      color: 0x504038, roughness: 0.2, metalness: 0, clearcoat: 1.0,
+      emissive: 0x504030, emissiveIntensity: 0.4,
     });
     if (useFarMat) {
       bodyMat = toStandardMaterial(bodyMat);
