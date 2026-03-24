@@ -35,6 +35,12 @@ export class AudioManager {
     this.sonarOsc = null;
   }
 
+  /**
+   * Phase 1 (synchronous): Create AudioContext, master chain, and buses.
+   * Must run inside a user-gesture context. Heavy work (noise buffers,
+   * drones, texture bed, MusicSystem) is deferred to budgeted async phases
+   * so the main thread is not blocked.
+   */
   start() {
     if (this.started) return;
     const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
@@ -53,19 +59,44 @@ export class AudioManager {
     this.musicBus = this._createBus(this.busDefaults.music);
     this.threatBus = this._createBus(this.busDefaults.threat);
     this.uiBus = this._createBus(this.busDefaults.ui);
-    this.noiseBuffers = {
-      white: this._createNoiseBuffer(2.5, 'white'),
-      pink: this._createNoiseBuffer(2.5, 'pink'),
-      brown: this._createNoiseBuffer(2.5, 'brown'),
-    };
     this.started = true;
 
-    this._createDrone(34, 'sine', 0.042);
-    this._createDrone(49, 'triangle', 0.026);
-    this._createDrone(73, 'sine', 0.011);
-    this._createDrone(22, 'sine', 0.03);
+    // Kick off budgeted async build — audio layers will fade in gradually
+    this._asyncBuildPromise = this._buildAudioGraphAsync();
+  }
+
+  /**
+   * Phase 2+ (async, budgeted): Generate noise buffers, drones, texture bed,
+   * and MusicSystem layers in small incremental steps, yielding to the
+   * browser between phases so startup is not blocked.
+   */
+  async _buildAudioGraphAsync() {
+    // Phase 2: Noise buffers (one per frame yield)
+    const colors = ['white', 'pink', 'brown'];
+    this.noiseBuffers = {};
+    for (const color of colors) {
+      this.noiseBuffers[color] = this._createNoiseBuffer(2.5, color);
+      await new Promise(r => requestAnimationFrame(r));
+    }
+
+    // Phase 3: Drones (batch in pairs, yield between)
+    const droneSpecs = [
+      [34, 'sine', 0.042],
+      [49, 'triangle', 0.026],
+      [73, 'sine', 0.011],
+      [22, 'sine', 0.03],
+    ];
+    for (let i = 0; i < droneSpecs.length; i++) {
+      this._createDrone(...droneSpecs[i]);
+      if (i % 2 === 1) await new Promise(r => requestAnimationFrame(r));
+    }
+
+    // Phase 4: Texture bed
+    await new Promise(r => requestAnimationFrame(r));
     this._initTextureBed();
 
+    // Phase 5: MusicSystem (constructor builds all layers)
+    await new Promise(r => requestAnimationFrame(r));
     this.music = new MusicSystem(this.ctx, {
       music: this.musicBus,
       threat: this.threatBus,

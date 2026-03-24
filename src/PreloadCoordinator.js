@@ -255,8 +255,19 @@ export class PreloadCoordinator {
 
     this.renderer.compile(this.underwaterEffect.scene, this.underwaterEffect.camera);
     this.underwaterEffect.render(0);
+
+    // Warm flashlight materials so first toggle doesn't cause a shader-compile hitch
+    this._warmFlashlightOnce();
+
     this._gpuWarmed = true;
     return true;
+  }
+
+  _warmFlashlightOnce() {
+    const wasVisible = this.player.flashlight.visible;
+    this.player.flashlight.visible = true;
+    this.renderer.compile(this.underwaterEffect.scene, this.underwaterEffect.camera);
+    this.player.flashlight.visible = wasVisible;
   }
 
   _warmCreatureQueue(token) {

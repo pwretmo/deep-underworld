@@ -339,13 +339,20 @@ export class Game {
   }
 
   _updateDescentProgress() {
-    const progress = this.creatures.getLoadProgress();
-    if (progress.total <= 0) {
-      this.descentProgressBar.style.width = '0%';
-      return;
-    }
+    // Composite progress: creatures 50%, terrain 25%, flora 25%
+    const creatures = this.creatures.getLoadProgress();
+    const terrainPending = this.terrain.getPendingCount();
+    const terrainLoaded = this.terrain.getChunkCount();
+    const terrainTotal = terrainLoaded + terrainPending;
+    const floraPending = this.flora.getPendingCount();
+    const floraLoaded = this.flora.getChunkCount();
+    const floraTotal = floraLoaded + floraPending;
 
-    const pct = Math.min(100, (progress.loaded / progress.total) * 100);
+    const creaturePct = creatures.total > 0 ? creatures.loaded / creatures.total : 1;
+    const terrainPct = terrainTotal > 0 ? terrainLoaded / terrainTotal : 1;
+    const floraPct = floraTotal > 0 ? floraLoaded / floraTotal : 1;
+
+    const pct = Math.min(100, (creaturePct * 0.5 + terrainPct * 0.25 + floraPct * 0.25) * 100);
     this.descentProgressBar.style.width = pct + '%';
   }
 
