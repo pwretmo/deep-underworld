@@ -126,8 +126,8 @@ export class GhostShark {
       transparent: true,
       opacity: 0.55,
       roughness: 0.4,
-      emissive: 0x203050,
-      emissiveIntensity: 0.35,
+      emissive: 0x282050,
+      emissiveIntensity: 0.5,
     });
     const dorsal = new THREE.Mesh(finGeo, finMat);
     dorsal.position.set(0, 1.1, 0);
