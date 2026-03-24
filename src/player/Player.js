@@ -120,6 +120,11 @@ export class Player {
     this.bobTime = 0;
     this.bobAmount = 0.03;
 
+    // Physics (set later via setPhysicsWorld)
+    this._physicsWorld = null;
+    this._physicsCollider = null;
+    this._physicsBody = null;
+
     this._setupControls();
   }
 
@@ -239,11 +244,30 @@ export class Player {
     document.exitPointerLock();
   }
 
+  /**
+   * Attach physics world and create the player's capsule collider.
+   * @param {import('../physics/PhysicsWorld.js').PhysicsWorld} physicsWorld
+   */
+  setPhysicsWorld(physicsWorld) {
+    this._physicsWorld = physicsWorld;
+    const { collider, body } = physicsWorld.createPlayerCollider(
+      this.position.x, this.position.y, this.position.z,
+      1,  // half-height
+      2   // radius
+    );
+    this._physicsCollider = collider;
+    this._physicsBody = body;
+  }
+
   reset() {
     this.position.set(0, -5, 0);
     this.velocity.set(0, 0, 0);
     this.euler.set(0, 0, 0);
     this.camera.quaternion.setFromEuler(this.euler);
+    // Sync physics body to reset position
+    if (this._physicsBody) {
+      this._physicsBody.setNextKinematicTranslation({ x: 0, y: -5, z: 0 });
+    }
   }
 
   update(dt) {
@@ -268,9 +292,43 @@ export class Player {
 
     this.velocity.add(this._accel.multiplyScalar(dt));
     this.velocity.multiplyScalar(1 - this.dampening * dt);
-    this.position.addScaledVector(this.velocity, dt);
 
-    // Keep player below water surface
+    // Compute desired movement delta
+    const dx = this.velocity.x * dt;
+    const dy = this.velocity.y * dt;
+    const dz = this.velocity.z * dt;
+
+    // Use physics character controller if available
+    if (this._physicsWorld && this._physicsCollider && this._physicsBody) {
+      const corrected = this._physicsWorld.computeMovement(
+        this._physicsCollider,
+        { x: dx, y: dy, z: dz }
+      );
+      this.position.x += corrected.x;
+      this.position.y += corrected.y;
+      this.position.z += corrected.z;
+
+      // If movement was blocked on an axis, zero that velocity component
+      // to prevent velocity buildup against walls
+      const tolerance = 0.001;
+      if (Math.abs(dx) > tolerance && Math.abs(corrected.x) < tolerance) this.velocity.x = 0;
+      if (Math.abs(dy) > tolerance && Math.abs(corrected.y) < tolerance) this.velocity.y = 0;
+      if (Math.abs(dz) > tolerance && Math.abs(corrected.z) < tolerance) this.velocity.z = 0;
+
+      // Sync kinematic body to new position
+      this._physicsBody.setNextKinematicTranslation({
+        x: this.position.x,
+        y: this.position.y,
+        z: this.position.z,
+      });
+    } else {
+      // Fallback: no physics, apply raw movement
+      this.position.x += dx;
+      this.position.y += dy;
+      this.position.z += dz;
+    }
+
+    // Keep player below water surface (post-physics constraint)
     if (this.position.y > -1) {
       this.position.y = -1;
       this.velocity.y = 0;

@@ -10,6 +10,7 @@ import { UnderwaterEffect } from './shaders/UnderwaterEffect.js';
 import { PreloadCoordinator } from './PreloadCoordinator.js';
 import { AbyssEncounter } from './encounters/AbyssEncounter.js';
 import { qualityManager } from './QualityManager.js';
+import { PhysicsWorld } from './physics/PhysicsWorld.js';
 
 export class Game {
   constructor() {
@@ -52,6 +53,7 @@ export class Game {
     this.audio = new AudioManager();
     this.underwaterEffect = new UnderwaterEffect(this.renderer, this.scene, this.camera);
     this.abyssEncounter = new AbyssEncounter();
+    this.physicsWorld = null; // initialized async in _primeAndEnterGameplay
 
     // Detect high-end GPU for potential ultra tier auto-select
     qualityManager.detectGPU(this.renderer);
@@ -327,6 +329,12 @@ export class Game {
     this._descentActive = true;
     this._updateDescentProgress();
 
+    // Initialize Rapier WASM physics before terrain/player use it
+    this.physicsWorld = new PhysicsWorld();
+    await this.physicsWorld.init();
+    this.terrain.setPhysicsWorld(this.physicsWorld);
+    this.player.setPhysicsWorld(this.physicsWorld);
+
     const primeSummary = await this.preload.primeStartBaseline({
       onProgress: () => this._updateDescentProgress(),
     });
@@ -407,6 +415,11 @@ export class Game {
     const depth = Math.max(0, -this.player.position.y);
     this.depth = depth;
     this.player.depth = depth;
+
+    // Step physics before player update so collisions are current
+    if (this.physicsWorld) {
+      this.physicsWorld.step(dt);
+    }
 
     // Update systems
     this.player.update(dt);

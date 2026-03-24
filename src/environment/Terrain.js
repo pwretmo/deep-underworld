@@ -12,6 +12,7 @@ export class Terrain {
     this.lastChunkZ = null;
     this.viewDistance = qualityManager.getSettings().terrainViewDistance;
     this._pendingChunks = []; // queue for staggered generation
+    this._physicsWorld = null;
 
     window.addEventListener('qualitychange', (e) => {
       this.viewDistance = e.detail.settings.terrainViewDistance;
@@ -28,6 +29,14 @@ export class Terrain {
       metalness: 0.05,
       flatShading: true,
     });
+  }
+
+  /**
+   * Attach physics world for collision generation.
+   * @param {import('../physics/PhysicsWorld.js').PhysicsWorld} physicsWorld
+   */
+  setPhysicsWorld(physicsWorld) {
+    this._physicsWorld = physicsWorld;
   }
 
   _getChunkKey(cx, cz) {
@@ -106,7 +115,36 @@ export class Terrain {
     // Add rocks
     this._addRocks(mesh, offsetX, offsetZ, size);
 
+    // Create physics trimesh collider for this chunk
+    if (this._physicsWorld) {
+      this._createChunkCollider(mesh, positions, geo.index, offsetX, offsetZ);
+    }
+
     return mesh;
+  }
+
+  /**
+   * Build a trimesh collider from chunk geometry.
+   */
+  _createChunkCollider(mesh, positions, geoIndex, offsetX, offsetZ) {
+    // Build world-space vertices
+    const vertCount = positions.length / 3;
+    const worldVerts = new Float32Array(positions.length);
+    for (let i = 0; i < vertCount; i++) {
+      worldVerts[i * 3] = positions[i * 3] + offsetX;
+      worldVerts[i * 3 + 1] = positions[i * 3 + 1];
+      worldVerts[i * 3 + 2] = positions[i * 3 + 2] + offsetZ;
+    }
+
+    // Extract indices from the geometry index (PlaneGeometry always has an index)
+    const srcIndex = geoIndex.array;
+    const indices = new Uint32Array(srcIndex.length);
+    for (let i = 0; i < srcIndex.length; i++) {
+      indices[i] = srcIndex[i];
+    }
+
+    const handle = this._physicsWorld.createTrimeshCollider(worldVerts, indices);
+    mesh.userData.physicsColliderHandles = [handle];
   }
 
   _addRocks(parent, offsetX, offsetZ, size) {
@@ -134,6 +172,28 @@ export class Terrain {
 
     instancedRocks.instanceMatrix.needsUpdate = true;
     parent.add(instancedRocks);
+
+    // Create physics sphere colliders for each rock
+    if (this._physicsWorld) {
+      const handles = parent.userData.physicsColliderHandles || [];
+      const mat4 = new THREE.Matrix4();
+      const pos = new THREE.Vector3();
+      const scl = new THREE.Vector3();
+      const quat = new THREE.Quaternion();
+      for (let i = 0; i < count; i++) {
+        instancedRocks.getMatrixAt(i, mat4);
+        mat4.decompose(pos, quat, scl);
+        // World-space position: rock local pos + chunk offset
+        const wx = pos.x + offsetX;
+        const wy = pos.y;
+        const wz = pos.z + offsetZ;
+        // Use average scale as sphere radius
+        const radius = (scl.x + scl.y + scl.z) / 3;
+        const handle = this._physicsWorld.createSphereCollider(wx, wy, wz, radius);
+        handles.push(handle);
+      }
+      parent.userData.physicsColliderHandles = handles;
+    }
   }
 
   _rebuildPendingAround(cx, cz) {
@@ -147,6 +207,12 @@ export class Terrain {
     // Remove distant chunks
     for (const [key, mesh] of this.chunks) {
       if (!needed.has(key)) {
+        // Remove physics colliders
+        if (this._physicsWorld && mesh.userData.physicsColliderHandles) {
+          for (const handle of mesh.userData.physicsColliderHandles) {
+            this._physicsWorld.removeCollider(handle);
+          }
+        }
         this.scene.remove(mesh);
         mesh.geometry.dispose();
         mesh.material.dispose();
