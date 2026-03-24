@@ -1,4 +1,11 @@
 import * as THREE from 'three';
+import { LOD_NEAR_DISTANCE, LOD_MEDIUM_DISTANCE, toStandardMaterial } from './lodUtils.js';
+
+const AMALGAM_LOD = {
+  near:   { coreSegs: [16, 14], skulls: 3, limbs: 6, pipes: 4 },
+  medium: { coreSegs: [10, 8],  skulls: 2, limbs: 3, pipes: 2 },
+  far:    { coreSegs: [6, 4],   skulls: 1, limbs: 2, pipes: 0 },
+};
 
 // Fused mass of multiple creature bodies merged together - biomechanical horror amalgamation
 export class Amalgam {
@@ -8,7 +15,6 @@ export class Amalgam {
     this.time = Math.random() * 100;
     this.speed = 0.3 + Math.random() * 0.2;
     this.direction = new THREE.Vector3(Math.random() - 0.5, -0.05, Math.random() - 0.5).normalize();
-    this.limbs = [];
 
     this._buildModel();
     this.group.position.copy(position);
@@ -16,35 +22,59 @@ export class Amalgam {
   }
 
   _buildModel() {
-    const fleshMat = new THREE.MeshPhysicalMaterial({
+    this.tiers = {};
+    const lod = new THREE.LOD();
+    for (const [tierName, profile] of Object.entries(AMALGAM_LOD)) {
+      const tier = this._buildTier(profile, tierName === 'far');
+      this.tiers[tierName] = tier;
+      const dist = tierName === 'near' ? 0 : tierName === 'medium' ? LOD_NEAR_DISTANCE : LOD_MEDIUM_DISTANCE;
+      lod.addLevel(tier.group, dist);
+    }
+    this.lod = lod;
+    this.group.add(lod);
+
+    this.glow = new THREE.PointLight(0xffaa00, 0.8, 12);
+    this.tiers.near.group.add(this.glow);
+
+    const s = 2 + Math.random() * 2;
+    this.group.scale.setScalar(s);
+  }
+
+  _buildTier(profile, useFarMat) {
+    const tierGroup = new THREE.Group();
+    const limbs = [];
+
+    let fleshMat = new THREE.MeshPhysicalMaterial({
       color: 0x120810, roughness: 0.25, metalness: 0.3,
       clearcoat: 0.9, clearcoatRoughness: 0.15,
     });
-    const metalMat = new THREE.MeshPhysicalMaterial({
-      color: 0x0a0a0a, roughness: 0.12, metalness: 0.85,
-      clearcoat: 1.0,
+    let metalMat = new THREE.MeshPhysicalMaterial({
+      color: 0x0a0a0a, roughness: 0.12, metalness: 0.85, clearcoat: 1.0,
     });
-    const boneMat = new THREE.MeshPhysicalMaterial({
-      color: 0x2a2218, roughness: 0.25, metalness: 0.4,
-      clearcoat: 0.8,
+    let boneMat = new THREE.MeshPhysicalMaterial({
+      color: 0x2a2218, roughness: 0.25, metalness: 0.4, clearcoat: 0.8,
     });
+    if (useFarMat) {
+      fleshMat = toStandardMaterial(fleshMat);
+      metalMat = toStandardMaterial(metalMat);
+      boneMat = toStandardMaterial(boneMat);
+    }
 
-    // Core mass - irregular lumpy body
-    const coreGeo = new THREE.SphereGeometry(1.5, 16, 14);
+    // Core mass
+    const coreGeo = new THREE.SphereGeometry(1.5, profile.coreSegs[0], profile.coreSegs[1]);
     const cp = coreGeo.attributes.position;
     for (let i = 0; i < cp.count; i++) {
       const x = cp.getX(i), y = cp.getY(i), z = cp.getZ(i);
       const n = 1 + Math.sin(x * 3 + y * 4) * 0.2 + Math.cos(z * 5 + x * 2) * 0.15;
-      cp.setX(i, x * n);
-      cp.setY(i, y * n);
-      cp.setZ(i, z * n);
+      cp.setX(i, x * n); cp.setY(i, y * n); cp.setZ(i, z * n);
     }
     coreGeo.computeVertexNormals();
-    this.group.add(new THREE.Mesh(coreGeo, fleshMat));
+    tierGroup.add(new THREE.Mesh(coreGeo, fleshMat));
 
-    // Protruding partial skulls
-    for (let i = 0; i < 3; i++) {
-      const skullGeo = new THREE.SphereGeometry(0.3, 10, 8, 0, Math.PI);
+    // Skulls
+    const skullSegs = useFarMat ? 6 : 10;
+    for (let i = 0; i < profile.skulls; i++) {
+      const skullGeo = new THREE.SphereGeometry(0.3, skullSegs, Math.max(4, skullSegs - 2), 0, Math.PI);
       skullGeo.scale(1.3, 0.8, 0.7);
       const skull = new THREE.Mesh(skullGeo, boneMat);
       const phi = Math.random() * Math.PI * 2;
@@ -55,33 +85,29 @@ export class Amalgam {
         Math.cos(theta) * 1.3
       );
       skull.lookAt(0, 0, 0);
-      this.group.add(skull);
+      tierGroup.add(skull);
 
-      // Eye in each skull
-      const eyeGeo = new THREE.SphereGeometry(0.05, 6, 6);
-      const eye = new THREE.Mesh(eyeGeo, new THREE.MeshPhysicalMaterial({
+      let eyeMat = new THREE.MeshPhysicalMaterial({
         color: 0xffcc00, emissive: 0xffaa00, emissiveIntensity: 2, roughness: 0,
-      }));
+      });
+      if (useFarMat) eyeMat = toStandardMaterial(eyeMat);
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 6), eyeMat);
       eye.position.copy(skull.position);
       eye.position.y += 0.1;
-      this.group.add(eye);
+      tierGroup.add(eye);
     }
 
-    // Protruding limb fragments
-    for (let i = 0; i < 6; i++) {
+    // Limbs
+    for (let i = 0; i < profile.limbs; i++) {
       const limbGroup = new THREE.Group();
       const len = 0.5 + Math.random() * 1.5;
-      const limbGeo = new THREE.CylinderGeometry(0.06, 0.03, len, 6);
+      const limbGeo = new THREE.CylinderGeometry(0.06, 0.03, len, useFarMat ? 4 : 6);
       limbGroup.add(new THREE.Mesh(limbGeo, i % 2 === 0 ? metalMat : fleshMat));
-
-      // Joint/bone protrusion at end
       if (Math.random() > 0.5) {
-        const knobGeo = new THREE.SphereGeometry(0.06, 6, 6);
-        const knob = new THREE.Mesh(knobGeo, boneMat);
+        const knob = new THREE.Mesh(new THREE.SphereGeometry(0.06, useFarMat ? 4 : 6, useFarMat ? 4 : 6), boneMat);
         knob.position.y = -len * 0.5;
         limbGroup.add(knob);
       }
-
       const phi = Math.random() * Math.PI * 2;
       const theta = Math.random() * Math.PI;
       limbGroup.position.set(
@@ -90,29 +116,20 @@ export class Amalgam {
         Math.cos(theta) * 1.2
       );
       limbGroup.lookAt(0, 0, 0);
-      this.limbs.push(limbGroup);
-      this.group.add(limbGroup);
+      limbs.push(limbGroup);
+      tierGroup.add(limbGroup);
     }
 
-    // Mechanical pipes/tubes running through the mass
-    for (let i = 0; i < 4; i++) {
-      const pipeGeo = new THREE.CylinderGeometry(0.03, 0.03, 3 + Math.random(), 6);
+    // Pipes
+    for (let i = 0; i < profile.pipes; i++) {
+      const pipeGeo = new THREE.CylinderGeometry(0.03, 0.03, 3 + Math.random(), useFarMat ? 4 : 6);
       const pipe = new THREE.Mesh(pipeGeo, metalMat);
-      pipe.position.set(
-        (Math.random() - 0.5) * 1.5,
-        (Math.random() - 0.5) * 1.5,
-        (Math.random() - 0.5) * 1.5
-      );
+      pipe.position.set((Math.random() - 0.5) * 1.5, (Math.random() - 0.5) * 1.5, (Math.random() - 0.5) * 1.5);
       pipe.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
-      this.group.add(pipe);
+      tierGroup.add(pipe);
     }
 
-    // Pulsing glow from within
-    this.glow = new THREE.PointLight(0xffaa00, 0.8, 12);
-    this.group.add(this.glow);
-
-    const s = 2 + Math.random() * 2;
-    this.group.scale.setScalar(s);
+    return { group: tierGroup, limbs };
   }
 
   update(dt, playerPos) {
@@ -127,10 +144,12 @@ export class Amalgam {
     this.group.rotation.z += dt * 0.015;
 
     // Limbs twitch
-    for (let i = 0; i < this.limbs.length; i++) {
-      const phase = this.time * 2 + i * 1.3;
-      this.limbs[i].rotation.x += Math.sin(phase) * 0.01;
-      this.limbs[i].rotation.z += Math.cos(phase * 0.7) * 0.005;
+    for (const tier of Object.values(this.tiers)) {
+      for (let i = 0; i < tier.limbs.length; i++) {
+        const phase = this.time * 2 + i * 1.3;
+        tier.limbs[i].rotation.x += Math.sin(phase) * 0.01;
+        tier.limbs[i].rotation.z += Math.cos(phase * 0.7) * 0.005;
+      }
     }
 
     // Glow pulses

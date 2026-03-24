@@ -14,6 +14,28 @@ export class Flora {
     this._pendingChunks = []; // queue for staggered generation
     this._floraDensityScale = qualityManager.getSettings().floraDensityScale;
 
+    // Shared geometry/materials for instanced bio-orbs
+    this._orbGeo = new THREE.SphereGeometry(1, 8, 8);
+    this._orbMat = new THREE.MeshStandardMaterial({
+      emissive: 0xffffff,
+      emissiveIntensity: 0.8,
+      transparent: true,
+      opacity: 0.7,
+    });
+
+    // Shared geometry/materials for instanced tube worms
+    this._tubeGeo = new THREE.CylinderGeometry(0.04, 0.06, 1, 6);
+    this._tubeMat = new THREE.MeshStandardMaterial({
+      color: 0x884422,
+      roughness: 0.9,
+    });
+    this._tipGeo = new THREE.SphereGeometry(0.12, 6, 6);
+    this._tipMat = new THREE.MeshStandardMaterial({
+      color: 0xff3300,
+      emissive: 0xff2200,
+      emissiveIntensity: 0.3,
+    });
+
     window.addEventListener('qualitychange', (e) => {
       this._floraDensityScale = e.detail.settings.floraDensityScale;
       // Mark all chunks for rebuild on next move
@@ -30,6 +52,11 @@ export class Flora {
     const size = this.chunkSize;
     const offsetX = cx * size;
     const offsetZ = cz * size;
+
+    // Collectors for instanced geometry
+    const orbData = [];     // { x, y, z, size, color }
+    const tubeData = [];    // { x, y, z, height, rx, rz }
+    const tipData = [];     // { x, y, z }
 
     // Use noise to determine flora placement
     const floraCount = Math.round((12 + Math.floor(Math.random() * 10)) * this._floraDensityScale);
@@ -56,12 +83,66 @@ export class Flora {
         // Coral formations
         this._addCoral(group, fx, groundY, fz, depth);
       } else if (depth > 100 && type < 0.8) {
-        // Bioluminescent orbs
-        lightsInChunk = this._addBioOrb(group, fx, groundY, fz, depth, lightsInChunk);
+        // Bioluminescent orbs — collect for instanced batching
+        lightsInChunk = this._collectBioOrb(group, orbData, fx, groundY, fz, depth, lightsInChunk);
       } else if (depth > 200) {
-        // Deep sea tube worms
-        this._addTubeWorms(group, fx, groundY, fz);
+        // Deep sea tube worms — collect for instanced batching
+        this._collectTubeWorms(tubeData, tipData, fx, groundY, fz);
       }
+    }
+
+    // Batch bio-orbs into InstancedMesh
+    if (orbData.length > 0) {
+      const orbColors = [0x00ffaa, 0x00aaff, 0x8844ff, 0xff00aa, 0x44ffaa];
+      const instancedOrbs = new THREE.InstancedMesh(this._orbGeo, this._orbMat, orbData.length);
+      instancedOrbs.instanceColor = new THREE.InstancedBufferAttribute(
+        new Float32Array(orbData.length * 3), 3
+      );
+      const dummy = new THREE.Object3D();
+      const tmpColor = new THREE.Color();
+      for (let i = 0; i < orbData.length; i++) {
+        const d = orbData[i];
+        dummy.position.set(d.x, d.y, d.z);
+        dummy.scale.setScalar(d.size);
+        dummy.updateMatrix();
+        instancedOrbs.setMatrixAt(i, dummy.matrix);
+        tmpColor.setHex(d.color);
+        instancedOrbs.setColorAt(i, tmpColor);
+      }
+      instancedOrbs.instanceMatrix.needsUpdate = true;
+      instancedOrbs.instanceColor.needsUpdate = true;
+      group.add(instancedOrbs);
+    }
+
+    // Batch tube worm cylinders into InstancedMesh
+    if (tubeData.length > 0) {
+      const instancedTubes = new THREE.InstancedMesh(this._tubeGeo, this._tubeMat, tubeData.length);
+      const dummy = new THREE.Object3D();
+      for (let i = 0; i < tubeData.length; i++) {
+        const d = tubeData[i];
+        dummy.position.set(d.x, d.y, d.z);
+        dummy.scale.set(1, d.height, 1);
+        dummy.rotation.set(d.rx, 0, d.rz);
+        dummy.updateMatrix();
+        instancedTubes.setMatrixAt(i, dummy.matrix);
+      }
+      instancedTubes.instanceMatrix.needsUpdate = true;
+      group.add(instancedTubes);
+    }
+
+    // Batch tube worm tips into InstancedMesh
+    if (tipData.length > 0) {
+      const instancedTips = new THREE.InstancedMesh(this._tipGeo, this._tipMat, tipData.length);
+      const dummy = new THREE.Object3D();
+      for (let i = 0; i < tipData.length; i++) {
+        const d = tipData[i];
+        dummy.position.set(d.x, d.y, d.z);
+        dummy.scale.setScalar(1);
+        dummy.updateMatrix();
+        instancedTips.setMatrixAt(i, dummy.matrix);
+      }
+      instancedTips.instanceMatrix.needsUpdate = true;
+      group.add(instancedTips);
     }
 
     group.position.set(offsetX, 0, offsetZ);
@@ -144,28 +225,17 @@ export class Flora {
     create(x, y, z, 0.4 + Math.random() * 0.4, 0);
   }
 
-  _addBioOrb(parent, x, y, z, depth, lightsInChunk) {
+  _collectBioOrb(parent, orbData, x, y, z, depth, lightsInChunk) {
     const colors = [0x00ffaa, 0x00aaff, 0x8844ff, 0xff00aa, 0x44ffaa];
     const color = colors[Math.floor(Math.random() * colors.length)];
     const size = 0.1 + Math.random() * 0.3;
 
-    const geo = new THREE.SphereGeometry(size, 8, 8);
-    const mat = new THREE.MeshStandardMaterial({
-      color,
-      emissive: color,
-      emissiveIntensity: 0.8,
-      transparent: true,
-      opacity: 0.7,
-    });
-
-    const orb = new THREE.Mesh(geo, mat);
-    orb.position.set(x, y + 1 + Math.random() * 5, z);
-    parent.add(orb);
+    orbData.push({ x, y: y + 1 + Math.random() * 5, z, size, color });
 
     // Point light for glow — capped at 2 per chunk to reduce draw calls
     if (lightsInChunk < 2 && Math.random() < 0.1) {
       const light = new THREE.PointLight(color, 0.8, 25);
-      light.position.copy(orb.position);
+      light.position.set(x, y + 1 + Math.random() * 5, z);
       parent.add(light);
       lightsInChunk++;
     }
@@ -173,35 +243,17 @@ export class Flora {
     return lightsInChunk;
   }
 
-  _addTubeWorms(parent, x, y, z) {
+  _collectTubeWorms(tubeData, tipData, x, y, z) {
     const count = 3 + Math.floor(Math.random() * 5);
     for (let i = 0; i < count; i++) {
       const height = 1 + Math.random() * 3;
-      const geo = new THREE.CylinderGeometry(0.04, 0.06, height, 6);
-      const mat = new THREE.MeshStandardMaterial({
-        color: 0x884422,
-        roughness: 0.9,
-      });
-      const tube = new THREE.Mesh(geo, mat);
-      tube.position.set(
-        x + (Math.random() - 0.5) * 0.5,
-        y + height / 2,
-        z + (Math.random() - 0.5) * 0.5
-      );
-      tube.rotation.x = (Math.random() - 0.5) * 0.15;
-      tube.rotation.z = (Math.random() - 0.5) * 0.15;
-      parent.add(tube);
+      const tx = x + (Math.random() - 0.5) * 0.5;
+      const tz = z + (Math.random() - 0.5) * 0.5;
+      const rx = (Math.random() - 0.5) * 0.15;
+      const rz = (Math.random() - 0.5) * 0.15;
 
-      // Red/orange tip
-      const tipGeo = new THREE.SphereGeometry(0.12, 6, 6);
-      const tipMat = new THREE.MeshStandardMaterial({
-        color: 0xff3300,
-        emissive: 0xff2200,
-        emissiveIntensity: 0.3,
-      });
-      const tip = new THREE.Mesh(tipGeo, tipMat);
-      tip.position.set(tube.position.x, y + height, tube.position.z);
-      parent.add(tip);
+      tubeData.push({ x: tx, y: y + height / 2, z: tz, height, rx, rz });
+      tipData.push({ x: tx, y: y + height, z: tz });
     }
   }
 

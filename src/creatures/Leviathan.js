@@ -1,4 +1,11 @@
 import * as THREE from 'three';
+import { LOD_NEAR_DISTANCE, LOD_MEDIUM_DISTANCE, toStandardMaterial } from './lodUtils.js';
+
+const LEVIATHAN_LOD = {
+  near:   { segmentCount: 20, headSegs: [24, 18], bodySegs: [16, 12], teethCount: 18, details: true },
+  medium: { segmentCount: 10, headSegs: [14, 10], bodySegs: [10, 8],  teethCount: 9,  details: false },
+  far:    { segmentCount: 6,  headSegs: [8, 6],   bodySegs: [6, 4],   teethCount: 6,  details: false },
+};
 
 export class Leviathan {
   constructor(scene, position) {
@@ -19,238 +26,186 @@ export class Leviathan {
   }
 
   _buildModel() {
-    const segmentCount = 20;
+    this.tiers = {};
+    const lod = new THREE.LOD();
+    for (const [tierName, profile] of Object.entries(LEVIATHAN_LOD)) {
+      const tier = this._buildTier(profile, tierName === 'far');
+      this.tiers[tierName] = tier;
+      const dist = tierName === 'near' ? 0 : tierName === 'medium' ? LOD_NEAR_DISTANCE : LOD_MEDIUM_DISTANCE;
+      lod.addLevel(tier.group, dist);
+    }
+    this.lod = lod;
+    this.group.add(lod);
+
+    // Eye light only on near tier
+    this.eyeLight = new THREE.PointLight(0xff2200, 2, 30);
+    this.eyeLight.position.set(3, 1.2, 0);
+    this.tiers.near.group.add(this.eyeLight);
+
+    this.group.scale.setScalar(1.5 + Math.random() * 1.5);
+  }
+
+  _buildTier(profile, useFarMat) {
+    const tierGroup = new THREE.Group();
+    const segments = [];
     const totalLength = 40;
-    const segLen = totalLength / segmentCount;
+    const segLen = totalLength / profile.segmentCount;
 
-    this.segments = [];
-
-    // Giger biomechanical wet-black material
-    const bodyMat = new THREE.MeshPhysicalMaterial({
-      color: 0x080610,
-      roughness: 0.25,
-      metalness: 0.6,
-      clearcoat: 1.0,
-      clearcoatRoughness: 0.15,
+    // Materials
+    let bodyMat = new THREE.MeshPhysicalMaterial({
+      color: 0x080610, roughness: 0.25, metalness: 0.6,
+      clearcoat: 1.0, clearcoatRoughness: 0.15,
     });
-    const boneMat = new THREE.MeshPhysicalMaterial({
-      color: 0x2a2218,
-      roughness: 0.35,
-      metalness: 0.4,
-      clearcoat: 0.8,
-      clearcoatRoughness: 0.2,
+    let boneMat = new THREE.MeshPhysicalMaterial({
+      color: 0x2a2218, roughness: 0.35, metalness: 0.4,
+      clearcoat: 0.8, clearcoatRoughness: 0.2,
     });
-    const fleshMat = new THREE.MeshPhysicalMaterial({
-      color: 0x1a0818,
-      roughness: 0.3,
-      metalness: 0.3,
-      clearcoat: 0.9,
-      clearcoatRoughness: 0.1,
-      emissive: 0x0a0008,
-      emissiveIntensity: 0.1,
+    let fleshMat = new THREE.MeshPhysicalMaterial({
+      color: 0x1a0818, roughness: 0.3, metalness: 0.3,
+      clearcoat: 0.9, clearcoatRoughness: 0.1,
+      emissive: 0x0a0008, emissiveIntensity: 0.1,
     });
 
-    // Head - elongated biomechanical skull
-    const headGeo = new THREE.SphereGeometry(3, 24, 18);
+    if (useFarMat) {
+      const origBody = bodyMat; bodyMat = toStandardMaterial(bodyMat); origBody.dispose();
+      const origBone = boneMat; boneMat = toStandardMaterial(boneMat); origBone.dispose();
+      const origFlesh = fleshMat; fleshMat = toStandardMaterial(fleshMat); origFlesh.dispose();
+    }
+
+    // Head
+    const headGeo = new THREE.SphereGeometry(3, profile.headSegs[0], profile.headSegs[1]);
     headGeo.scale(2.5, 0.8, 0.9);
     const hPos = headGeo.attributes.position;
     for (let i = 0; i < hPos.count; i++) {
       const x = hPos.getX(i), y = hPos.getY(i), z = hPos.getZ(i);
-      // Giger ridges along the top
       const ridge = Math.abs(z) < 0.5 ? Math.sin(x * 2) * 0.3 : 0;
       hPos.setY(i, y + ridge + Math.sin(x * 4 + z * 3) * 0.08);
     }
     headGeo.computeVertexNormals();
     const head = new THREE.Mesh(headGeo, bodyMat);
-    this.group.add(head);
-    this.segments.push(head);
+    tierGroup.add(head);
+    segments.push(head);
 
-    // Cranial ridge - exposed spinal crest on skull
-    const ridgeGeo = new THREE.BoxGeometry(8, 0.4, 0.15, 20, 1, 1);
-    const rPos = ridgeGeo.attributes.position;
-    for (let i = 0; i < rPos.count; i++) {
-      const x = rPos.getX(i), y = rPos.getY(i);
-      rPos.setY(i, y + Math.sin(x * 1.5) * 0.3 + 0.6);
-    }
-    ridgeGeo.computeVertexNormals();
-    const ridge = new THREE.Mesh(ridgeGeo, boneMat);
-    ridge.position.set(-1, 0.5, 0);
-    this.group.add(ridge);
-
-    // Massive biomechanical jaw with hydraulic hinges
-    const jawGeo = new THREE.ConeGeometry(2.5, 5, 16);
+    // Jaw
+    const jawGeo = new THREE.ConeGeometry(2.5, 5, Math.max(8, Math.round(16 * profile.headSegs[0] / 24)));
     const jPos = jawGeo.attributes.position;
     for (let i = 0; i < jPos.count; i++) {
       const y = jPos.getY(i);
       if (y < 0) jPos.setX(i, jPos.getX(i) * (1 + Math.sin(y * 4) * 0.15));
     }
     jawGeo.computeVertexNormals();
-    this.jaw = new THREE.Mesh(jawGeo, bodyMat);
-    this.jaw.position.set(5, -1, 0);
-    this.jaw.rotation.z = Math.PI / 2 + 0.3;
-    this.group.add(this.jaw);
+    const jaw = new THREE.Mesh(jawGeo, bodyMat);
+    jaw.position.set(5, -1, 0);
+    jaw.rotation.z = Math.PI / 2 + 0.3;
+    tierGroup.add(jaw);
 
-    // Jaw hydraulic pistons
-    for (const side of [-1, 1]) {
-      const pistonGeo = new THREE.CylinderGeometry(0.12, 0.08, 2.5, 8);
-      const piston = new THREE.Mesh(pistonGeo, boneMat);
-      piston.position.set(3.5, -0.3, side * 1.8);
-      piston.rotation.z = 0.6 * side;
-      this.group.add(piston);
-    }
-
-    // Teeth - metallic biomechanical fangs
+    // Teeth
     const toothGeo = new THREE.ConeGeometry(0.08, 0.6, 6);
-    const toothMat = new THREE.MeshPhysicalMaterial({
-      color: 0xbba880,
-      roughness: 0.15,
-      metalness: 0.7,
-      clearcoat: 1.0,
+    let toothMat = new THREE.MeshPhysicalMaterial({
+      color: 0xbba880, roughness: 0.15, metalness: 0.7, clearcoat: 1.0,
     });
-    for (let i = 0; i < 18; i++) {
-      const angle = (i / 18) * Math.PI;
+    if (useFarMat) { const orig = toothMat; toothMat = toStandardMaterial(toothMat); orig.dispose(); }
+    for (let i = 0; i < profile.teethCount; i++) {
+      const angle = (i / profile.teethCount) * Math.PI;
       const tooth = new THREE.Mesh(toothGeo, toothMat);
-      tooth.position.set(
-        4.5 + Math.cos(angle) * 1.5,
-        -0.5 + Math.sin(angle) * 1.2,
-        Math.cos(angle * 3) * 1.5
-      );
+      tooth.position.set(4.5 + Math.cos(angle) * 1.5, -0.5 + Math.sin(angle) * 1.2, Math.cos(angle * 3) * 1.5);
       tooth.rotation.z = Math.PI + (Math.random() - 0.5) * 0.2;
       tooth.scale.y = 0.8 + Math.random() * 0.8;
-      this.group.add(tooth);
+      tierGroup.add(tooth);
     }
 
-    // Glowing eyes - slit pupils
-    const eyeGeo = new THREE.SphereGeometry(0.5, 16, 16);
+    // Eyes
+    const eyeGeo = new THREE.SphereGeometry(0.5, Math.max(8, Math.round(16 * profile.headSegs[0] / 24)), Math.max(8, Math.round(16 * profile.headSegs[0] / 24)));
     eyeGeo.scale(1, 0.5, 1);
-    const eyeMat = new THREE.MeshPhysicalMaterial({
-      color: 0xff2200,
-      emissive: 0xff2200,
-      emissiveIntensity: 3,
-      roughness: 0.0,
-      clearcoat: 1.0,
+    let eyeMat = new THREE.MeshPhysicalMaterial({
+      color: 0xff2200, emissive: 0xff2200, emissiveIntensity: 3, roughness: 0.0, clearcoat: 1.0,
     });
-    const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
-    leftEye.position.set(3, 1.2, 2);
-    this.group.add(leftEye);
-    const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
-    rightEye.position.set(3, 1.2, -2);
-    this.group.add(rightEye);
+    if (useFarMat) { const orig = eyeMat; eyeMat = toStandardMaterial(eyeMat); orig.dispose(); }
+    tierGroup.add(new THREE.Mesh(eyeGeo, eyeMat)).position.set(3, 1.2, 2);
+    tierGroup.add(new THREE.Mesh(eyeGeo, eyeMat)).position.set(3, 1.2, -2);
 
-    this.eyeLight = new THREE.PointLight(0xff2200, 2, 30);
-    this.eyeLight.position.set(3, 1.2, 0);
-    this.group.add(this.eyeLight);
-
-    // Body segments - biomechanical with exposed ribs & pipes
-    for (let i = 1; i < segmentCount; i++) {
-      const t = i / segmentCount;
+    // Body segments
+    for (let i = 1; i < profile.segmentCount; i++) {
+      const t = i / profile.segmentCount;
       const radius = THREE.MathUtils.lerp(2.8, 0.3, t);
-      const geo = new THREE.SphereGeometry(radius, 16, 12);
+      const geo = new THREE.SphereGeometry(radius, profile.bodySegs[0], profile.bodySegs[1]);
       geo.scale(1.5, 1, 1);
-      const vPos = geo.attributes.position;
-      for (let v = 0; v < vPos.count; v++) {
-        const x = vPos.getX(v), y = vPos.getY(v), z = vPos.getZ(v);
-        // Mechanical ribbing
-        const ribbing = Math.sin(x * 8) * 0.05 * radius;
-        vPos.setY(v, y + ribbing);
+      if (profile.details) {
+        const vPos = geo.attributes.position;
+        for (let v = 0; v < vPos.count; v++) {
+          const x = vPos.getX(v), y = vPos.getY(v);
+          vPos.setY(v, y + Math.sin(x * 8) * 0.05 * radius);
+        }
+        geo.computeVertexNormals();
       }
-      geo.computeVertexNormals();
       const seg = new THREE.Mesh(geo, bodyMat);
       seg.position.set(-i * segLen * 0.5, 0, 0);
-      this.group.add(seg);
-      this.segments.push(seg);
+      tierGroup.add(seg);
+      segments.push(seg);
 
-      // Exposed spinal vertebrae on top
-      if (i % 2 === 0 && t < 0.85) {
-        const vertGeo = new THREE.BoxGeometry(0.3, radius * 0.5, 0.4, 1, 1, 1);
-        const vert = new THREE.Mesh(vertGeo, boneMat);
-        vert.position.set(-i * segLen * 0.5, radius * 0.85, 0);
-        this.group.add(vert);
-      }
-
-      // Dorsal spines - elongated biomechanical
-      if (i % 3 === 0 && t < 0.7) {
-        const spineGeo = new THREE.ConeGeometry(0.12, radius * 2, 6);
-        const spine = new THREE.Mesh(spineGeo, boneMat);
-        spine.position.set(-i * segLen * 0.5, radius * 1.1, 0);
-        this.group.add(spine);
-      }
-
-      // Lateral pipes running along body
-      if (i % 2 === 0 && t < 0.8) {
-        for (const side of [-1, 1]) {
-          const pipeGeo = new THREE.CylinderGeometry(0.08, 0.08, segLen * 0.6, 6);
-          pipeGeo.rotateZ(Math.PI / 2);
-          const pipe = new THREE.Mesh(pipeGeo, fleshMat);
-          pipe.position.set(-i * segLen * 0.5, radius * 0.3, side * radius * 0.9);
-          this.group.add(pipe);
+      // Details only for near tier
+      if (profile.details) {
+        if (i % 2 === 0 && t < 0.85) {
+          const vertGeo = new THREE.BoxGeometry(0.3, radius * 0.5, 0.4, 1, 1, 1);
+          tierGroup.add(new THREE.Mesh(vertGeo, boneMat)).position.set(-i * segLen * 0.5, radius * 0.85, 0);
         }
-      }
-
-      // Bioluminescent slits along body
-      if (i % 3 === 0) {
-        const slitGeo = new THREE.PlaneGeometry(0.6, 0.15);
-        const slitMat = new THREE.MeshPhysicalMaterial({
-          color: 0x6622ff,
-          emissive: 0x6622ff,
-          emissiveIntensity: 1.5,
-          transparent: true,
-          opacity: 0.8,
-          side: THREE.DoubleSide,
-        });
-        for (const side of [-1, 1]) {
-          const slit = new THREE.Mesh(slitGeo, slitMat);
-          slit.position.set(-i * segLen * 0.5, 0, side * (radius + 0.01));
-          slit.rotation.y = Math.PI / 2;
-          this.group.add(slit);
+        if (i % 3 === 0 && t < 0.7) {
+          const spineGeo = new THREE.ConeGeometry(0.12, radius * 2, 6);
+          tierGroup.add(new THREE.Mesh(spineGeo, boneMat)).position.set(-i * segLen * 0.5, radius * 1.1, 0);
         }
-
-        if (i % 6 === 0) {
-          const glow = new THREE.PointLight(0x6622ff, 0.8, 15);
-          glow.position.set(-i * segLen * 0.5, 0, 0);
-          this.group.add(glow);
+        if (i % 2 === 0 && t < 0.8) {
+          for (const side of [-1, 1]) {
+            const pipeGeo = new THREE.CylinderGeometry(0.08, 0.08, segLen * 0.6, 6);
+            pipeGeo.rotateZ(Math.PI / 2);
+            tierGroup.add(new THREE.Mesh(pipeGeo, fleshMat)).position.set(-i * segLen * 0.5, radius * 0.3, side * radius * 0.9);
+          }
         }
-      }
-
-      // Exposed rib arches on select segments
-      if (i % 5 === 0 && t < 0.6) {
-        for (const side of [-1, 1]) {
-          const ribCurve = new THREE.QuadraticBezierCurve3(
-            new THREE.Vector3(0, radius * 0.8, 0),
-            new THREE.Vector3(0, radius * 1.2, side * radius * 0.8),
-            new THREE.Vector3(0, 0, side * radius)
-          );
-          const ribGeo = new THREE.TubeGeometry(ribCurve, 8, 0.06, 6, false);
-          const rib = new THREE.Mesh(ribGeo, boneMat);
-          rib.position.set(-i * segLen * 0.5, 0, 0);
-          this.group.add(rib);
+        if (i % 3 === 0) {
+          const slitGeo = new THREE.PlaneGeometry(0.6, 0.15);
+          let slitMat = new THREE.MeshPhysicalMaterial({
+            color: 0x6622ff, emissive: 0x6622ff, emissiveIntensity: 1.5,
+            transparent: true, opacity: 0.8, side: THREE.DoubleSide,
+          });
+          if (useFarMat) { const orig = slitMat; slitMat = toStandardMaterial(slitMat); orig.dispose(); }
+          for (const side of [-1, 1]) {
+            const slit = new THREE.Mesh(slitGeo, slitMat);
+            slit.position.set(-i * segLen * 0.5, 0, side * (radius + 0.01));
+            slit.rotation.y = Math.PI / 2;
+            tierGroup.add(slit);
+          }
+        }
+        if (i % 5 === 0 && t < 0.6) {
+          for (const side of [-1, 1]) {
+            const ribCurve = new THREE.QuadraticBezierCurve3(
+              new THREE.Vector3(0, radius * 0.8, 0),
+              new THREE.Vector3(0, radius * 1.2, side * radius * 0.8),
+              new THREE.Vector3(0, 0, side * radius)
+            );
+            const ribGeo = new THREE.TubeGeometry(ribCurve, 8, 0.06, 6, false);
+            tierGroup.add(new THREE.Mesh(ribGeo, boneMat)).position.set(-i * segLen * 0.5, 0, 0);
+          }
         }
       }
     }
 
-    // Tail - segmented biomechanical blade
-    const tailGeo = new THREE.PlaneGeometry(5, 7, 6, 6);
+    // Tail
+    const tailGeo = new THREE.PlaneGeometry(5, 7, profile.details ? 6 : 3, profile.details ? 6 : 3);
     const tPos = tailGeo.attributes.position;
     for (let i = 0; i < tPos.count; i++) {
-      const x = tPos.getX(i), y = tPos.getY(i);
-      tPos.setZ(i, Math.sin(x * 2 + y) * 0.3);
+      tPos.setZ(i, Math.sin(tPos.getX(i) * 2 + tPos.getY(i)) * 0.3);
     }
     tailGeo.computeVertexNormals();
-    const tailMat = new THREE.MeshPhysicalMaterial({
-      color: 0x080610,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.7,
-      roughness: 0.3,
-      metalness: 0.5,
-      clearcoat: 0.6,
+    let tailMat = new THREE.MeshPhysicalMaterial({
+      color: 0x080610, side: THREE.DoubleSide, transparent: true, opacity: 0.7,
+      roughness: 0.3, metalness: 0.5, clearcoat: 0.6,
     });
+    if (useFarMat) { const orig = tailMat; tailMat = toStandardMaterial(tailMat); orig.dispose(); }
     const tail = new THREE.Mesh(tailGeo, tailMat);
-    tail.position.set(-segmentCount * segLen * 0.5 - 2, 0, 0);
+    tail.position.set(-profile.segmentCount * segLen * 0.5 - 2, 0, 0);
     tail.rotation.y = Math.PI / 2;
-    this.group.add(tail);
+    tierGroup.add(tail);
 
-    this.group.scale.setScalar(1.5 + Math.random() * 1.5);
+    return { group: tierGroup, segments, jaw };
   }
 
   update(dt, playerPos) {
@@ -270,20 +225,23 @@ export class Leviathan {
     const angle = Math.atan2(nextX - targetX, nextZ - targetZ);
     this.group.rotation.y = angle + Math.PI / 2;
 
-    // Undulate body segments
-    for (let i = 1; i < this.segments.length; i++) {
-      const seg = this.segments[i];
-      const phase = this.time * 1.5 - i * 0.3;
-      seg.position.z = Math.sin(phase) * i * 0.15;
-      seg.position.y = Math.cos(phase * 0.7) * i * 0.08;
+    // Undulate body segments across all tiers
+    for (const tier of Object.values(this.tiers)) {
+      for (let i = 1; i < tier.segments.length; i++) {
+        const seg = tier.segments[i];
+        const phase = this.time * 1.5 - i * 0.3;
+        seg.position.z = Math.sin(phase) * i * 0.15;
+        seg.position.y = Math.cos(phase * 0.7) * i * 0.08;
+      }
+      // Jaw movement
+      if (tier.jaw) {
+        tier.jaw.rotation.z = Math.PI / 2 + 0.3 + Math.sin(this.time * 1.5) * 0.1;
+      }
     }
 
     // Eye glow pulsing
-    this.eyeLight.intensity = 2 + Math.sin(this.time * 2) * 0.5;
-
-    // Jaw movement
-    if (this.jaw) {
-      this.jaw.rotation.z = Math.PI / 2 + 0.3 + Math.sin(this.time * 1.5) * 0.1;
+    if (this.eyeLight) {
+      this.eyeLight.intensity = 2 + Math.sin(this.time * 2) * 0.5;
     }
 
     // Occasional close pass near player
