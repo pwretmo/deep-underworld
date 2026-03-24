@@ -110,6 +110,12 @@ export class Player {
     /** Current depth (positive = deeper). Updated by Game._animate(). */
     this.depth = 0;
 
+    // Reusable vectors for update() — avoids per-frame allocations
+    this._forward = new THREE.Vector3();
+    this._right = new THREE.Vector3();
+    this._up = new THREE.Vector3(0, 1, 0);
+    this._accel = new THREE.Vector3();
+
     // Head bobbing
     this.bobTime = 0;
     this.bobAmount = 0.03;
@@ -210,27 +216,26 @@ export class Player {
   update(dt) {
     if (!this.locked) return;
 
-    const forward = new THREE.Vector3();
-    this.camera.getWorldDirection(forward);
-    const right = new THREE.Vector3().crossVectors(forward, this.camera.up).normalize();
-    const up = new THREE.Vector3(0, 1, 0);
+    this.camera.getWorldDirection(this._forward);
+    this._right.crossVectors(this._forward, this.camera.up).normalize();
+    this._up.set(0, 1, 0);
 
-    const accel = new THREE.Vector3();
+    this._accel.set(0, 0, 0);
 
-    if (this.keys['KeyW']) accel.add(forward);
-    if (this.keys['KeyS']) accel.sub(forward);
-    if (this.keys['KeyA']) accel.sub(right);
-    if (this.keys['KeyD']) accel.add(right);
-    if (this.keys['Space']) accel.add(up);
-    if (this.keys['ShiftLeft'] || this.keys['ShiftRight']) accel.sub(up);
+    if (this.keys['KeyW']) this._accel.add(this._forward);
+    if (this.keys['KeyS']) this._accel.sub(this._forward);
+    if (this.keys['KeyA']) this._accel.sub(this._right);
+    if (this.keys['KeyD']) this._accel.add(this._right);
+    if (this.keys['Space']) this._accel.add(this._up);
+    if (this.keys['ShiftLeft'] || this.keys['ShiftRight']) this._accel.sub(this._up);
 
-    if (accel.length() > 0) {
-      accel.normalize().multiplyScalar(this.moveSpeed);
+    if (this._accel.length() > 0) {
+      this._accel.normalize().multiplyScalar(this.moveSpeed);
     }
 
-    this.velocity.add(accel.multiplyScalar(dt));
+    this.velocity.add(this._accel.multiplyScalar(dt));
     this.velocity.multiplyScalar(1 - this.dampening * dt);
-    this.position.add(this.velocity.clone().multiplyScalar(dt));
+    this.position.addScaledVector(this.velocity, dt);
 
     // Keep player below water surface
     if (this.position.y > -1) {
