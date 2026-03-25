@@ -656,7 +656,10 @@ export class Game {
 
   _updateAutoplayDrive(depth) {
     if (!this.autoplay) {
-      this.player.clearAutoplayInput();
+      const autoplayInput = this.player.autoplayInput;
+      if (autoplayInput.forward !== 0 || autoplayInput.right !== 0 || autoplayInput.vertical !== 0) {
+        this.player.clearAutoplayInput();
+      }
       return;
     }
 

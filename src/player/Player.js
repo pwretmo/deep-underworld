@@ -132,14 +132,20 @@ export class Player {
     }
   }
 
-  setAutoplayInput({ forward = 0, right = 0, vertical = 0 } = {}) {
+  setAutoplayInput(input) {
+    const forward = input?.forward ?? 0;
+    const right = input?.right ?? 0;
+    const vertical = input?.vertical ?? 0;
+
     this.autoplayInput.forward = THREE.MathUtils.clamp(forward, -1, 1);
     this.autoplayInput.right = THREE.MathUtils.clamp(right, -1, 1);
     this.autoplayInput.vertical = THREE.MathUtils.clamp(vertical, -1, 1);
   }
 
   clearAutoplayInput() {
-    this.setAutoplayInput();
+    this.autoplayInput.forward = 0;
+    this.autoplayInput.right = 0;
+    this.autoplayInput.vertical = 0;
   }
 
   update(dt) {
