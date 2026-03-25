@@ -85,15 +85,28 @@ function _createBoneNormalTexture() {
   if (_boneNormalTex) return _boneNormalTex;
   const size = 64;
   const data = new Uint8Array(size * size * 4);
+
+  const sampleHeight = (u, v) => {
+    const pore = Math.sin(u * 42 + v * 18) * 0.3 + Math.sin(u * 13 + v * 37) * 0.2;
+    const ridge = Math.sin(v * 26 + u * 5) * 0.25;
+    return pore + ridge;
+  };
+
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const idx = (y * size + x) * 4;
       const u = x / size, v = y / size;
-      const pore = Math.sin(u * 42 + v * 18) * 0.3 + Math.sin(u * 13 + v * 37) * 0.2;
-      const ridge = Math.sin(v * 26 + u * 5) * 0.25;
-      data[idx] = Math.floor((pore * 0.5 + 0.5) * 255);
-      data[idx + 1] = Math.floor((ridge * 0.5 + 0.5) * 255);
-      data[idx + 2] = 220;
+      const du = 1 / size;
+      const dv = 1 / size;
+      const dx = sampleHeight(u + du, v) - sampleHeight(u - du, v);
+      const dy = sampleHeight(u, v + dv) - sampleHeight(u, v - dv);
+      const nx = -dx * 2.0;
+      const ny = -dy * 2.0;
+      const nz = 1.0;
+      const nLen = 1 / Math.sqrt(nx * nx + ny * ny + nz * nz);
+      data[idx] = Math.floor((nx * nLen * 0.5 + 0.5) * 255);
+      data[idx + 1] = Math.floor((ny * nLen * 0.5 + 0.5) * 255);
+      data[idx + 2] = Math.floor((nz * nLen * 0.5 + 0.5) * 255);
       data[idx + 3] = 255;
     }
   }
@@ -107,15 +120,28 @@ function _createFleshNormalTexture() {
   if (_fleshNormalTex) return _fleshNormalTex;
   const size = 64;
   const data = new Uint8Array(size * size * 4);
+
+  const sampleHeight = (u, v) => {
+    const fiber = Math.sin(u * 60 + v * 8) * 0.35 + Math.sin(u * 28 + v * 44) * 0.15;
+    const cross = Math.sin(v * 50 + u * 3) * 0.2;
+    return fiber + cross;
+  };
+
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const idx = (y * size + x) * 4;
       const u = x / size, v = y / size;
-      const fiber = Math.sin(u * 60 + v * 8) * 0.35 + Math.sin(u * 28 + v * 44) * 0.15;
-      const cross = Math.sin(v * 50 + u * 3) * 0.2;
-      data[idx] = Math.floor((fiber * 0.5 + 0.5) * 255);
-      data[idx + 1] = Math.floor((cross * 0.5 + 0.5) * 255);
-      data[idx + 2] = 230;
+      const du = 1 / size;
+      const dv = 1 / size;
+      const dx = sampleHeight(u + du, v) - sampleHeight(u - du, v);
+      const dy = sampleHeight(u, v + dv) - sampleHeight(u, v - dv);
+      const nx = -dx * 2.2;
+      const ny = -dy * 2.2;
+      const nz = 1.0;
+      const nLen = 1 / Math.sqrt(nx * nx + ny * ny + nz * nz);
+      data[idx] = Math.floor((nx * nLen * 0.5 + 0.5) * 255);
+      data[idx + 1] = Math.floor((ny * nLen * 0.5 + 0.5) * 255);
+      data[idx + 2] = Math.floor((nz * nLen * 0.5 + 0.5) * 255);
       data[idx + 3] = 255;
     }
   }
@@ -323,11 +349,6 @@ export class BoneWorm {
       const farBody = new THREE.Mesh(farBodyGeo, boneMat);
       _applyBodyWaveShader(farBody.material, this._shaderUniforms, 'far');
       tierGroup.add(farBody);
-
-      const farGlowGeo = new THREE.SphereGeometry(0.18, 6, 4);
-      const farGlow = new THREE.Mesh(farGlowGeo, glowMat);
-      farGlow.position.set(1.6, 0, 0);
-      tierGroup.add(farGlow);
 
       return { group: tierGroup, segments: [], jaw: null, head: null, fleshMat, glowMat };
     }
@@ -606,6 +627,7 @@ export class BoneWorm {
     const isNear = tierName === 'near';
     const speed = this._undulationSpeed;
     const agitation = this._agitation;
+    const profile = BONEWORM_LOD[tierName];
 
     this._breathingPhase += dt * BREATHING_SPEED;
 
@@ -637,14 +659,16 @@ export class BoneWorm {
         }
 
         // Spine erection based on agitation
-        for (const spine of seg.spines) {
-          const spinePhase = Math.sin(time * 3 - i * 0.8) * 0.1;
-          spine.scale.y = 1.0 + agitation * 0.6 + spinePhase;
-          spine.rotation.z = Math.sin(time * 4 - i * 1.2) * 0.08 * (1 + agitation);
+        if (profile.hasSpineAnim) {
+          for (const spine of seg.spines) {
+            const spinePhase = Math.sin(time * 3 - i * 0.8) * 0.1;
+            spine.scale.y = 1.0 + agitation * 0.6 + spinePhase;
+            spine.rotation.z = Math.sin(time * 4 - i * 1.2) * 0.08 * (1 + agitation);
+          }
         }
 
         // Flesh bulging: per-vertex wobble synced to contraction
-        if (seg.flesh && seg.flesh.geometry) {
+        if (profile.hasFleshDeform && seg.flesh && seg.flesh.geometry) {
           const posAttr = seg.flesh.geometry.attributes.position;
           const bulgePhase = Math.sin(time * 2.5 - i * 0.6);
           const bulgeAmt = 0.008 * (1 + agitation);
