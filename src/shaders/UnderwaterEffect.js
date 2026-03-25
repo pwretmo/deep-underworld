@@ -33,12 +33,15 @@ const RENDER_PIPELINE_TUNING = Object.freeze({
     baseScale: 1.0,
     minScale: 0.6,
     maxScale: 1.0,
+    scaleLevels: [1.0, 0.85, 0.72, 0.6],
     degradeThresholdMs: 28,
     severeThresholdMs: 45,
+    emergencyThresholdMs: 120,
     recoveryThresholdMs: 22,
-    degradeStep: 0.05,
-    severeDegradeStep: 0.09,
-    recoveryStep: 0.02,
+    scaleChangeCooldownMs: 900,
+    recoveryDelayMs: 1400,
+    emergencyHoldMs: 2800,
+    stableFramesForRecovery: 96,
   },
 });
 
@@ -173,6 +176,15 @@ export class UnderwaterEffect {
     this._nativeComposerPixelRatio = Math.max(renderer.getPixelRatio(), 1);
     this._composerScale = this.tuning.performance.baseScale;
     this._appliedComposerScale = 0;
+    this._appliedComposerWidth = 0;
+    this._appliedComposerHeight = 0;
+    this._scaleLadder = [];
+    this._scaleIndex = 0;
+    this._nextScaleChangeAt = 0;
+    this._recoveryAllowedAt = 0;
+    this._stableRecoveryFrames = 0;
+    this._bloomSuspended = false;
+    this._bloomSuspendedUntil = 0;
 
     // Render pass
     const renderPass = new RenderPass(scene, camera);
@@ -212,11 +224,13 @@ export class UnderwaterEffect {
     // creature-dense scenes can cause heavy post-processing stalls on some GPUs.
     this._renderEmaMs = 16;
     this._postProcessMaxScale = qualityManager.getSettings().postProcessScale;
+    this._rebuildScaleLadder();
     this._applyComposerScale(true);
 
     window.addEventListener('qualitychange', (e) => {
       this._postProcessMaxScale = e.detail.settings.postProcessScale;
-      this._composerScale = Math.min(this._composerScale, this._postProcessMaxScale);
+      this._rebuildScaleLadder();
+      this._setScaleIndex(this._findScaleIndex(this._composerScale), { force: true, resetCooldown: true });
       this._applyComposerScale(true);
       this._setupBloom(e.detail.tier);
     });
@@ -238,11 +252,124 @@ export class UnderwaterEffect {
       this.composer.removePass(this._bloomPass);
       this._bloomPass.dispose();
       this._bloomPass = null;
+      this._bloomSuspended = false;
+      this._bloomSuspendedUntil = 0;
+    }
+
+    if (this._bloomPass) {
+      this._bloomPass.enabled = !this._bloomSuspended;
     }
   }
 
   resize() {
     this._applyComposerScale(true);
+  }
+
+  warmPerformanceFallbacks({ depth = 0, flashlightOn = false, exposure = 0.76 } = {}) {
+    if (this._scaleLadder.length <= 1) {
+      return;
+    }
+
+    const originalIndex = this._scaleIndex;
+    const originalScale = this._composerScale;
+
+    for (let i = 0; i < this._scaleLadder.length; i++) {
+      if (i === originalIndex) {
+        continue;
+      }
+
+      this._scaleIndex = i;
+      this._composerScale = this._scaleLadder[i];
+      this._applyComposerScale(true);
+      this._updatePassState(depth, flashlightOn, exposure);
+      this.composer.render();
+    }
+
+    this._scaleIndex = originalIndex;
+    this._composerScale = originalScale;
+    this._applyComposerScale(true);
+    this._updatePassState(depth, flashlightOn, exposure);
+  }
+
+  _rebuildScaleLadder() {
+    const requestedScales = [
+      this.tuning.performance.baseScale,
+      ...this.tuning.performance.scaleLevels,
+      this._postProcessMaxScale,
+      this.tuning.performance.minScale,
+    ];
+
+    const nextScaleLadder = [];
+    for (const scale of requestedScales) {
+      const clampedScale = THREE.MathUtils.clamp(
+        scale,
+        this.tuning.performance.minScale,
+        this._postProcessMaxScale
+      );
+
+      if (!nextScaleLadder.some((entry) => Math.abs(entry - clampedScale) < 0.01)) {
+        nextScaleLadder.push(clampedScale);
+      }
+    }
+
+    nextScaleLadder.sort((a, b) => b - a);
+    this._scaleLadder = nextScaleLadder;
+    this._scaleIndex = this._findScaleIndex(this._composerScale);
+    this._composerScale = this._scaleLadder[this._scaleIndex] ?? this.tuning.performance.minScale;
+  }
+
+  _findScaleIndex(scale) {
+    if (this._scaleLadder.length === 0) {
+      return 0;
+    }
+
+    let bestIndex = 0;
+    let bestDelta = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < this._scaleLadder.length; i++) {
+      const delta = Math.abs(this._scaleLadder[i] - scale);
+      if (delta < bestDelta) {
+        bestIndex = i;
+        bestDelta = delta;
+      }
+    }
+    return bestIndex;
+  }
+
+  _setScaleIndex(index, { force = false, resetCooldown = false, holdRecovery = false, now = performance.now() } = {}) {
+    const nextIndex = THREE.MathUtils.clamp(index, 0, Math.max(this._scaleLadder.length - 1, 0));
+    const nextScale = this._scaleLadder[nextIndex] ?? this.tuning.performance.minScale;
+
+    if (!force && Math.abs(nextScale - this._composerScale) < 0.01) {
+      return false;
+    }
+
+    this._scaleIndex = nextIndex;
+    this._composerScale = nextScale;
+    this._nextScaleChangeAt = resetCooldown ? now : now + this.tuning.performance.scaleChangeCooldownMs;
+    if (holdRecovery) {
+      this._recoveryAllowedAt = Math.max(
+        this._recoveryAllowedAt,
+        now + this.tuning.performance.emergencyHoldMs
+      );
+    } else {
+      this._recoveryAllowedAt = Math.max(
+        this._recoveryAllowedAt,
+        now + this.tuning.performance.recoveryDelayMs
+      );
+    }
+    this._applyComposerScale(force);
+    return true;
+  }
+
+  _setBloomSuspended(suspended, now = performance.now()) {
+    this._bloomSuspended = suspended;
+    if (suspended) {
+      this._bloomSuspendedUntil = now + this.tuning.performance.emergencyHoldMs;
+    }
+
+    if (this._bloomPass) {
+      this._bloomPass.enabled = !suspended;
+    }
   }
 
   _applyComposerScale(force = false) {
@@ -252,23 +379,29 @@ export class UnderwaterEffect {
       this.tuning.performance.minScale,
       this._postProcessMaxScale
     );
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const pixelRatio = this._nativeComposerPixelRatio * nextScale;
 
-    if (!force && Math.abs(nextScale - this._appliedComposerScale) < 0.01) {
+    if (!force &&
+      Math.abs(nextScale - this._appliedComposerScale) < 0.01 &&
+      width === this._appliedComposerWidth &&
+      height === this._appliedComposerHeight) {
       return;
     }
 
     this._appliedComposerScale = nextScale;
-    const pixelRatio = this._nativeComposerPixelRatio * nextScale;
+    this._appliedComposerWidth = width;
+    this._appliedComposerHeight = height;
     this.composer.setPixelRatio(pixelRatio);
-    this.composer.setSize(window.innerWidth, window.innerHeight);
+    this.composer.setSize(width, height);
     this.underwaterPass.uniforms.resolution.value.set(
-      window.innerWidth * pixelRatio,
-      window.innerHeight * pixelRatio
+      width * pixelRatio,
+      height * pixelRatio
     );
   }
 
-  render(depth, { flashlightOn = false, exposure = 0.76 } = {}) {
-    const frameStart = performance.now();
+  _updatePassState(depth, flashlightOn, exposure) {
     this.time += 0.016;
     this.underwaterPass.uniforms.time.value = this.time;
     this.underwaterPass.uniforms.depth.value = depth;
@@ -299,15 +432,12 @@ export class UnderwaterEffect {
     );
 
     const bloomParams = this.underwaterPass.uniforms.bloomParams.value;
-    // When ultra bloom pass is active, reduce in-shader bloom contribution
-    // to avoid double-blooming; the real UnrealBloomPass handles the heavy lift.
-    const shaderBloomScale = this._bloomPass ? 0.3 : 1.0;
+    const shaderBloomScale = this._bloomPass && !this._bloomSuspended ? 0.3 : 1.0;
     bloomParams.x = THREE.MathUtils.lerp(bloomParams.x, targetStrength * shaderBloomScale, 0.09);
     bloomParams.y = THREE.MathUtils.lerp(bloomParams.y, targetThreshold, 0.09);
     bloomParams.z = THREE.MathUtils.lerp(bloomParams.z, targetRadius, 0.09);
 
-    // Update UnrealBloomPass parameters with depth if active
-    if (this._bloomPass) {
+    if (this._bloomPass && !this._bloomSuspended) {
       this._bloomPass.strength = THREE.MathUtils.lerp(
         this.tuning.bloom.surfaceStrength,
         this.tuning.bloom.deepStrength,
@@ -319,21 +449,56 @@ export class UnderwaterEffect {
         depthNorm
       ) + (flashlightOn ? 0.08 : 0.0);
     }
+  }
 
+  render(depth, { flashlightOn = false, exposure = 0.76 } = {}) {
+    const frameStart = performance.now();
+    this._updatePassState(depth, flashlightOn, exposure);
     this.composer.render();
 
-    const renderMs = performance.now() - frameStart;
+    const now = performance.now();
+    const renderMs = now - frameStart;
     this._renderEmaMs = this._renderEmaMs * 0.92 + renderMs * 0.08;
 
-    if (renderMs > this.tuning.performance.severeThresholdMs || this._renderEmaMs > this.tuning.performance.degradeThresholdMs) {
-      const degradeStep = renderMs > this.tuning.performance.severeThresholdMs
-        ? this.tuning.performance.severeDegradeStep
-        : this.tuning.performance.degradeStep;
-      this._composerScale = Math.max(this.tuning.performance.minScale, this._composerScale - degradeStep);
-      this._applyComposerScale();
+    if (this._bloomSuspended &&
+      this._bloomPass &&
+      now >= this._bloomSuspendedUntil &&
+      this._scaleIndex === 0 &&
+      this._renderEmaMs < this.tuning.performance.recoveryThresholdMs) {
+      this._setBloomSuspended(false, now);
+    }
+
+    const underPressure =
+      renderMs > this.tuning.performance.severeThresholdMs ||
+      this._renderEmaMs > this.tuning.performance.degradeThresholdMs;
+    const emergencyFrame = renderMs > this.tuning.performance.emergencyThresholdMs;
+
+    if (underPressure) {
+      this._stableRecoveryFrames = 0;
+
+      if (emergencyFrame && this._bloomPass && !this._bloomSuspended) {
+        this._setBloomSuspended(true, now);
+      }
+
+      if (now >= this._nextScaleChangeAt) {
+        const nextIndex = emergencyFrame
+          ? this._scaleLadder.length - 1
+          : this._scaleIndex + 1;
+        this._setScaleIndex(nextIndex, { now, holdRecovery: emergencyFrame });
+      }
     } else if (this._renderEmaMs < this.tuning.performance.recoveryThresholdMs) {
-      this._composerScale = Math.min(this._postProcessMaxScale, this._composerScale + this.tuning.performance.recoveryStep);
-      this._applyComposerScale();
+      this._stableRecoveryFrames++;
+      if (
+        this._scaleIndex > 0 &&
+        now >= this._nextScaleChangeAt &&
+        now >= this._recoveryAllowedAt &&
+        this._stableRecoveryFrames >= this.tuning.performance.stableFramesForRecovery
+      ) {
+        this._stableRecoveryFrames = 0;
+        this._setScaleIndex(this._scaleIndex - 1, { now });
+      }
+    } else {
+      this._stableRecoveryFrames = 0;
     }
   }
 }
