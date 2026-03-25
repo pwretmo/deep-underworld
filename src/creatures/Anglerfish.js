@@ -783,9 +783,11 @@ transformed.y += sin(position.x * 6.0 + uFinTime * 5.3) * 0.02 * uFinWave;`
     this._frameCounter += 1;
 
     this._toPlayer.subVectors(playerPos, this.group.position);
-    const distToPlayer = this._toPlayer.length();
+    let distToPlayer = this._toPlayer.length();
 
     this._updateStateAndVelocity(dt, playerPos, distToPlayer);
+    this._toPlayer.addScaledVector(this._velocity, -dt);
+    distToPlayer = this._toPlayer.length();
     this._updateOrientation(dt);
 
     this._lodTier = this._resolveLodTier(distToPlayer);
