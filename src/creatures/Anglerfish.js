@@ -79,7 +79,6 @@ export class Anglerfish {
 
     this._velocity = new THREE.Vector3();
     this._toPlayer = new THREE.Vector3();
-    this._movementDelta = new THREE.Vector3();
     this._moveTarget = new THREE.Vector3();
     this._desiredVelocity = new THREE.Vector3();
     this._lookVec = new THREE.Vector3(0, 0, 1);
@@ -657,8 +656,7 @@ transformed.y += sin(position.x * 6.0 + uFinTime * 5.3) * 0.02 * uFinWave;`
     const accelScale = this.state === 'chase' ? 1.1 : this.state === 'alert' ? 0.8 : 0.55;
     const blend = 1 - Math.exp(-this.maxAcceleration * accelScale * dt);
     this._velocity.lerp(this._desiredVelocity, blend);
-    this._movementDelta.copy(this._velocity).multiplyScalar(dt);
-    this.group.position.add(this._movementDelta);
+    this.group.position.addScaledVector(this._velocity, dt);
   }
 
   _updateOrientation(dt) {
@@ -784,11 +782,10 @@ transformed.y += sin(position.x * 6.0 + uFinTime * 5.3) * 0.02 * uFinWave;`
     this.time += dt;
     this._frameCounter += 1;
 
-    this._toPlayer.subVectors(playerPos, this.group.position);
-    const preMoveDistToPlayer = this._toPlayer.length();
+    const preMoveDistToPlayer = playerPos.distanceTo(this.group.position);
 
     this._updateStateAndVelocity(dt, playerPos, preMoveDistToPlayer);
-    this._toPlayer.sub(this._movementDelta);
+    this._toPlayer.subVectors(playerPos, this.group.position);
     const distToPlayer = this._toPlayer.length();
     this._updateOrientation(dt);
 
