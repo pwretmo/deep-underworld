@@ -1,11 +1,23 @@
 import * as THREE from 'three';
 
-const LOD_NEAR_DISTANCE = 42;
-const LOD_MEDIUM_DISTANCE = 86;
+const LOD_NEAR_DISTANCE = 30;
+const LOD_MEDIUM_DISTANCE = 80;
+const JELLY_RESPAWN_DISTANCE = 340;
+const TWO_PI = Math.PI * 2;
+const HALF_PI = Math.PI * 0.5;
+
+const _tmpMatrix = new THREE.Matrix4();
+const _tmpQuat = new THREE.Quaternion();
+const _tmpPos = new THREE.Vector3();
+const _tmpScale = new THREE.Vector3();
 
 function smoothstep(edge0, edge1, x) {
   const t = THREE.MathUtils.clamp((x - edge0) / (edge1 - edge0), 0, 1);
   return t * t * (3 - 2 * t);
+}
+
+function lerp(a, b, t) {
+  return a + (b - a) * t;
 }
 
 // Create a soft circular sprite texture for glow effects.
@@ -29,6 +41,105 @@ function createGlowTexture() {
 
 const glowTexture = createGlowTexture();
 
+function createBellNormalTexture() {
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const image = ctx.createImageData(size, size);
+  const data = image.data;
+
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const u = x / (size - 1);
+      const v = y / (size - 1);
+      const angle = u * TWO_PI;
+      const band = Math.sin(v * 56 + Math.cos(angle * 3.2) * 2.4) * 0.22;
+      const radial = Math.cos(angle * 14 + v * 18) * 0.16;
+      const nx = THREE.MathUtils.clamp(0.5 + radial, 0, 1);
+      const ny = THREE.MathUtils.clamp(0.5 + band, 0, 1);
+      const nz = Math.sqrt(Math.max(0, 1 - (nx * 2 - 1) ** 2 - (ny * 2 - 1) ** 2)) * 0.5 + 0.5;
+      const i = (y * size + x) * 4;
+      data[i] = Math.round(nx * 255);
+      data[i + 1] = Math.round(ny * 255);
+      data[i + 2] = Math.round(nz * 255);
+      data[i + 3] = 255;
+    }
+  }
+
+  ctx.putImageData(image, 0, 0);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(1, 3);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+function createVeinTexture() {
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = 'black';
+  ctx.fillRect(0, 0, size, size);
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+  ctx.lineWidth = 1;
+
+  for (let i = 0; i < 22; i++) {
+    const angle = (i / 22) * TWO_PI;
+    ctx.beginPath();
+    ctx.moveTo(size * 0.5, size * 0.18);
+    for (let s = 1; s <= 6; s++) {
+      const r = (s / 6) * size * 0.45;
+      const wobble = Math.sin(s * 1.7 + angle * 2.2) * size * 0.02;
+      ctx.lineTo(
+        size * 0.5 + Math.cos(angle + s * 0.11) * (r + wobble),
+        size * 0.2 + Math.sin(angle) * 0.08 * size + r * 0.9
+      );
+    }
+    ctx.stroke();
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+function createPoreTexture() {
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = 'rgb(130,130,130)';
+  ctx.fillRect(0, 0, size, size);
+  for (let i = 0; i < 520; i++) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const r = 0.4 + Math.random() * 1.2;
+    const shade = 70 + Math.floor(Math.random() * 80);
+    ctx.fillStyle = `rgb(${shade},${shade},${shade})`;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, TWO_PI);
+    ctx.fill();
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(2, 8);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+const bellNormalTexture = createBellNormalTexture();
+const veinTexture = createVeinTexture();
+const poreTexture = createPoreTexture();
+
 const LOD_PROFILE = {
   near: {
     bellWidthSegments: 64,
@@ -47,6 +158,9 @@ const LOD_PROFILE = {
     tentacleRadialSegments: 8,
     tentacleRadiusScale: 1.0,
     animationInterval: 4,
+    tentacleNematocystClusters: 6,
+    appendageMotionScale: 1,
+    appendageCountScale: 1,
   },
   medium: {
     bellWidthSegments: 34,
@@ -64,25 +178,31 @@ const LOD_PROFILE = {
     tentacleSegments: 8,
     tentacleRadialSegments: 5,
     tentacleRadiusScale: 0.85,
-    animationInterval: 8,
+    animationInterval: 12,
+    tentacleNematocystClusters: 3,
+    appendageMotionScale: 0.6,
+    appendageCountScale: 0.5,
   },
   far: {
-    bellWidthSegments: 18,
-    bellHeightSegments: 12,
+    bellWidthSegments: 8,
+    bellHeightSegments: 6,
     innerWidthSegments: 12,
     innerHeightSegments: 10,
-    rimTubeSegments: 24,
+    rimTubeSegments: 12,
     rimRadialSegments: 6,
-    oralArmCount: 2,
-    oralArmSegments: 4,
-    oralArmRadialSegments: 4,
+    oralArmCount: 1,
+    oralArmSegments: 3,
+    oralArmRadialSegments: 3,
     oralArmRadiusScale: 0.7,
-    tentacleMin: 4,
-    tentacleMaxExtra: 2,
-    tentacleSegments: 4,
+    tentacleMin: 2,
+    tentacleMaxExtra: 1,
+    tentacleSegments: 3,
     tentacleRadialSegments: 3,
     tentacleRadiusScale: 0.7,
-    animationInterval: 16,
+    animationInterval: 4,
+    tentacleNematocystClusters: 0,
+    appendageMotionScale: 0.28,
+    appendageCountScale: 0.25,
   },
 };
 
@@ -114,6 +234,103 @@ export class Jellyfish {
     scene.add(this.group);
   }
 
+  _createBellMaterial(color, size, detailScale = 1) {
+    const mat = new THREE.MeshPhysicalMaterial({
+      color,
+      emissive: color,
+      emissiveIntensity: 0.16,
+      transparent: true,
+      opacity: 0.4,
+      roughness: 0.08,
+      metalness: 0.02,
+      transmission: 0.76,
+      thickness: 0.62,
+      iridescence: 0.78,
+      iridescenceIOR: 1.24,
+      clearcoat: 0.9,
+      clearcoatRoughness: 0.08,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      normalMap: bellNormalTexture,
+      normalScale: new THREE.Vector2(0.28 * detailScale, 0.42 * detailScale),
+    });
+
+    mat.userData.shaderUniforms = {
+      uContractionPhase: { value: 0 },
+      uJellyTime: { value: 0 },
+      uPulseTravel: { value: 0 },
+      uDamage: { value: 0 },
+      uDamageSide: { value: 1 },
+      uBellSize: { value: size },
+      uVeinMap: { value: veinTexture },
+    };
+
+    mat.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, mat.userData.shaderUniforms);
+
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+uniform float uContractionPhase;
+uniform float uJellyTime;
+uniform float uDamage;
+uniform float uDamageSide;
+uniform float uBellSize;
+varying float vBellEdge;
+varying float vBellHeight;
+varying float vBellTravel;`
+        )
+        .replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+float radial = length(position.xz) / max(uBellSize, 0.001);
+float edge = smoothstep(0.33, 1.0, radial);
+float crown = 1.0 - smoothstep(0.0, 0.45, radial);
+float contraction = max(uContractionPhase, 0.0);
+float relax = max(-uContractionPhase, 0.0);
+float stretchMarks = sin(position.y * 34.0 + radial * 16.0 + uJellyTime * 2.2) * contraction * 0.03 * uBellSize;
+float radialContract = contraction * edge * (0.2 + sin(radial * 18.0 + uJellyTime * 3.1) * 0.02);
+transformed.xz *= (1.0 - radialContract + relax * edge * 0.06);
+transformed.y += crown * contraction * 0.04 * uBellSize;
+transformed.y -= edge * contraction * 0.16 * uBellSize;
+transformed.y += edge * relax * 0.05 * uBellSize;
+float damageShape = uDamage * smoothstep(0.15, 1.0, radial) * 0.24 * uBellSize;
+transformed.y -= damageShape * max(0.0, cos(atan(position.z, position.x) - uDamageSide));
+transformed.y += stretchMarks;
+vBellEdge = edge;
+vBellHeight = transformed.y;
+vBellTravel = radial;`
+        );
+
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+uniform float uContractionPhase;
+uniform float uJellyTime;
+uniform float uPulseTravel;
+uniform sampler2D uVeinMap;
+varying float vBellEdge;
+varying float vBellHeight;
+varying float vBellTravel;`
+        )
+        .replace(
+          '#include <emissivemap_fragment>',
+          `#include <emissivemap_fragment>
+float pulseHead = smoothstep(uPulseTravel - 0.2, uPulseTravel + 0.08, vBellTravel) * (1.0 - smoothstep(uPulseTravel + 0.08, uPulseTravel + 0.24, vBellTravel));
+float veins = texture2D(uVeinMap, vec2(vUv.x, vUv.y * 1.25)).r;
+float fresnel = pow(1.0 - abs(dot(normalize(vViewPosition), normal)), 2.6);
+float contractionGlow = max(uContractionPhase, 0.0) * 0.55;
+totalEmissiveRadiance += diffuseColor.rgb * (pulseHead * 1.25 + veins * 0.2 + fresnel * 0.32 + contractionGlow * vBellEdge * 0.34);`
+        );
+
+      mat.userData.shader = shader;
+    };
+
+    return mat;
+  }
+
   _createBellGeometry(size, widthSegments, heightSegments) {
     const bellGeo = new THREE.SphereGeometry(size, widthSegments, heightSegments, 0, Math.PI * 2, 0, Math.PI * 0.55);
     const positions = bellGeo.attributes.position;
@@ -125,7 +342,7 @@ export class Jellyfish {
       const angle = Math.atan2(z, x);
       const rimBand = smoothstep(0.62, 1.0, radial);
       const crownBand = 1 - smoothstep(0.0, 0.35, radial);
-      const rimLobes = Math.sin(angle * 6) * 0.026 * rimBand * size;
+      const rimLobes = Math.sin(angle * 9) * 0.032 * rimBand * size;
       const crownUndulate = Math.sin(angle * 2.5) * 0.012 * crownBand * size;
       const radialSqueeze = (0.12 * rimBand - 0.05 * crownBand) * size;
       const subUmbrellaDip = -smoothstep(0.42, 0.95, radial) * 0.11 * size;
@@ -177,6 +394,7 @@ export class Jellyfish {
       minY,
       maxY,
       length: Math.max(maxY - minY, 0.001),
+      type: options.type,
       ...options,
     };
   }
@@ -189,8 +407,9 @@ export class Jellyfish {
     const relaxed = Math.max(0, -pulse);
     const flowFactor = 0.3 + relaxed * 0.82;
     const pulseSqueeze = 1 - contraction * appendage.radialPulse;
-    const driftX = jelly.driftX * appendage.trailFactor * 0.22;
-    const driftZ = jelly.driftZ * appendage.trailFactor * 0.22;
+    const driftX = jelly.velocityX * appendage.trailFactor * 0.32;
+    const driftZ = jelly.velocityZ * appendage.trailFactor * 0.32;
+    const proximityWeight = jelly.proximityInfluence * appendage.proximityResponse;
 
     for (let i = 0; i < rest.length; i += 3) {
       const baseX = rest[i];
@@ -206,6 +425,10 @@ export class Jellyfish {
       const axial = Math.cos(t * appendage.twistSpeed + appendage.phaseOffset + along * appendage.waveFrequency * 0.55)
         * appendage.twistAmount * tipWeight;
       const curl = (relaxed * appendage.relaxCurlAmount - contraction * appendage.pulseCurlAmount) * tipWeightSq;
+      const crossing = Math.sin(t * appendage.crossSpeed + appendage.crossPhase + along * appendage.crossFrequency)
+        * appendage.crossAmount * contraction * tipWeight * appendage.crossSign;
+      const oralSpread = appendage.type === 'oral' ? contraction * appendage.spreadAmount * tipWeight : 0;
+      const playerReact = proximityWeight * tipWeight;
       const vertical = contraction * jelly.size * appendage.liftAmount * tipWeight
         - relaxed * jelly.size * appendage.dropAmount * along * 0.4
         + waveB * appendage.heaveAmount * tipWeightSq;
@@ -214,15 +437,286 @@ export class Jellyfish {
       const radialZ = baseZ - appendage.rootCenter.z;
       const radialScale = THREE.MathUtils.lerp(1, pulseSqueeze, tipWeight);
 
-      array[i] = appendage.rootCenter.x + radialX * radialScale + appendage.perpX * lateral + appendage.dirX * (axial + driftX * tipWeight) + radialX * curl;
+      array[i] = appendage.rootCenter.x
+        + radialX * (radialScale + oralSpread)
+        + appendage.perpX * (lateral + crossing + jelly.playerDirX * playerReact * 0.06)
+        + appendage.dirX * (axial + driftX * tipWeight)
+        + radialX * curl;
       array[i + 1] = baseY + vertical;
-      array[i + 2] = appendage.rootCenter.z + radialZ * radialScale + appendage.perpZ * lateral + appendage.dirZ * (axial + driftZ * tipWeight) + radialZ * curl;
+      array[i + 2] = appendage.rootCenter.z
+        + radialZ * (radialScale + oralSpread)
+        + appendage.perpZ * (lateral + crossing + jelly.playerDirZ * playerReact * 0.06)
+        + appendage.dirZ * (axial + driftZ * tipWeight)
+        + radialZ * curl;
     }
 
     positions.needsUpdate = true;
     appendage.geometry.computeVertexNormals();
     appendage.geometry.attributes.normal.needsUpdate = true;
     appendage.geometry.computeBoundingSphere();
+  }
+
+  _createOralArmFrill(curve, size, color, profile) {
+    const frillGeo = new THREE.TubeGeometry(
+      curve,
+      profile.oralArmSegments,
+      (0.055 * size + 0.012) * profile.oralArmRadiusScale,
+      3,
+      false
+    );
+    const frillPositions = frillGeo.attributes.position;
+    for (let i = 0; i < frillPositions.count; i++) {
+      const x = frillPositions.getX(i);
+      const y = frillPositions.getY(i);
+      const z = frillPositions.getZ(i);
+      const angle = Math.atan2(z, x);
+      const ripple = Math.sin(angle * 6 + y * 8) * size * 0.01;
+      frillPositions.setX(i, x + Math.cos(angle) * ripple);
+      frillPositions.setZ(i, z + Math.sin(angle) * ripple);
+    }
+    frillGeo.computeVertexNormals();
+    const frillMat = new THREE.MeshPhysicalMaterial({
+      color,
+      emissive: color,
+      emissiveIntensity: 0.22,
+      transparent: true,
+      opacity: 0.25,
+      roughness: 0.45,
+      transmission: 0.2,
+      side: THREE.DoubleSide,
+      bumpMap: poreTexture,
+      bumpScale: 0.018,
+      depthWrite: false,
+    });
+    return new THREE.Mesh(frillGeo, frillMat);
+  }
+
+  _createNematocystSystem(group, tentacles, color, size, clusterCount, tierMotionScale) {
+    if (!clusterCount || tentacles.length === 0) {
+      return null;
+    }
+
+    const references = [];
+    for (let t = 0; t < tentacles.length; t++) {
+      const descriptor = tentacles[t];
+      for (let c = 0; c < clusterCount; c++) {
+        const along = 0.2 + (c / Math.max(1, clusterCount - 1)) * 0.72;
+        let closestVertex = 0;
+        let closestDelta = Infinity;
+        for (let i = 0; i < descriptor.restPositions.length; i += 3) {
+          const y = descriptor.restPositions[i + 1];
+          const localAlong = THREE.MathUtils.clamp((descriptor.maxY - y) / descriptor.length, 0, 1);
+          const delta = Math.abs(localAlong - along);
+          if (delta < closestDelta) {
+            closestDelta = delta;
+            closestVertex = i / 3;
+          }
+        }
+        references.push({
+          appendageIndex: t,
+          vertexIndex: closestVertex,
+          baseScale: (0.012 + Math.random() * 0.018) * size,
+          pulseOffset: Math.random() * TWO_PI,
+          liftBias: (Math.random() - 0.5) * 0.02 * size,
+        });
+      }
+    }
+
+    const geo = new THREE.SphereGeometry(1, 5, 4);
+    const mat = new THREE.MeshPhysicalMaterial({
+      color,
+      emissive: color,
+      emissiveIntensity: 0.55,
+      roughness: 0.35,
+      transparent: true,
+      opacity: 0.5,
+      depthWrite: false,
+    });
+
+    const count = references.length;
+    const mesh = new THREE.InstancedMesh(geo, mat, count);
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+    const pulseAttribute = new THREE.InstancedBufferAttribute(new Float32Array(count), 1);
+    for (let i = 0; i < count; i++) {
+      pulseAttribute.setX(i, references[i].pulseOffset);
+    }
+    geo.setAttribute('instancePulse', pulseAttribute);
+
+    mat.userData.shaderUniforms = {
+      uPulseTime: { value: 0 },
+    };
+
+    mat.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, mat.userData.shaderUniforms);
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+attribute float instancePulse;
+uniform float uPulseTime;
+varying float vPulse;`
+        )
+        .replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+float pulse = 0.8 + 0.2 * sin(uPulseTime * 2.8 + instancePulse * 1.6);
+transformed *= pulse;
+vPulse = pulse;`
+        );
+
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+varying float vPulse;`
+        )
+        .replace(
+          '#include <emissivemap_fragment>',
+          `#include <emissivemap_fragment>
+totalEmissiveRadiance += diffuseColor.rgb * (vPulse - 0.76) * 0.42;`
+        );
+      mat.userData.shader = shader;
+    };
+
+    group.add(mesh);
+
+    return {
+      mesh,
+      references,
+      tierMotionScale,
+    };
+  }
+
+  _updateNematocysts(system, tier, jelly, t) {
+    if (!system) return;
+
+    const refs = system.references;
+    for (let i = 0; i < refs.length; i++) {
+      const ref = refs[i];
+      const appendage = tier.tentacles[ref.appendageIndex];
+      const positions = appendage.geometry.attributes.position.array;
+      const baseIndex = ref.vertexIndex * 3;
+
+      _tmpPos.set(
+        positions[baseIndex],
+        positions[baseIndex + 1] + ref.liftBias,
+        positions[baseIndex + 2]
+      );
+      _tmpScale.setScalar(ref.baseScale * (0.86 + Math.sin(t * 2.7 + ref.pulseOffset) * 0.17));
+      _tmpMatrix.compose(_tmpPos, _tmpQuat.identity(), _tmpScale);
+      system.mesh.setMatrixAt(i, _tmpMatrix);
+    }
+
+    system.mesh.instanceMatrix.needsUpdate = true;
+    if (system.mesh.material.userData.shaderUniforms) {
+      system.mesh.material.userData.shaderUniforms.uPulseTime.value = t;
+    }
+  }
+
+  _createBellInteriorDetail(group, color, size) {
+    const stomachGeo = new THREE.SphereGeometry(size * 0.23, 16, 12);
+    const stomachMat = new THREE.MeshPhysicalMaterial({
+      color,
+      emissive: color,
+      emissiveIntensity: 0.35,
+      transparent: true,
+      opacity: 0.25,
+      roughness: 0.2,
+      transmission: 0.35,
+      depthWrite: false,
+    });
+    const stomach = new THREE.Mesh(stomachGeo, stomachMat);
+    stomach.position.y = -size * 0.07;
+    group.add(stomach);
+
+    const manubriumGeo = new THREE.CylinderGeometry(size * 0.042, size * 0.07, size * 0.5, 10, 1, true);
+    const manubriumMat = new THREE.MeshPhysicalMaterial({
+      color,
+      emissive: color,
+      emissiveIntensity: 0.3,
+      transparent: true,
+      opacity: 0.32,
+      roughness: 0.18,
+      transmission: 0.24,
+      depthWrite: false,
+    });
+    const manubrium = new THREE.Mesh(manubriumGeo, manubriumMat);
+    manubrium.position.y = -size * 0.34;
+    group.add(manubrium);
+
+    const gonadArms = new THREE.Group();
+    for (let i = 0; i < 4; i++) {
+      const angle = (i / 4) * TWO_PI;
+      const pts = [
+        new THREE.Vector3(Math.cos(angle) * size * 0.12, -size * 0.1, Math.sin(angle) * size * 0.12),
+        new THREE.Vector3(Math.cos(angle + 0.2) * size * 0.16, -size * 0.24, Math.sin(angle + 0.2) * size * 0.16),
+        new THREE.Vector3(Math.cos(angle - 0.1) * size * 0.1, -size * 0.44, Math.sin(angle - 0.1) * size * 0.1),
+      ];
+      const armGeo = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 8, size * 0.03, 6, false);
+      const armMat = new THREE.MeshPhysicalMaterial({
+        color,
+        emissive: color,
+        emissiveIntensity: 0.24,
+        transparent: true,
+        opacity: 0.2,
+        roughness: 0.34,
+        transmission: 0.25,
+        depthWrite: false,
+      });
+      const arm = new THREE.Mesh(armGeo, armMat);
+      gonadArms.add(arm);
+    }
+    group.add(gonadArms);
+
+    const gastricFilaments = new THREE.Group();
+    for (let i = 0; i < 6; i++) {
+      const angle = (i / 6) * TWO_PI;
+      const filamentPts = [
+        new THREE.Vector3(Math.cos(angle) * size * 0.06, -size * 0.12, Math.sin(angle) * size * 0.06),
+        new THREE.Vector3(Math.cos(angle + 0.3) * size * 0.08, -size * 0.24, Math.sin(angle + 0.3) * size * 0.08),
+        new THREE.Vector3(Math.cos(angle - 0.2) * size * 0.04, -size * 0.35, Math.sin(angle - 0.2) * size * 0.04),
+      ];
+      const filamentGeo = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(filamentPts), 5, size * 0.01, 4, false);
+      const filament = new THREE.Mesh(
+        filamentGeo,
+        new THREE.MeshPhysicalMaterial({
+          color,
+          emissive: color,
+          emissiveIntensity: 0.16,
+          transparent: true,
+          opacity: 0.2,
+          roughness: 0.4,
+          transmission: 0.18,
+          depthWrite: false,
+        })
+      );
+      gastricFilaments.add(filament);
+    }
+    group.add(gastricFilaments);
+
+    return {
+      stomach,
+      manubrium,
+      gonadArms,
+      gastricFilaments,
+    };
+  }
+
+  _createJetMesh(color, size) {
+    const geo = new THREE.ConeGeometry(size * 0.08, size * 0.8, 12, 1, true);
+    const mat = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.rotation.x = Math.PI;
+    mesh.position.y = -size * 0.56;
+    return mesh;
   }
 
   _createFlowingAppendages(group, color, size, profile) {
@@ -254,15 +748,22 @@ export class Jellyfish {
       const armMat = new THREE.MeshPhysicalMaterial({
         color,
         emissive: color,
-        emissiveIntensity: 0.4,
+        emissiveIntensity: 0.3,
         transparent: true,
-        opacity: 0.45,
+        opacity: 0.43,
         roughness: 0.3,
+        bumpMap: poreTexture,
+        bumpScale: 0.022,
         depthWrite: false,
       });
       const arm = new THREE.Mesh(armGeo, armMat);
       group.add(arm);
+
+      const frill = this._createOralArmFrill(curve, size, color, profile);
+      group.add(frill);
+
       oralArms.push(this._createAppendageDescriptor(arm, {
+        type: 'oral',
         angle,
         dirX: Math.cos(angle),
         dirZ: Math.sin(angle),
@@ -284,6 +785,45 @@ export class Jellyfish {
         dropAmount: 0.015 + Math.random() * 0.02,
         radialPulse: 0.03 + Math.random() * 0.02,
         trailFactor: 0.3 + Math.random() * 0.25,
+        proximityResponse: 0.6 + Math.random() * 0.4,
+        spreadAmount: 0.14 + Math.random() * 0.1,
+        crossSpeed: 0.4 + Math.random() * 0.2,
+        crossPhase: Math.random() * TWO_PI,
+        crossFrequency: 3.4 + Math.random() * 1.8,
+        crossAmount: 0.02 + Math.random() * 0.018,
+        crossSign: Math.random() > 0.5 ? 1 : -1,
+      }));
+
+      oralArms.push(this._createAppendageDescriptor(frill, {
+        type: 'oral',
+        angle,
+        dirX: Math.cos(angle),
+        dirZ: Math.sin(angle),
+        perpX: Math.cos(angle + HALF_PI),
+        perpZ: Math.sin(angle + HALF_PI),
+        phaseOffset: Math.random() * TWO_PI,
+        swaySpeed: 0.6 + Math.random() * 0.2,
+        secondarySpeed: 0.35 + Math.random() * 0.2,
+        swayAmount: 0.03 + Math.random() * 0.025,
+        secondarySwayAmount: 0.018 + Math.random() * 0.015,
+        waveFrequency: 3 + Math.random() * 0.8,
+        secondaryFrequency: 5.6 + Math.random() * 1,
+        twistSpeed: 0.4 + Math.random() * 0.15,
+        twistAmount: 0.025 + Math.random() * 0.02,
+        liftAmount: 0.026 + Math.random() * 0.024,
+        heaveAmount: 0.012 + Math.random() * 0.012,
+        pulseCurlAmount: 0.016 + Math.random() * 0.016,
+        relaxCurlAmount: 0.036 + Math.random() * 0.02,
+        dropAmount: 0.014 + Math.random() * 0.012,
+        radialPulse: 0.028 + Math.random() * 0.018,
+        trailFactor: 0.26 + Math.random() * 0.2,
+        proximityResponse: 0.7 + Math.random() * 0.35,
+        spreadAmount: 0.19 + Math.random() * 0.08,
+        crossSpeed: 0.35 + Math.random() * 0.16,
+        crossPhase: Math.random() * TWO_PI,
+        crossFrequency: 2.8 + Math.random() * 1.2,
+        crossAmount: 0.03 + Math.random() * 0.015,
+        crossSign: Math.random() > 0.5 ? 1 : -1,
       }));
     }
 
@@ -324,6 +864,7 @@ export class Jellyfish {
       const tentacle = new THREE.Mesh(tentGeo, tentMat);
       group.add(tentacle);
       tentacles.push(this._createAppendageDescriptor(tentacle, {
+        type: 'tentacle',
         angle,
         dirX: Math.cos(angle),
         dirZ: Math.sin(angle),
@@ -345,28 +886,131 @@ export class Jellyfish {
         relaxCurlAmount: 0.07 + Math.random() * 0.03,
         dropAmount: 0.018 + Math.random() * 0.02,
         radialPulse: 0.04 + Math.random() * 0.02,
+        proximityResponse: 0.95 + Math.random() * 0.35,
+        spreadAmount: 0,
+        crossSpeed: 0.64 + Math.random() * 0.24,
+        crossPhase: Math.random() * TWO_PI,
+        crossFrequency: 5.8 + Math.random() * 2.5,
+        crossAmount: 0.05 + Math.random() * 0.04,
+        crossSign: Math.random() > 0.5 ? 1 : -1,
       }));
     }
 
-    return { oralArms, tentacles };
+    const nematocysts = this._createNematocystSystem(
+      group,
+      tentacles,
+      color,
+      size,
+      profile.tentacleNematocystClusters,
+      profile.appendageMotionScale
+    );
+
+    return { oralArms, tentacles, nematocysts };
+  }
+
+  _createFarTier(color, size) {
+    const group = new THREE.Group();
+
+    const farBell = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(size * 0.9, 0),
+      this._createBellMaterial(color, size, 0.8)
+    );
+    group.add(farBell);
+
+    const silhouette = new THREE.Mesh(
+      new THREE.CircleGeometry(size * 0.48, 7),
+      new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.24,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      })
+    );
+    silhouette.rotation.x = HALF_PI;
+    silhouette.position.y = -size * 0.18;
+    group.add(silhouette);
+
+    const trailGroup = new THREE.Group();
+    trailGroup.userData.baseRotX = (Math.random() - 0.5) * 0.12;
+    trailGroup.userData.baseRotZ = (Math.random() - 0.5) * 0.12;
+
+    const oralArms = [];
+    const tentacles = [];
+    const farCountScale = LOD_PROFILE.far.appendageCountScale;
+    const reducedOralCount = Math.max(1, Math.round(LOD_PROFILE.near.oralArmCount * farCountScale));
+    const reducedTentacleCount = Math.max(1, Math.round(LOD_PROFILE.near.tentacleMin * farCountScale));
+
+    const oralMat = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.22,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const tentacleMat = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.2,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+
+    for (let i = 0; i < reducedOralCount; i++) {
+      const angle = (i / reducedOralCount) * TWO_PI;
+      const oralPlane = new THREE.Mesh(
+        new THREE.PlaneGeometry(size * 0.12, size * 1.35),
+        oralMat
+      );
+      oralPlane.position.set(Math.cos(angle) * size * 0.1, -size * 0.8, Math.sin(angle) * size * 0.1);
+      oralPlane.rotation.y = angle;
+      trailGroup.add(oralPlane);
+      oralArms.push(this._createAppendageDescriptor(oralPlane, {
+        type: 'oral',
+        angle,
+      }));
+    }
+
+    for (let i = 0; i < reducedTentacleCount; i++) {
+      const angle = (i / reducedTentacleCount) * TWO_PI + (Math.random() - 0.5) * 0.22;
+      const tentaclePlane = new THREE.Mesh(
+        new THREE.PlaneGeometry(size * 0.06, size * 1.8),
+        tentacleMat
+      );
+      tentaclePlane.position.set(Math.cos(angle) * size * 0.22, -size * 1.05, Math.sin(angle) * size * 0.22);
+      tentaclePlane.rotation.y = angle;
+      trailGroup.add(tentaclePlane);
+      tentacles.push(this._createAppendageDescriptor(tentaclePlane, {
+        type: 'tentacle',
+        angle,
+      }));
+    }
+
+    group.add(trailGroup);
+
+    const jet = this._createJetMesh(color, size);
+    group.add(jet);
+
+    return {
+      group,
+      bell: farBell,
+      inner: silhouette,
+      rim: silhouette,
+      oralArms,
+      tentacles,
+      nematocysts: null,
+      animationInterval: 4,
+      profile: LOD_PROFILE.far,
+      interior: null,
+      jet,
+      farTrailGroup: trailGroup,
+    };
   }
 
   _createJellyTier(color, size, profile) {
     const group = new THREE.Group();
 
-    const bellMat = new THREE.MeshPhysicalMaterial({
-      color,
-      emissive: color,
-      emissiveIntensity: 0.3,
-      transparent: true,
-      opacity: 0.35,
-      roughness: 0.15,
-      metalness: 0,
-      transmission: 0.6,
-      thickness: 0.5,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    });
+    const bellMat = this._createBellMaterial(color, size, 1);
     const bell = new THREE.Mesh(this._createBellGeometry(size, profile.bellWidthSegments, profile.bellHeightSegments), bellMat);
     group.add(bell);
 
@@ -382,9 +1026,9 @@ export class Jellyfish {
     const innerMat = new THREE.MeshPhysicalMaterial({
       color,
       emissive: color,
-      emissiveIntensity: 0.8,
+      emissiveIntensity: 0.5,
       transparent: true,
-      opacity: 0.2,
+      opacity: 0.24,
       roughness: 0.3,
       transmission: 0.4,
       thickness: 0.3,
@@ -426,6 +1070,9 @@ export class Jellyfish {
     group.add(rim);
 
     const appendages = this._createFlowingAppendages(group, color, size, profile);
+    const interior = this._createBellInteriorDetail(group, color, size);
+    const jet = this._createJetMesh(color, size);
+    group.add(jet);
 
     return {
       group,
@@ -434,8 +1081,12 @@ export class Jellyfish {
       rim,
       oralArms: appendages.oralArms,
       tentacles: appendages.tentacles,
+      nematocysts: appendages.nematocysts,
       animationInterval: profile.animationInterval,
       profile,
+      interior,
+      jet,
+      farTrailGroup: null,
     };
   }
 
@@ -445,7 +1096,7 @@ export class Jellyfish {
 
     const nearTier = this._createJellyTier(color, size, LOD_PROFILE.near);
     const mediumTier = this._createJellyTier(color, size, LOD_PROFILE.medium);
-    const farTier = this._createJellyTier(color, size, LOD_PROFILE.far);
+    const farTier = this._createFarTier(color, size);
 
     const lod = new THREE.LOD();
     lod.addLevel(nearTier.group, 0);
@@ -466,7 +1117,7 @@ export class Jellyfish {
     sprite.position.y = -size * 0.1;
     group.add(sprite);
 
-    const light = new THREE.PointLight(color, 1, 10);
+    const light = new THREE.PointLight(color, 0.42, 8);
     light.position.y = -0.1;
     group.add(light);
 
@@ -484,20 +1135,53 @@ export class Jellyfish {
       phase: Math.random() * Math.PI * 2,
       driftX: (Math.random() - 0.5) * 0.4,
       driftZ: (Math.random() - 0.5) * 0.4,
-      verticalDrift: -0.05 - Math.random() * 0.04,
+      verticalDrift: -0.03 - Math.random() * 0.03,
       rollPhase: Math.random() * Math.PI * 2,
-      pulseSpeed: 0.8 + Math.random() * 0.4,
+      pulseSpeed: 0.9 + Math.random() * 0.35,
+      swimPhase: Math.random() * TWO_PI,
+      velocityX: 0,
+      velocityY: 0,
+      velocityZ: 0,
+      playerDirX: 0,
+      playerDirZ: 0,
+      proximityInfluence: 0,
+      reactionBias: Math.random() > 0.5 ? 1 : -1,
+      damageAmount: 0,
+      damageCooldown: Math.random() * 1.5,
+      damageSide: Math.random() * TWO_PI,
       lastActiveTierName: null,
     };
   }
 
-  _getLodTierName(distanceToPlayer) {
+  _getLodTierName(distanceToPlayer, previousTierName) {
+    const hysteresis = 4;
+    if (previousTierName === 'near' && distanceToPlayer < LOD_NEAR_DISTANCE + hysteresis) return 'near';
+    if (previousTierName === 'medium' && distanceToPlayer > LOD_NEAR_DISTANCE - hysteresis && distanceToPlayer < LOD_MEDIUM_DISTANCE + hysteresis) return 'medium';
+    if (previousTierName === 'far' && distanceToPlayer > LOD_MEDIUM_DISTANCE - hysteresis) return 'far';
     if (distanceToPlayer < LOD_NEAR_DISTANCE) return 'near';
     if (distanceToPlayer < LOD_MEDIUM_DISTANCE) return 'medium';
     return 'far';
   }
 
+  _updateBellShaderUniforms(tier, pulse, t, jelly) {
+    const bellMaterial = tier.bell.material;
+    if (!bellMaterial.userData || !bellMaterial.userData.shaderUniforms) return;
+    const uniforms = bellMaterial.userData.shaderUniforms;
+    uniforms.uContractionPhase.value = pulse;
+    uniforms.uJellyTime.value = t;
+    uniforms.uPulseTravel.value = (Math.sin(t * 2 + jelly.phase) * 0.5 + 0.5);
+    uniforms.uDamage.value = jelly.damageAmount;
+    uniforms.uDamageSide.value = jelly.damageSide;
+  }
+
   _animateTierAppendages(jelly, tier, pulse, t) {
+    if (tier.farTrailGroup) {
+      tier.farTrailGroup.rotation.y += 0.025 + Math.max(0, pulse) * 0.05;
+      tier.farTrailGroup.rotation.x = tier.farTrailGroup.userData.baseRotX + Math.sin(t * 0.45 + jelly.phase) * 0.08;
+      tier.farTrailGroup.rotation.z = tier.farTrailGroup.userData.baseRotZ + Math.cos(t * 0.38 + jelly.rollPhase) * 0.07;
+      return;
+    }
+
     for (const tent of tier.tentacles) {
       this._deformAppendage(tent, jelly, pulse, t);
     }
@@ -505,6 +1189,8 @@ export class Jellyfish {
     for (const arm of tier.oralArms) {
       this._deformAppendage(arm, jelly, pulse, t);
     }
+
+    this._updateNematocysts(tier.nematocysts, tier, jelly, t);
   }
 
   update(dt, playerPos) {
@@ -514,19 +1200,60 @@ export class Jellyfish {
     for (const jelly of this.jellies) {
       const t = this.time;
 
-      const pulse = Math.sin(t * jelly.pulseSpeed + jelly.phase);
+      const dx = playerPos.x - jelly.group.position.x;
+      const dy = playerPos.y - jelly.group.position.y;
+      const dz = playerPos.z - jelly.group.position.z;
+      const preMoveDistToPlayer = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      const planarLength = Math.max(0.0001, Math.sqrt(dx * dx + dz * dz));
+      jelly.playerDirX = dx / planarLength;
+      jelly.playerDirZ = dz / planarLength;
+      jelly.proximityInfluence = THREE.MathUtils.clamp(1 - preMoveDistToPlayer / 22, 0, 1);
+
+      const phaseSpeedScale = 1 + jelly.proximityInfluence * 0.7;
+      const contractionSpeed = jelly.pulseSpeed * 1.45 * phaseSpeedScale;
+      const relaxSpeed = jelly.pulseSpeed * 0.68 * phaseSpeedScale;
+      const phaseSin = Math.sin(jelly.swimPhase);
+      jelly.swimPhase += dt * (phaseSin >= 0 ? contractionSpeed : relaxSpeed);
+      if (jelly.swimPhase > TWO_PI) jelly.swimPhase -= TWO_PI;
+
+      const idlePulse = Math.sin(t * 0.35 + jelly.phase * 0.6) * 0.22;
+      const pulse = Math.sin(jelly.swimPhase) * 0.85 + idlePulse * 0.15;
       const contraction = Math.max(0, pulse);
       const relaxation = Math.max(0, -pulse);
       const propulsion = Math.pow(contraction, 1.7);
       const glideDrag = Math.pow(relaxation, 1.2);
 
-      jelly.group.position.y += (jelly.verticalDrift + propulsion * 0.62 - glideDrag * 0.04) * dt;
-      const horizontalFactor = 0.35 + (1 - contraction) * 0.65;
-      jelly.group.position.x += jelly.driftX * horizontalFactor * dt;
-      jelly.group.position.z += jelly.driftZ * horizontalFactor * dt;
+      if (jelly.damageCooldown > 0) {
+        jelly.damageCooldown -= dt;
+      } else if (preMoveDistToPlayer < 2.3) {
+        jelly.damageAmount = 1;
+        jelly.damageCooldown = 2.2;
+        jelly.damageSide = Math.atan2(dz, dx);
+      }
+      jelly.damageAmount = Math.max(0, jelly.damageAmount - dt * 0.6);
 
-      const distToPlayer = jelly.group.position.distanceTo(playerPos);
-      const activeTierName = this._getLodTierName(distToPlayer);
+      const desiredVX = jelly.driftX * (0.32 + (1 - contraction) * 0.58)
+        + jelly.playerDirX * jelly.proximityInfluence * jelly.reactionBias * 0.22;
+      const desiredVY = jelly.verticalDrift + propulsion * 0.56 - glideDrag * 0.08;
+      const desiredVZ = jelly.driftZ * (0.32 + (1 - contraction) * 0.58)
+        + jelly.playerDirZ * jelly.proximityInfluence * jelly.reactionBias * 0.22;
+
+      const inertia = 1 - Math.exp(-dt * 2.8);
+      const drag = 1 - Math.exp(-dt * 1.7);
+      jelly.velocityX = lerp(jelly.velocityX, desiredVX, inertia) * (1 - drag * 0.2);
+      jelly.velocityY = lerp(jelly.velocityY, desiredVY, inertia);
+      jelly.velocityZ = lerp(jelly.velocityZ, desiredVZ, inertia) * (1 - drag * 0.2);
+
+      jelly.group.position.x += jelly.velocityX * dt;
+      jelly.group.position.y += jelly.velocityY * dt;
+      jelly.group.position.z += jelly.velocityZ * dt;
+
+      const postMoveDx = playerPos.x - jelly.group.position.x;
+      const postMoveDy = playerPos.y - jelly.group.position.y;
+      const postMoveDz = playerPos.z - jelly.group.position.z;
+      const distToPlayer = Math.sqrt(postMoveDx * postMoveDx + postMoveDy * postMoveDy + postMoveDz * postMoveDz);
+
+      const activeTierName = this._getLodTierName(distToPlayer, jelly.lastActiveTierName);
       const activeTier = jelly.tiers[activeTierName];
 
       // Keep newly visible tiers in sync so LOD transitions don't reveal stale appendage geometry.
@@ -535,32 +1262,56 @@ export class Jellyfish {
         jelly.lastActiveTierName = activeTierName;
       }
 
-      const pulseShape = Math.sign(pulse) * Math.pow(Math.abs(pulse), 1.6);
+      const pulseShape = Math.sign(pulse) * Math.pow(Math.abs(pulse), 1.4);
       const squishX = 1 + pulseShape * 0.11;
       const squishY = 1 - pulseShape * 0.16;
-      for (const tier of Object.values(jelly.tiers)) {
-        tier.bell.scale.set(squishX, squishY, squishX);
-        tier.inner.scale.set(squishX * 0.98, squishY * 0.95, squishX * 0.98);
-        tier.rim.scale.set(squishX, 1, squishX);
-      }
 
-      jelly.light.intensity = 0.42 + contraction * 0.72;
-      jelly.sprite.material.opacity = 0.08 + contraction * 0.16;
+      this._updateBellShaderUniforms(jelly.tiers.near, pulseShape, t, jelly);
+      this._updateBellShaderUniforms(jelly.tiers.medium, pulseShape, t, jelly);
+      this._updateBellShaderUniforms(jelly.tiers.far, pulseShape, t, jelly);
+
+      jelly.tiers.near.inner.scale.set(squishX * 0.98, squishY * 0.92, squishX * 0.98);
+      jelly.tiers.near.rim.scale.set(1 + contraction * 0.12, 1, 1 + contraction * 0.12);
+      jelly.tiers.medium.inner.scale.set(squishX * 0.98, squishY * 0.94, squishX * 0.98);
+      jelly.tiers.medium.rim.scale.set(1 + contraction * 0.08, 1, 1 + contraction * 0.08);
+
+      const jetOpacity = contraction > 0.16 ? (contraction - 0.16) * 0.55 : 0;
+      jelly.tiers.near.jet.material.opacity = jetOpacity;
+      jelly.tiers.near.jet.scale.set(1 + contraction * 1.8, 1 + contraction * 1.6, 1 + contraction * 1.8);
+      jelly.tiers.medium.jet.material.opacity = jetOpacity * 0.8;
+      jelly.tiers.medium.jet.scale.set(1 + contraction * 1.4, 1 + contraction * 1.3, 1 + contraction * 1.4);
+      jelly.tiers.far.jet.material.opacity = jetOpacity * 0.6;
+
+      jelly.light.intensity = activeTierName === 'near' ? (0.12 + contraction * 0.28) : 0;
+      jelly.sprite.material.opacity = 0.05 + contraction * 0.18;
+      const farScale = THREE.MathUtils.clamp(distToPlayer / 120, 1, 2.1);
+      jelly.sprite.scale.setScalar(jelly.size * 3 * farScale);
 
       if (this._frameCount % activeTier.animationInterval === 0) {
         this._animateTierAppendages(jelly, activeTier, pulse, t);
       }
 
-      jelly.group.rotation.y += dt * (0.05 + propulsion * 0.03);
-      jelly.group.rotation.x = Math.sin(t * 0.25 + jelly.rollPhase) * 0.06;
-      jelly.group.rotation.z = Math.cos(t * 0.22 + jelly.rollPhase) * 0.05;
+      jelly.group.rotation.y += dt * (0.04 + propulsion * 0.03);
+      jelly.group.rotation.x = Math.sin(t * 0.25 + jelly.rollPhase + jelly.velocityX * 0.6) * 0.07;
+      jelly.group.rotation.z = Math.cos(t * 0.22 + jelly.rollPhase + jelly.velocityZ * 0.6) * 0.06;
 
-      if (distToPlayer > 120) {
+      if (jelly.tiers.near.interior) {
+        jelly.tiers.near.interior.manubrium.scale.y = 1 + contraction * 0.2;
+        jelly.tiers.near.interior.gonadArms.rotation.y = t * 0.08;
+      }
+      if (jelly.tiers.medium.interior) {
+        jelly.tiers.medium.interior.manubrium.scale.y = 1 + contraction * 0.14;
+      }
+
+      if (distToPlayer > JELLY_RESPAWN_DISTANCE) {
         jelly.group.position.set(
-          playerPos.x + (Math.random() - 0.5) * 80,
-          playerPos.y + (Math.random() - 0.5) * 30 - 10,
-          playerPos.z + (Math.random() - 0.5) * 80
+          playerPos.x + (Math.random() - 0.5) * 240,
+          playerPos.y + (Math.random() - 0.5) * 60 - 14,
+          playerPos.z + (Math.random() - 0.5) * 240
         );
+        jelly.velocityX = 0;
+        jelly.velocityY = 0;
+        jelly.velocityZ = 0;
       }
     }
   }
