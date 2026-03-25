@@ -293,6 +293,7 @@ export class Anglerfish {
       jawGeo.rotateZ(-Math.PI * 0.5);
       jawGeo.translate(0.62, 0, 0);
       jawMat = bodyMat.clone();
+      jawMat.userData = {};
       jawMat.emissiveIntensity = isNear ? 0.3 : 0.55;
       if (isNear) this._applyJawShader(jawMat);
       jaw = new THREE.Mesh(jawGeo, jawMat);
@@ -511,12 +512,18 @@ float scaleRelief = sin(position.x * 25.0 + position.y * 17.0 + position.z * 21.
 transformed += normal * scaleRelief * uFlexIntensity;`
         );
 
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <emissivemap_fragment>',
-        `#include <emissivemap_fragment>
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+uniform float uBodyFlex;`
+        )
+        .replace(
+          '#include <emissivemap_fragment>',
+          `#include <emissivemap_fragment>
 float rim = pow(1.0 - abs(dot(normalize(vViewPosition), normal)), 2.3);
 totalEmissiveRadiance += vec3(0.06, 0.16, 0.12) * rim * (0.7 + uBodyFlex * 0.7);`
-      );
+        );
 
       material.userData.shader = shader;
     };
