@@ -265,6 +265,11 @@ export class PreloadCoordinator {
       flashlightOn: false,
       exposure: this.renderer.toneMappingExposure,
     });
+    // Item 5: warm additional depth bands and bloom-suspended variants.
+    this.underwaterEffect.warmPerformanceFallbacks({ depth: 400, flashlightOn: false, exposure: this.renderer.toneMappingExposure });
+    this.underwaterEffect.warmPerformanceFallbacks({ depth: 800, flashlightOn: false, exposure: this.renderer.toneMappingExposure });
+    this.underwaterEffect.warmBloomSuspendedVariant({ depth: 0, flashlightOn: false, exposure: this.renderer.toneMappingExposure });
+    this.underwaterEffect.warmBloomSuspendedVariant({ depth: 400, flashlightOn: false, exposure: this.renderer.toneMappingExposure });
 
     // Warm flashlight materials so first toggle doesn't cause a shader-compile hitch
     this._warmFlashlightOnce();
@@ -397,9 +402,8 @@ export class PreloadCoordinator {
   async _warmDepthBandRenders() {
     if (!this.prepareDepthState) return;
 
-    // Reduced warmup set (3 depths × 2 yaws). Shaders already compiled in _warmGpuOnce();
-    // fog/lighting are uniform updates, not shader variants, so no recompilation needed.
-    const sampleDepths = [0, 120, 320];
+    // Item 5: extended depth bands cover mid/deep/abyss post-FX configurations.
+    const sampleDepths = [0, 120, 320, 500, 800];
     const sampleYawAngles = [0, Math.PI];
     const originalPosition = this.player.position.clone();
     const originalQuaternion = this.player.camera.quaternion.clone();

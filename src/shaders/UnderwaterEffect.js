@@ -43,6 +43,18 @@ const RENDER_PIPELINE_TUNING = Object.freeze({
     recoveryDelayMs: 1400,
     emergencyHoldMs: 2800,
     stableFramesForRecovery: 96,
+    // Item 1: sustained moderate-pressure counter
+    sustainedModeratePressureFrames: 8,
+    moderatePressureThresholdMs: 24,
+    // Item 3: suspend bloom at pressured state, not only emergency
+    bloomSuspendThresholdMs: 34,
+    // Item 2: depth-based post-FX scale caps
+    depthScaleCaps: {
+      surface: 1.0,
+      mid: 0.85,
+      deep: 0.72,
+      abyss: 0.6,
+    },
   },
 });
 
@@ -59,6 +71,7 @@ const UnderwaterShader = {
     darkening: { value: 0.55 },
     highlightRoll: { value: new THREE.Vector3(0.62, 0.34, 0.62) },
     bloomParams: { value: new THREE.Vector3(0.28, 0.78, 1.6) },
+    reducedMode: { value: 0.0 },
   },
   vertexShader: `
     varying vec2 vUv;
@@ -79,6 +92,7 @@ const UnderwaterShader = {
     uniform float darkening;
     uniform vec3 highlightRoll;
     uniform vec3 bloomParams;
+    uniform float reducedMode;
     varying vec2 vUv;
 
     void main() {
@@ -96,8 +110,8 @@ const UnderwaterShader = {
       float abyssBlend = smoothstep(depthThresholds.z, depthThresholds.z + 280.0, depth);
       float depthBlend = clamp(midBlend * 0.45 + deepBlend * 0.7 + abyssBlend * 0.35, 0.0, 1.0);
 
-      // Chromatic aberration (increases with depth)
-      float caStr = 0.0015 + depth * 0.000005;
+      // Chromatic aberration — scaled back in reduced mode (items 6/7)
+      float caStr = (0.0015 + depth * 0.000005) * (1.0 - reducedMode * 0.85);
       float r = texture2D(tDiffuse, uv + vec2(caStr, caStr * 0.3)).r;
       float b = texture2D(tDiffuse, uv - vec2(caStr, caStr * 0.2)).b;
       color.r = r;
@@ -127,7 +141,8 @@ const UnderwaterShader = {
       // so require both the flashlight to be active and nearby pixels to share
       // similar brightness before relaxing the deep-water grading.
       float preTintLuma = max(max(color.r, color.g), color.b);
-      vec2 lightProbe = max(vec2(1.0) / resolution, vec2(0.0005));
+      // Scale probe to zero when flashlight is off — avoids 4 redundant texture lookups (item 6).
+      vec2 lightProbe = max(vec2(1.0) / resolution, vec2(0.0005)) * flashlightActive;
       float nearbyLuma = 0.25 * (
         max(max(texture2D(tDiffuse, uv + vec2(lightProbe.x, 0.0)).r, texture2D(tDiffuse, uv + vec2(lightProbe.x, 0.0)).g), texture2D(tDiffuse, uv + vec2(lightProbe.x, 0.0)).b) +
         max(max(texture2D(tDiffuse, uv - vec2(lightProbe.x, 0.0)).r, texture2D(tDiffuse, uv - vec2(lightProbe.x, 0.0)).g), texture2D(tDiffuse, uv - vec2(lightProbe.x, 0.0)).b) +
@@ -154,14 +169,14 @@ const UnderwaterShader = {
       float silhouetteLift = smoothstep(0.04, 0.32, luma) * 0.022 * abyssBlend;
       color.rgb += silhouetteLift;
 
-      // Film grain - heavier for oppressive atmosphere
-      float grainStr = grading.z + depthBlend * 0.02;
+      // Film grain — heavier for oppressive atmosphere; reduced in low-cost mode (items 6/7)
+      float grainStr = (grading.z + depthBlend * 0.02) * (1.0 - reducedMode * 0.7);
       float grain = fract(sin(dot(uv * time * 0.01, vec2(12.9898, 78.233))) * 43758.5453);
       color.rgb += (grain - 0.5) * grainStr;
 
       // Ordered dither in darker gradients helps break visible color banding.
       float dither = fract(52.9829189 * fract(dot(fragCoord, vec2(0.06711056, 0.00583715)) + time * 0.003));
-      float ditherStrength = mix(0.0016, 0.0065, abyssBlend);
+      float ditherStrength = mix(0.0016, 0.0065, abyssBlend) * (1.0 - reducedMode * 0.75);
       color.rgb += (dither - 0.5) * ditherStrength;
 
       // A single-sample highlight spill is much cheaper than sampling neighboring
@@ -173,7 +188,7 @@ const UnderwaterShader = {
 
       // Slight scanline effect for deep water dread
       float scanline = 0.97 + 0.03 * sin(uv.y * resolution.y * 1.5);
-      float scanlineStr = clamp(depthBlend, 0.0, 1.0) * grading.w;
+      float scanlineStr = clamp(depthBlend, 0.0, 1.0) * grading.w * (1.0 - reducedMode * 0.9);
       color.rgb *= mix(1.0, scanline, scanlineStr);
 
       // Highlight roll-off reduces flashlight hotspot clipping while keeping punch.
@@ -252,12 +267,22 @@ export class UnderwaterEffect {
     // Adaptive render guard:
     // creature-dense scenes can cause heavy post-processing stalls on some GPUs.
     this._renderEmaMs = 16;
-    this._postProcessMaxScale = qualityManager.getSettings().postProcessScale;
+    this._qualityMaxScale = qualityManager.getSettings().postProcessScale;
+    this._depthScaleCap = 1.0;
+    this._postProcessMaxScale = this._qualityMaxScale;
+    this._reducedShaderMode = false;
+    this._isSoftwareRenderer = false;
+    this._moderatePressureFrames = 0;
+    // Item 4: cache quantized pass-state inputs to skip unnecessary bloom recomputation
+    this._passStateCacheDepth = -9999;
+    this._passStateCacheFlashlight = null;
+    this._passStateCacheExposure = -1;
     this._rebuildScaleLadder();
     this._applyComposerScale(true);
 
     window.addEventListener('qualitychange', (e) => {
-      this._postProcessMaxScale = e.detail.settings.postProcessScale;
+      this._qualityMaxScale = e.detail.settings.postProcessScale;
+      this._postProcessMaxScale = Math.min(this._qualityMaxScale, this._depthScaleCap);
       this._rebuildScaleLadder();
       this._setScaleIndex(this._findScaleIndex(this._composerScale), { force: true, resetCooldown: true });
       this._applyComposerScale(true);
@@ -437,6 +462,20 @@ export class UnderwaterEffect {
     this.underwaterPass.uniforms.exposure.value = exposure;
     this.underwaterPass.uniforms.flashlightActive.value = flashlightOn ? 1 : 0;
 
+    // Item 4: quantize inputs — skip bloom target recomputation when nothing meaningful changed.
+    const qDepth = Math.round(depth / 5) * 5;
+    const qExposure = Math.round(exposure * 100) / 100;
+    if (
+      qDepth === this._passStateCacheDepth &&
+      flashlightOn === this._passStateCacheFlashlight &&
+      qExposure === this._passStateCacheExposure
+    ) {
+      return;
+    }
+    this._passStateCacheDepth = qDepth;
+    this._passStateCacheFlashlight = flashlightOn;
+    this._passStateCacheExposure = qExposure;
+
     const depthNorm = THREE.MathUtils.smoothstep(
       depth,
       this.tuning.depthThresholds.mid,
@@ -504,10 +543,32 @@ export class UnderwaterEffect {
       this._renderEmaMs > this.tuning.performance.degradeThresholdMs;
     const emergencyFrame = renderMs > this.tuning.performance.emergencyThresholdMs;
 
+    // Items 1/8: track sustained moderate-EMA pressure for early degradation
+    const moderatePressure = this._renderEmaMs > this.tuning.performance.moderatePressureThresholdMs;
+    if (moderatePressure) {
+      this._moderatePressureFrames = Math.min(
+        this._moderatePressureFrames + 1,
+        this.tuning.performance.sustainedModeratePressureFrames + 1
+      );
+    } else {
+      this._moderatePressureFrames = 0;
+    }
+    const sustainedModeratePressure =
+      this._moderatePressureFrames >= this.tuning.performance.sustainedModeratePressureFrames;
+
+    // Items 6/7: activate reduced shader mode under any tier of pressure
+    const shouldReduceShader = underPressure || sustainedModeratePressure;
+    if (shouldReduceShader !== this._reducedShaderMode) {
+      this._reducedShaderMode = shouldReduceShader;
+      this.underwaterPass.uniforms.reducedMode.value = shouldReduceShader ? 1.0 : 0.0;
+    }
+
     if (underPressure) {
       this._stableRecoveryFrames = 0;
 
-      if (emergencyFrame && this._bloomPass && !this._bloomSuspended) {
+      // Item 3: suspend bloom at pressured state, not only at emergency
+      if (this._bloomPass && !this._bloomSuspended &&
+          (emergencyFrame || renderMs > this.tuning.performance.bloomSuspendThresholdMs)) {
         this._setBloomSuspended(true, now);
       }
 
@@ -517,6 +578,10 @@ export class UnderwaterEffect {
           : this._scaleIndex + 1;
         this._setScaleIndex(nextIndex, { now, holdRecovery: emergencyFrame });
       }
+    } else if (sustainedModeratePressure && now >= this._nextScaleChangeAt) {
+      // Item 1: degrade one rung earlier under sustained moderate-EMA pressure
+      this._stableRecoveryFrames = 0;
+      this._setScaleIndex(this._scaleIndex + 1, { now });
     } else if (this._renderEmaMs < this.tuning.performance.recoveryThresholdMs) {
       this._stableRecoveryFrames++;
       if (
@@ -563,5 +628,66 @@ export class UnderwaterEffect {
       stallRisk: emergency ? 'emergency' : pressured ? 'pressured' : 'normal',
       stallRiskLabel: emergency ? 'Emergency' : pressured ? 'Pressured' : 'Normal',
     };
+  }
+
+  /**
+   * Item 2: Cap the maximum composer scale for the current depth band.
+   * Called each frame from Game._updateRenderPipelineForDepth.
+   * Deep/abyss zones tolerate cheaper post-FX — visual sensitivity is lower.
+   */
+  applyDepthScaleCap(depth) {
+    const caps = this.tuning.performance.depthScaleCaps;
+    const thresholds = this.tuning.depthThresholds;
+    let cap;
+    if (depth < thresholds.mid) {
+      cap = caps.surface;
+    } else if (depth < thresholds.deep) {
+      cap = caps.mid;
+    } else if (depth < thresholds.abyss) {
+      cap = caps.deep;
+    } else {
+      cap = caps.abyss;
+    }
+
+    if (Math.abs(cap - this._depthScaleCap) < 0.005) return;
+    this._depthScaleCap = cap;
+    const newMax = Math.min(this._qualityMaxScale, cap);
+    if (Math.abs(newMax - this._postProcessMaxScale) < 0.005) return;
+    this._postProcessMaxScale = newMax;
+    this._rebuildScaleLadder();
+    const clampedIndex = this._findScaleIndex(Math.min(this._composerScale, newMax));
+    this._setScaleIndex(clampedIndex, { force: false, resetCooldown: false });
+  }
+
+  /**
+   * Item 9: Start with a reduced post-process profile for software/fallback renderers.
+   * Called once from Game constructor when software rendering is detected.
+   */
+  applySoftwareRendererPolicy() {
+    this._isSoftwareRenderer = true;
+    this._reducedShaderMode = true;
+    this.underwaterPass.uniforms.reducedMode.value = 1.0;
+    this._setScaleIndex(this._scaleLadder.length - 1, { force: true, resetCooldown: true });
+    if (this._bloomPass && !this._bloomSuspended) {
+      this._setBloomSuspended(true);
+    }
+  }
+
+  /**
+   * Item 5: Warm all scale-ladder variants with bloom explicitly suspended.
+   * Allows PreloadCoordinator to pre-compile the bloom-off post-FX permutation.
+   */
+  warmBloomSuspendedVariant({ depth = 0, flashlightOn = false, exposure = 0.76 } = {}) {
+    if (!this._bloomPass) return;
+    const wasSuspended = this._bloomSuspended;
+    if (!wasSuspended) {
+      this._bloomSuspended = true;
+      this._bloomPass.enabled = false;
+    }
+    this.warmPerformanceFallbacks({ depth, flashlightOn, exposure });
+    if (!wasSuspended) {
+      this._bloomSuspended = false;
+      this._bloomPass.enabled = true;
+    }
   }
 }

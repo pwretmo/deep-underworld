@@ -63,6 +63,10 @@ export class Game {
       this.renderer.setPixelRatio(window.devicePixelRatio);
     }
     this.graphicsDiagnostics = this._detectGraphicsDiagnostics();
+    // Item 9: start software/fallback renderers in a reduced post-process profile.
+    if (this.graphicsDiagnostics.hardwareAccelerated === false) {
+      this.underwaterEffect.applySoftwareRendererPolicy();
+    }
 
     this.renderTuning = {
       depthThresholds: {
@@ -672,6 +676,8 @@ export class Game {
       this._targetExposure,
       exposure.easing
     );
+    // Item 2: cap composer scale by depth band (deep zones tolerate cheaper FX).
+    this.underwaterEffect.applyDepthScaleCap(depth);
   }
 
   _updateAutoplayDrive(depth) {
