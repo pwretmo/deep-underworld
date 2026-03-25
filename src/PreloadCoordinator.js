@@ -126,7 +126,7 @@ export class PreloadCoordinator {
     this.creatures.prepareInitialQueue(this.player.position);
     this.terrain.preloadPrepareAround(this.player.position);
     this.flora.preloadPrepareAround(this.player.position);
-    this._warmGpuOnce(token);
+    await this._warmGpuOnceAsync(token);
 
     const deadline = performance.now() + START_PRIME_TIMEOUT_MS;
     const reportProgress = () => {
@@ -172,7 +172,7 @@ export class PreloadCoordinator {
 
     // Force-compile shader programs for all preloaded creature materials
     // so the first gameplay render doesn't trigger synchronous GPU compiles.
-    this.renderer.compile(this.underwaterEffect.scene, this.underwaterEffect.camera);
+    await this.renderer.compileAsync(this.underwaterEffect.scene, this.underwaterEffect.camera);
     await new Promise(resolve => window.requestAnimationFrame(() => resolve()));
 
     await this._warmDepthBandRenders();
@@ -285,6 +285,59 @@ export class PreloadCoordinator {
     const wasVisible = this.player.flashlight.visible;
     this.player.flashlight.visible = true;
     this.renderer.compile(this.underwaterEffect.scene, this.underwaterEffect.camera);
+    this.player.flashlight.visible = wasVisible;
+  }
+
+  async _warmGpuOnceAsync(token) {
+    if (token.cancelled) return;
+    if (this._gpuWarmed) return;
+
+    await this.renderer.compileAsync(this.underwaterEffect.scene, this.underwaterEffect.camera);
+    await new Promise(r => requestAnimationFrame(r));
+    if (token.cancelled) return;
+
+    this.underwaterEffect.warmRender(0, {
+      flashlightOn: false,
+      exposure: this.renderer.toneMappingExposure,
+    });
+    await new Promise(r => requestAnimationFrame(r));
+    if (token.cancelled) return;
+
+    this.underwaterEffect.warmPerformanceFallbacks({
+      depth: 0,
+      flashlightOn: false,
+      exposure: this.renderer.toneMappingExposure,
+    });
+    await new Promise(r => requestAnimationFrame(r));
+    if (token.cancelled) return;
+
+    this.underwaterEffect.warmPerformanceFallbacks({ depth: 400, flashlightOn: false, exposure: this.renderer.toneMappingExposure });
+    await new Promise(r => requestAnimationFrame(r));
+    if (token.cancelled) return;
+
+    this.underwaterEffect.warmPerformanceFallbacks({ depth: 800, flashlightOn: false, exposure: this.renderer.toneMappingExposure });
+    await new Promise(r => requestAnimationFrame(r));
+    if (token.cancelled) return;
+
+    this.underwaterEffect.warmBloomSuspendedVariant({ depth: 0, flashlightOn: false, exposure: this.renderer.toneMappingExposure });
+    await new Promise(r => requestAnimationFrame(r));
+    if (token.cancelled) return;
+
+    this.underwaterEffect.warmBloomSuspendedVariant({ depth: 400, flashlightOn: false, exposure: this.renderer.toneMappingExposure });
+    await new Promise(r => requestAnimationFrame(r));
+    if (token.cancelled) return;
+
+    await this._warmFlashlightOnceAsync();
+    if (token.cancelled) return;
+
+    this._gpuWarmed = true;
+  }
+
+  async _warmFlashlightOnceAsync() {
+    const wasVisible = this.player.flashlight.visible;
+    this.player.flashlight.visible = true;
+    await this.renderer.compileAsync(this.underwaterEffect.scene, this.underwaterEffect.camera);
+    await new Promise(r => requestAnimationFrame(r));
     this.player.flashlight.visible = wasVisible;
   }
 
