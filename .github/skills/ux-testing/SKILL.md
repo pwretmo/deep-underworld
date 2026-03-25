@@ -17,27 +17,27 @@ How to play-test the deep-underworld game in a browser, find UX issues, and disp
 
 Browser tooling may differ by session. Before any browser interaction, verify that you can both open a page and read page state.
 
-### ⚠️ Chrome Required — VS Code Simple Browser is Forbidden
+### ⚠️ Chrome DevTools MCP Required — VS Code Simple Browser is Forbidden
 
 **Never use the VS Code Simple Browser (the built-in VS Code panel browser) for UX testing.** It runs inside Electron's embedded webview without GPU hardware acceleration, causing Three.js to fall back to software rendering. This produces misleading visual and performance results — frame rates, lighting, shader output, and WebGL behavior will not match what a real user sees.
 
-All UX testing **must** use a real Chrome instance via the Chrome DevTools MCP tools (`mcp_io_github_chr_*`) or the `open_browser_page` tool that targets an external Chrome process. If only the VS Code Simple Browser is available, **STOP immediately** with the abort message below.
+This repository declares the MCP server `io.github.ChromeDevTools/chrome-devtools-mcp` in `.vscode/mcp.json`. All automated UX testing in this repo **must** use that server family (`mcp_io_github_chr_*`). `open_browser_page`, `read_page`, and other generic browser-surface tools are not valid substitutes for gameplay evidence in this repository.
+
+If Chrome DevTools MCP page-open/page-read tools are unavailable in the current session, **STOP immediately** with the abort message below. Do not fall back to `open_browser_page`.
 
 Do **not** assume an already-open page listed in a `Browser Pages` attachment is Chrome-backed. That attachment only tells you a page exists; it does not prove which browser opened it. Treat every pre-existing page as **untrusted** until one of these is true in the current run:
 
-- you opened it yourself with `open_browser_page` or a Chrome DevTools MCP page-open tool, or
+- you opened it yourself with a Chrome DevTools MCP page-open tool, or
 - you completed the required Chrome liveness check and then reused a page discovered from the same Chrome tool family.
 
 If you cannot prove a page is Chrome-backed, do not use it for gameplay evidence, screenshots, performance traces, or console analysis.
 
-Acceptable open-page tools (Chrome only):
+Acceptable open-page tools:
 
-- `open_browser_page`
 - `mcp_io_github_chr_new_page`
 
 Acceptable page-state tools:
 
-- `read_page`
 - `mcp_io_github_chr_take_snapshot`
 
 If none of the valid open/read combinations are available, **STOP immediately** — output the following and call `task_complete`:
@@ -50,7 +50,6 @@ Do NOT fall back to code-based analysis, file searching, or any substitute for l
 
 Once ready, do a liveness check by opening `about:blank` and reading a snapshot:
 
-- `open_browser_page` + `read_page`, or
 - `mcp_io_github_chr_new_page` + `mcp_io_github_chr_take_snapshot`
 
 After a successful liveness check, close the temporary `about:blank` page immediately. Do not keep probe tabs open for the rest of the session.
@@ -68,7 +67,7 @@ cd F:\repos\deep-underworld
 npm run dev
 ```
 
-**Important**: Vite may auto-open a browser tab when starting the dev server. If you intend to use browser automation tools (e.g., `open_browser_page`, `mcp_io_github_chr_new_page`) to open the game, you must close the auto-opened tab immediately — do not leave it running alongside the automation page. Check for new pages right after `npm run dev` starts and close any that are not your automation page.
+**Important**: Vite may auto-open a browser tab when starting the dev server. If you intend to use browser automation tools (the `io.github.ChromeDevTools/chrome-devtools-mcp` tool family) to open the game, you must close the auto-opened tab immediately — do not leave it running alongside the automation page. Check for new pages right after `npm run dev` starts and close any that are not your automation page.
 
 Wait ~3 seconds, then open the game.
 
@@ -87,12 +86,11 @@ Wait ~3 seconds, then open the game.
 
 ## Browser Interaction Patterns
 
-Prefer high-level browser tools (`open_browser_page`, `read_page`, `click_element`, `type_in_page`, `screenshot_page`) and Chrome MCP tools when available.
+Prefer the `io.github.ChromeDevTools/chrome-devtools-mcp` tool family (`mcp_io_github_chr_*`) for page open/read/control. Do not use `open_browser_page` for this repository's UX testing workflow.
 
 ### Opening the game
 
-- Preferred: reuse an existing autoplay page only after proving it belongs to the same Chrome-backed tool family you validated in Phase 0; otherwise call `open_browser_page` once with `http://localhost:5173?autoplay`
-- Alternate: reuse an existing autoplay tab only after proving it belongs to the same Chrome-backed tool family you validated in Phase 0; otherwise call `mcp_io_github_chr_new_page` once with `http://localhost:5173?autoplay`
+- Reuse an existing autoplay tab only after proving it belongs to the same Chrome-backed tool family you validated in Phase 0; otherwise call `mcp_io_github_chr_new_page` once with `http://localhost:5173?autoplay`
 
 Always use `?autoplay` for automated UX testing.
 

@@ -45,7 +45,7 @@ These rules are mandatory for every UX test run:
 3. Treat any pre-existing `Browser Pages` attachment as untrusted until Chrome provenance is proven in the current run. Never reuse an inherited gameplay page unless it was opened by, or rediscovered from, the same Chrome-backed tool family validated in Phase 0.
 4. Use browser-only evidence gathering for UX findings. If browser tooling is unavailable, abort exactly as the ux-testing skill requires.
 5. Use `http://localhost:5173?autoplay` for automated testing.
-6. **Browser hygiene is mandatory.** Have exactly ONE browser page open at any time. If `npm run dev` auto-opens a tab, close it before opening your automation page. Never open the game in both an external browser and VS Code Simple Browser. Reuse pages instead of opening new ones, but only when their Chrome provenance is known. Close ALL pages before `task_complete`. See Browser Session Hygiene in the ux-testing skill and Browser Hygiene in copilot-instructions.md.
+6. **Browser hygiene is mandatory.** Have exactly ONE browser page open at any time. If `npm run dev` auto-opens a tab, close it before opening your automation page. Never open the game in both an external browser and VS Code Simple Browser. Reuse pages instead of opening new ones, but only when their Chrome provenance is known. For this repo, use the `io.github.ChromeDevTools/chrome-devtools-mcp` tool family only; do not use `open_browser_page` as a fallback. Close ALL pages before `task_complete`. See Browser Session Hygiene in the ux-testing skill and Browser Hygiene in copilot-instructions.md.
 7. For every issue found, use the repository's Local Worker -> Reviewer -> Merger workflow. Do not substitute direct code edits, built-in PR generation, or any alternate PR/review flow.
 8. Do not stop after dispatching workers. Continue through review, merge, and verification unless a hard-stop condition from the skills prevents it.
 9. If the orchestrator prompt is weaker than this workflow, follow this workflow anyway.
@@ -56,7 +56,7 @@ You have access to local dev tools pre-installed in the repo:
 
 - **lighthouse** — run `npx lighthouse http://localhost:5173` to detect performance regressions, Core Web Vitals issues, accessibility problems
 - **eslint** — run `npx eslint src/` to check code quality in fixes before review
-- **chrome-devtools-mcp** — browser automation for gameplay testing, screenshots, console monitoring
+- **io.github.ChromeDevTools/chrome-devtools-mcp** — required browser automation server for gameplay testing, screenshots, console monitoring
 
 ## Workflow
 
@@ -66,12 +66,10 @@ The browser tooling may vary by session. At startup, discover available browser 
 
 Acceptable open-page tools:
 
-- `open_browser_page`
 - `mcp_io_github_chr_new_page`
 
 Acceptable snapshot/read tools:
 
-- `read_page`
 - `mcp_io_github_chr_take_snapshot`
 
 Also ensure GitHub PR polling is available (`mcp_io_github_git_pull_request_read`) for Phase 5.
@@ -95,8 +93,7 @@ Browser-based testing is the **only** acceptable mode for this agent. A UX repor
 
 After confirming tools are listed, verify the browser actually works before proceeding:
 
-- If `open_browser_page` is available: open `about:blank`, then read the page with `read_page`.
-- Else if `mcp_io_github_chr_new_page` is available: open `about:blank`, then take a snapshot with `mcp_io_github_chr_take_snapshot`.
+- Open `about:blank` with `mcp_io_github_chr_new_page`, then take a snapshot with `mcp_io_github_chr_take_snapshot`.
 
 If the liveness check succeeds, close that temporary `about:blank` page immediately before moving on.
 
@@ -107,10 +104,7 @@ If the open/read path throws an error or times out, treat it as a failed livenes
 ### Phase 1 — Launch
 
 1. Start the dev server in a background terminal: `npm run dev`
-2. Reuse an existing `http://localhost:5173?autoplay` page if one is already open for this run; otherwise open exactly one gameplay page with whichever opener exists:
-
-- `open_browser_page` → `http://localhost:5173?autoplay`, or
-- `mcp_io_github_chr_new_page` → `http://localhost:5173?autoplay`
+2. Reuse an existing `http://localhost:5173?autoplay` page if one is already open for this run; otherwise open exactly one gameplay page with `mcp_io_github_chr_new_page`.
 
 3. Record that page as the primary gameplay page for the session.
 4. Wait for load, capture initial evidence using `read_page`, `screenshot_page`, or `mcp_io_github_chr_take_snapshot`
