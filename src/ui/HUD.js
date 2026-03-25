@@ -44,6 +44,7 @@ export class HUD {
     this.sonarPings = [];
     this.sonarAge = 0;
     this.lastDepthZone = '';
+    this._sonarForward = new THREE.Vector3(0, 0, -1);
 
     // Creature locator
     this.locatorPanel = document.getElementById('creature-locator');
@@ -75,7 +76,7 @@ export class HUD {
     });
   }
 
-  update(depth, flashlightOn) {
+  update(depth, flashlightOn, camera) {
     // Depth counter
     this.depthDisplay.textContent = `${Math.floor(depth)}m`;
 
@@ -104,7 +105,7 @@ export class HUD {
     }
 
     // Update sonar display
-    this._drawSonar(depth);
+    this._drawSonar(depth, camera);
   }
 
   _showWarning(text, duration) {
@@ -129,7 +130,7 @@ export class HUD {
     this.sonarAge = 0;
   }
 
-  _drawSonar(depth) {
+  _drawSonar(depth, camera) {
     const ctx = this.sonarCtx;
     const w = 150, h = 150, cx = w / 2, cy = h / 2;
 
@@ -182,10 +183,26 @@ export class HUD {
     if (this.sonarPings.length > 0) {
       const pingAlpha = Math.max(0, 1 - this.sonarAge * 0.3);
       if (pingAlpha > 0) {
+        if (camera) {
+          camera.getWorldDirection(this._sonarForward);
+          this._sonarForward.y = 0;
+          if (this._sonarForward.lengthSq() > 0.0001) {
+            this._sonarForward.normalize();
+          } else {
+            this._sonarForward.set(0, 0, -1);
+          }
+        } else {
+          this._sonarForward.set(0, 0, -1);
+        }
+
+        const rightX = -this._sonarForward.z;
+        const rightZ = this._sonarForward.x;
         for (const ping of this.sonarPings) {
           const scale = 70 / 80; // max range
-          const px = cx + ping.dx * scale;
-          const pz = cy + ping.dz * scale;
+          const localRight = ping.dx * rightX + ping.dz * rightZ;
+          const localForward = ping.dx * this._sonarForward.x + ping.dz * this._sonarForward.z;
+          const px = cx + localRight * scale;
+          const pz = cy - localForward * scale;
           if (px > 5 && px < w - 5 && pz > 5 && pz < h - 5) {
             ctx.fillStyle = `rgba(255, 50, 50, ${pingAlpha})`;
             ctx.beginPath();
