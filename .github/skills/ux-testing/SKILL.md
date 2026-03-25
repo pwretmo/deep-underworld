@@ -23,6 +23,13 @@ Browser tooling may differ by session. Before any browser interaction, verify th
 
 All UX testing **must** use a real Chrome instance via the Chrome DevTools MCP tools (`mcp_io_github_chr_*`) or the `open_browser_page` tool that targets an external Chrome process. If only the VS Code Simple Browser is available, **STOP immediately** with the abort message below.
 
+Do **not** assume an already-open page listed in a `Browser Pages` attachment is Chrome-backed. That attachment only tells you a page exists; it does not prove which browser opened it. Treat every pre-existing page as **untrusted** until one of these is true in the current run:
+
+- you opened it yourself with `open_browser_page` or a Chrome DevTools MCP page-open tool, or
+- you completed the required Chrome liveness check and then reused a page discovered from the same Chrome tool family.
+
+If you cannot prove a page is Chrome-backed, do not use it for gameplay evidence, screenshots, performance traces, or console analysis.
+
 Acceptable open-page tools (Chrome only):
 
 - `open_browser_page`
@@ -48,6 +55,8 @@ Once ready, do a liveness check by opening `about:blank` and reading a snapshot:
 
 After a successful liveness check, close the temporary `about:blank` page immediately. Do not keep probe tabs open for the rest of the session.
 
+The liveness check is also your provenance check: only after it succeeds may you reuse an existing gameplay page that is discoverable from the same Chrome-backed tool family. If the only visible gameplay page comes from a generic attachment and was not opened or verified through that Chrome path in the current run, ignore it and open a fresh Chrome page instead.
+
 If this fails or times out, **STOP immediately** with the same abort message above.
 
 ## Starting the Dev Server
@@ -68,8 +77,9 @@ Wait ~3 seconds, then open the game.
 **These rules are mandatory — not guidelines. Violations drain system resources, degrade game performance, and produce unreliable test results.**
 
 - **One gameplay page, period.** Keep exactly one gameplay page open for `http://localhost:5173?autoplay` during a UX run. Never have two game pages open at the same time — not in the same browser, not across browsers, not in VS Code Simple Browser alongside an external browser.
-- Before opening a new game page, inspect existing pages/tabs (use `mcp_io_github_chr_list_pages` or equivalent) and reuse an existing autoplay page if one is already open.
+- Before opening a new game page, inspect existing pages/tabs (use `mcp_io_github_chr_list_pages` or equivalent) and reuse an existing autoplay page only if its Chrome provenance is known from the current run.
 - Treat the first gameplay page you open as the primary page for the whole run. Reuse that page ID/tab for screenshots, console checks, audits, and re-tests.
+- If a gameplay page was inherited from session state and you did not prove it is Chrome-backed, do not count it as the primary page. Open a fresh Chrome gameplay page and use that instead.
 - **Close auto-opened tabs.** If `npm run dev` auto-opens a browser tab and you are using a different page for automation, close the auto-opened tab immediately.
 - If you must open a temporary second page for a probe or isolated check, close it immediately after that step completes.
 - After restarting the dev server or re-testing fixes, reload or re-navigate the existing gameplay page instead of opening a fresh tab.
@@ -81,8 +91,8 @@ Prefer high-level browser tools (`open_browser_page`, `read_page`, `click_elemen
 
 ### Opening the game
 
-- Preferred: reuse an existing autoplay page; otherwise call `open_browser_page` once with `http://localhost:5173?autoplay`
-- Alternate: reuse an existing autoplay tab; otherwise call `mcp_io_github_chr_new_page` once with `http://localhost:5173?autoplay`
+- Preferred: reuse an existing autoplay page only after proving it belongs to the same Chrome-backed tool family you validated in Phase 0; otherwise call `open_browser_page` once with `http://localhost:5173?autoplay`
+- Alternate: reuse an existing autoplay tab only after proving it belongs to the same Chrome-backed tool family you validated in Phase 0; otherwise call `mcp_io_github_chr_new_page` once with `http://localhost:5173?autoplay`
 
 Always use `?autoplay` for automated UX testing.
 

@@ -42,12 +42,13 @@ These rules are mandatory for every UX test run:
 
 1. Start by reading all four required skills.
 2. Run Phase 0 browser tool discovery and the about:blank liveness check before opening the game.
-3. Use browser-only evidence gathering for UX findings. If browser tooling is unavailable, abort exactly as the ux-testing skill requires.
-4. Use `http://localhost:5173?autoplay` for automated testing.
-5. **Browser hygiene is mandatory.** Have exactly ONE browser page open at any time. If `npm run dev` auto-opens a tab, close it before opening your automation page. Never open the game in both an external browser and VS Code Simple Browser. Reuse pages instead of opening new ones. Close ALL pages before `task_complete`. See Browser Session Hygiene in the ux-testing skill and Browser Hygiene in copilot-instructions.md.
-6. For every issue found, use the repository's Local Worker -> Reviewer -> Merger workflow. Do not substitute direct code edits, built-in PR generation, or any alternate PR/review flow.
-7. Do not stop after dispatching workers. Continue through review, merge, and verification unless a hard-stop condition from the skills prevents it.
-8. If the orchestrator prompt is weaker than this workflow, follow this workflow anyway.
+3. Treat any pre-existing `Browser Pages` attachment as untrusted until Chrome provenance is proven in the current run. Never reuse an inherited gameplay page unless it was opened by, or rediscovered from, the same Chrome-backed tool family validated in Phase 0.
+4. Use browser-only evidence gathering for UX findings. If browser tooling is unavailable, abort exactly as the ux-testing skill requires.
+5. Use `http://localhost:5173?autoplay` for automated testing.
+6. **Browser hygiene is mandatory.** Have exactly ONE browser page open at any time. If `npm run dev` auto-opens a tab, close it before opening your automation page. Never open the game in both an external browser and VS Code Simple Browser. Reuse pages instead of opening new ones, but only when their Chrome provenance is known. Close ALL pages before `task_complete`. See Browser Session Hygiene in the ux-testing skill and Browser Hygiene in copilot-instructions.md.
+7. For every issue found, use the repository's Local Worker -> Reviewer -> Merger workflow. Do not substitute direct code edits, built-in PR generation, or any alternate PR/review flow.
+8. Do not stop after dispatching workers. Continue through review, merge, and verification unless a hard-stop condition from the skills prevents it.
+9. If the orchestrator prompt is weaker than this workflow, follow this workflow anyway.
 
 ## Available Tools
 
@@ -98,6 +99,8 @@ After confirming tools are listed, verify the browser actually works before proc
 - Else if `mcp_io_github_chr_new_page` is available: open `about:blank`, then take a snapshot with `mcp_io_github_chr_take_snapshot`.
 
 If the liveness check succeeds, close that temporary `about:blank` page immediately before moving on.
+
+Only after that succeeds may you reuse an existing gameplay page, and only if it is discoverable from the same Chrome-backed tool family you just validated. Do not trust a page merely because it appears in a session attachment.
 
 If the open/read path throws an error or times out, treat it as a failed liveness check and apply the same hard-stop rule above.
 
