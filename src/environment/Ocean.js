@@ -187,19 +187,58 @@ export class Ocean {
   }
 
   _createGodRays() {
-    // Volumetric light shafts — merged into a single draw call
+    // Volumetric light shafts — merged into a single draw call with per-vertex
+    // radial and axial opacity falloff so they look like soft light, not tubes.
     this.godRayData = [];
     const geometries = [];
 
     for (let i = 0; i < 5; i++) {
-      const geo = new THREE.CylinderGeometry(0.5, 8, 60, 8, 1, true);
+      // More radial segments (16) for round cross-section, more height
+      // segments (10) for smooth axial gradient
+      const heightSegs = 10;
+      const radialSegs = 16;
+      const height = 70;
+      const topRadius = 2;
+      const bottomRadius = 14;
+      const geo = new THREE.CylinderGeometry(
+        topRadius, bottomRadius, height, radialSegs, heightSegs, true
+      );
+
+      // Bake per-vertex alpha into a color attribute:
+      //   - axial: bright at top (surface), fading to 0 at bottom
+      //   - radial: bright at centre axis, fading toward outer edge
+      const posArr = geo.attributes.position.array;
+      const count = geo.attributes.position.count;
+      const alphas = new Float32Array(count);
+      const halfH = height / 2;
+
+      for (let v = 0; v < count; v++) {
+        const x = posArr[v * 3];
+        const y = posArr[v * 3 + 1];   // along cylinder axis
+        const z = posArr[v * 3 + 2];
+
+        // axialT: 0 at bottom, 1 at top
+        const axialT = THREE.MathUtils.clamp((y + halfH) / height, 0, 1);
+        // smooth cubic ease-in for softer bottom fade
+        const axialFade = axialT * axialT * (3 - 2 * axialT);
+
+        // radius at this height for the cone
+        const expectedR = THREE.MathUtils.lerp(bottomRadius, topRadius, axialT);
+        const actualR = Math.sqrt(x * x + z * z);
+        const radialT = expectedR > 0.001 ? THREE.MathUtils.clamp(actualR / expectedR, 0, 1) : 0;
+        // bell-curve-ish radial falloff (bright core, soft edges)
+        const radialFade = Math.exp(-radialT * radialT * 3.0);
+
+        alphas[v] = axialFade * radialFade;
+      }
+      geo.setAttribute('alpha', new THREE.BufferAttribute(alphas, 1));
+
       const phase = Math.random() * Math.PI * 2;
       const baseOpacity = 0.015 + Math.random() * 0.015;
       const offsetX = Math.sin(phase) * 40;
       const offsetZ = Math.cos(phase) * 40;
       const rotZ = (Math.random() - 0.5) * 0.3;
 
-      // Bake position and rotation into vertex positions
       const matrix = new THREE.Matrix4();
       matrix.makeRotationZ(rotZ);
       matrix.setPosition(offsetX, -15, offsetZ);
@@ -210,13 +249,30 @@ export class Ocean {
     }
 
     const mergedGeo = mergeGeometries(geometries, false);
-    // Dispose individual geometries after merge
     for (const geo of geometries) geo.dispose();
 
-    this.godRayMaterial = new THREE.MeshBasicMaterial({
-      color: 0x88bbdd,
+    this.godRayMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        color: { value: new THREE.Color(0x88bbdd) },
+        opacity: { value: 0.02 },
+      },
+      vertexShader: /* glsl */ `
+        attribute float alpha;
+        varying float vAlpha;
+        void main() {
+          vAlpha = alpha;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform vec3 color;
+        uniform float opacity;
+        varying float vAlpha;
+        void main() {
+          gl_FragColor = vec4(color, opacity * vAlpha);
+        }
+      `,
       transparent: true,
-      opacity: 0.02,
       side: THREE.DoubleSide,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
@@ -303,7 +359,7 @@ export class Ocean {
       for (const r of this.godRayData) {
         avgOpacity += r.baseOpacity * (1 - depth / 60) * (0.8 + Math.sin(this.time * 0.5 + r.phase) * 0.2);
       }
-      this.godRayMaterial.opacity = avgOpacity / this.godRayData.length;
+      this.godRayMaterial.uniforms.opacity.value = avgOpacity / this.godRayData.length;
       this.godRayMesh.visible = true;
       this.godRayMesh.position.set(playerPos.x, 0, playerPos.z);
     } else {
