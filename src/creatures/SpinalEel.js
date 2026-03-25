@@ -587,10 +587,6 @@ export class SpinalEel {
     const bodyGeo = new THREE.TubeGeometry(bodyCurve, profile.tubularSegments, 0.34, profile.radialSegments, false);
     _shapeTubeGeometry(bodyGeo, profile.length);
     const body = new THREE.Mesh(bodyGeo, bodyMat);
-    // Flip the body tube so it faces forward.  Applying the PI rotation on the
-    // mesh object (not the geometry) keeps geometry positions intact so the
-    // shader eelProgress = clamp(-position.x / uLength, 0, 1) stays valid.
-    body.rotation.z = Math.PI;
     group.add(body);
 
     const spineGeo = new THREE.TubeGeometry(bodyCurve, Math.max(18, Math.floor(profile.tubularSegments * 0.35)), 0.06, 6, false);
