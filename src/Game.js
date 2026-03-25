@@ -125,6 +125,11 @@ export class Game {
     this.maxDepth = 0;
     this.depth = 0;
     this.autoplay = false;
+    this._autoplayDrive = {
+      minForward: 0.12,
+      maxForward: 0.3,
+      descend: -1,
+    };
     this.menuOverlay = document.getElementById('menu');
     this.pauseOverlay = document.getElementById('paused');
     this.gameOverOverlay = document.getElementById('game-over');
@@ -225,6 +230,8 @@ export class Game {
 
   start() {
     if (this.gameOver || this.running || this.pendingStart || this._startTransition.startRequested) return;
+    this.autoplay = false;
+    this.player.clearAutoplayInput();
     this._startTransition.startRequested = true;
     this.preload.cancel('user-start');
     this.pendingStart = true;
@@ -261,6 +268,7 @@ export class Game {
     this.preload.cancel('autoplay-start');
     this.autoplay = true;
     this.player.locked = true; // simulate lock without real pointer lock
+    this._updateAutoplayDrive(Math.max(0, -this.player.position.y));
     this.audio.start();
     void this._primeAndEnterGameplay('Autoplay mode active');
   }
@@ -420,6 +428,7 @@ export class Game {
     const depth = Math.max(0, -this.player.position.y);
     this.depth = depth;
     this.player.depth = depth;
+    this._updateAutoplayDrive(depth);
 
     // Step physics before player update so collisions are current
     if (this.physicsWorld) {
@@ -643,6 +652,27 @@ export class Game {
       this._targetExposure,
       exposure.easing
     );
+  }
+
+  _updateAutoplayDrive(depth) {
+    if (!this.autoplay) {
+      const autoplayInput = this.player.autoplayInput;
+      if (autoplayInput.forward !== 0 || autoplayInput.right !== 0 || autoplayInput.vertical !== 0) {
+        this.player.clearAutoplayInput();
+      }
+      return;
+    }
+
+    const forward = THREE.MathUtils.lerp(
+      this._autoplayDrive.minForward,
+      this._autoplayDrive.maxForward,
+      THREE.MathUtils.smoothstep(depth, 8, 80)
+    );
+
+    this.player.setAutoplayInput({
+      forward,
+      vertical: this._autoplayDrive.descend,
+    });
   }
 
   _updatePointLightBudget(dt, depth, playerPos) {
