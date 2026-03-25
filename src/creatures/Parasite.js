@@ -155,10 +155,14 @@ function createVeinEmissiveTexture() {
   return tex;
 }
 
-// Shared textures (created once)
+// Shared textures (created once — never disposed by individual instances)
 const sacNormalTex = createSacNormalTexture();
 const proboscisNormalTex = createProboscisNormalTexture();
 const veinEmissiveTex = createVeinEmissiveTexture();
+const _sharedTextures = new Set([sacNormalTex, proboscisNormalTex, veinEmissiveTex]);
+
+// Maps LOD level indices to tier names (matches addLevel insertion order: 0, 42, 86)
+const TIER_NAMES = ['near', 'medium', 'far'];
 
 // ── Sac vertex shader chunks for per-vertex inflation waves ──
 const sacVertexPars = /* glsl */ `
@@ -232,17 +236,14 @@ export class Parasite {
     scene.add(this.group);
   }
 
-  // ── LOD tier resolution with hysteresis ──
+  // ── LOD tier resolution — query THREE.LOD's actual visible level ──
 
-  _getLodTierName(dist) {
-    const h = 4;
-    const prev = this._lastLodTier;
-    if (prev === 'near' && dist < LOD_NEAR_DISTANCE + h) return 'near';
-    if (prev === 'medium' && dist > LOD_NEAR_DISTANCE - h && dist < LOD_MEDIUM_DISTANCE + h) return 'medium';
-    if (prev === 'far' && dist > LOD_MEDIUM_DISTANCE - h) return 'far';
-    if (dist < LOD_NEAR_DISTANCE) return 'near';
-    if (dist < LOD_MEDIUM_DISTANCE) return 'medium';
-    return 'far';
+  _getVisibleTierName() {
+    const levels = this.lod.levels;
+    for (let i = 0; i < levels.length; i++) {
+      if (levels[i].object.visible) return TIER_NAMES[i];
+    }
+    return this._lastLodTier; // fallback before first render pass
   }
 
   // ── Materials ──
@@ -584,10 +585,8 @@ export class Parasite {
 
     this._proximityPulse = THREE.MathUtils.clamp(1 - dist / 25, 0, 1);
 
-    const tierName = this._getLodTierName(dist);
-    if (tierName !== this._lastLodTier) {
-      this._lastLodTier = tierName;
-    }
+    const tierName = this._getVisibleTierName();
+    this._lastLodTier = tierName;
 
     const t = this.time;
     const heartbeatFast = Math.sin(t * (this._heartbeatRate + this._proximityPulse * 2) + this._heartbeatPhase);
@@ -702,9 +701,10 @@ export class Parasite {
     this.group.traverse(c => {
       if (c.geometry) c.geometry.dispose();
       if (c.material) {
-        if (c.material.map) c.material.map.dispose();
-        if (c.material.normalMap) c.material.normalMap.dispose();
-        if (c.material.emissiveMap) c.material.emissiveMap.dispose();
+        // Skip shared module-level textures — they are reused across all instances
+        if (c.material.map && !_sharedTextures.has(c.material.map)) c.material.map.dispose();
+        if (c.material.normalMap && !_sharedTextures.has(c.material.normalMap)) c.material.normalMap.dispose();
+        if (c.material.emissiveMap && !_sharedTextures.has(c.material.emissiveMap)) c.material.emissiveMap.dispose();
         c.material.dispose();
       }
     });
