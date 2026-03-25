@@ -379,6 +379,11 @@ export class AudioManager {
     env.connect(destination);
     source.start(now, Math.random() * source.buffer.duration);
     source.stop(now + duration);
+    source.onended = () => {
+      source.disconnect();
+      filter.disconnect();
+      env.disconnect();
+    };
   }
 
   _playMetalGroan({
@@ -490,6 +495,14 @@ export class AudioManager {
     echoLevel.connect(destination);
     osc.start(now);
     osc.stop(now + duration + 0.05);
+    osc.onended = () => {
+      osc.disconnect();
+      env.disconnect();
+      setTimeout(() => {
+        echo.disconnect();
+        echoLevel.disconnect();
+      }, (delayTime + 0.2) * 1000);
+    };
   }
 
   _playCreak() {

@@ -259,7 +259,10 @@ export class PreloadCoordinator {
     if (this._gpuWarmed) return true;
 
     this.renderer.compile(this.underwaterEffect.scene, this.underwaterEffect.camera);
-    this.underwaterEffect.render(0);
+    this.underwaterEffect.warmRender(0, {
+      flashlightOn: false,
+      exposure: this.renderer.toneMappingExposure,
+    });
     this.underwaterEffect.warmPerformanceFallbacks({
       depth: 0,
       flashlightOn: false,
