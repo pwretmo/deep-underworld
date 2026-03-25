@@ -16,6 +16,7 @@ const RENDER_PIPELINE_TUNING = Object.freeze({
     vignette: 0.88,
     grain: 0.018,
     scanline: 0.24,
+    darkening: 0.55,
   },
   highlightRoll: {
     start: 0.62,
@@ -55,6 +56,7 @@ const UnderwaterShader = {
     resolution: { value: new THREE.Vector2() },
     depthThresholds: { value: new THREE.Vector3(130, 340, 720) },
     grading: { value: new THREE.Vector4(1.2, 0.88, 0.018, 0.24) },
+    darkening: { value: 0.55 },
     highlightRoll: { value: new THREE.Vector3(0.62, 0.34, 0.62) },
     bloomParams: { value: new THREE.Vector3(0.28, 0.78, 1.6) },
   },
@@ -74,6 +76,7 @@ const UnderwaterShader = {
     uniform vec2 resolution;
     uniform vec3 depthThresholds;
     uniform vec4 grading;
+    uniform float darkening;
     uniform vec3 highlightRoll;
     uniform vec3 bloomParams;
     varying vec2 vUv;
@@ -229,6 +232,7 @@ export class UnderwaterEffect {
       this.tuning.grading.grain,
       this.tuning.grading.scanline
     );
+    this.underwaterPass.uniforms.darkening.value = this.tuning.grading.darkening;
     this.underwaterPass.uniforms.highlightRoll.value.set(
       this.tuning.highlightRoll.start,
       this.tuning.highlightRoll.range,
