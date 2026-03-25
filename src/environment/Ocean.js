@@ -227,14 +227,14 @@ export class Ocean {
         const actualR = Math.sqrt(x * x + z * z);
         const radialT = expectedR > 0.001 ? THREE.MathUtils.clamp(actualR / expectedR, 0, 1) : 0;
         // bell-curve-ish radial falloff (bright core, soft edges)
-        const radialFade = Math.exp(-radialT * radialT * 3.0);
+        const radialFade = Math.exp(-radialT * radialT * 1.5);
 
         alphas[v] = axialFade * radialFade;
       }
       geo.setAttribute('alpha', new THREE.BufferAttribute(alphas, 1));
 
       const phase = Math.random() * Math.PI * 2;
-      const baseOpacity = 0.015 + Math.random() * 0.015;
+      const baseOpacity = 0.08 + Math.random() * 0.07;
       const offsetX = Math.sin(phase) * 40;
       const offsetZ = Math.cos(phase) * 40;
       const rotZ = (Math.random() - 0.5) * 0.3;
