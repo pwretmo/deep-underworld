@@ -33,7 +33,6 @@ const RENDER_PIPELINE_TUNING = Object.freeze({
   performance: {
     baseScale: 1.0,
     minScale: 0.6,
-    maxScale: 1.0,
     scaleLevels: [1.0, 0.85, 0.72, 0.6],
     degradeThresholdMs: 28,
     severeThresholdMs: 45,
@@ -222,12 +221,18 @@ export class UnderwaterEffect {
     this._appliedComposerHeight = 0;
     this._scaleLadder = [];
     this._scaleIndex = 0;
-    this._nextScaleChangeAt = 0;
-    this._recoveryAllowedAt = 0;
+    // Warm-up cooldown: ignore adaptive signals for the first 2 s to avoid reacting to
+    // one-time shader-compilation / render-target-allocation spikes on the first frame.
+    const _warmupNow = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+      ? performance.now() : 0;
+    const _warmupMs = 2000;
+    this._nextScaleChangeAt = _warmupNow + _warmupMs;
+    this._recoveryAllowedAt = _warmupNow + _warmupMs;
     this._stableRecoveryFrames = 0;
     this._bloomSuspended = false;
     this._bloomSuspendedUntil = 0;
     this._lastRenderMs = 0;
+    this._consecutiveEmergencyFrames = 0;
 
     // Render pass
     const renderPass = new RenderPass(scene, camera);
@@ -288,8 +293,7 @@ export class UnderwaterEffect {
       this._qualityMaxScale = e.detail.settings.postProcessScale;
       this._postProcessMaxScale = Math.min(this._qualityMaxScale, this._depthScaleCap);
       this._rebuildScaleLadder();
-      this._setScaleIndex(this._findScaleIndex(this._composerScale), { force: true, resetCooldown: true });
-      this._applyComposerScale(true);
+      this._setScaleIndex(this._findScaleIndex(this._composerScale), { force: true, skipCooldown: true });
       this._setupBloom(e.detail.tier);
     });
   }
@@ -393,7 +397,7 @@ export class UnderwaterEffect {
     return bestIndex;
   }
 
-  _setScaleIndex(index, { force = false, resetCooldown = false, holdRecovery = false, now = performance.now() } = {}) {
+  _setScaleIndex(index, { force = false, skipCooldown = false, holdRecovery = false, now = performance.now() } = {}) {
     const nextIndex = THREE.MathUtils.clamp(index, 0, Math.max(this._scaleLadder.length - 1, 0));
     const nextScale = this._scaleLadder[nextIndex] ?? this.tuning.performance.minScale;
 
@@ -403,7 +407,7 @@ export class UnderwaterEffect {
 
     this._scaleIndex = nextIndex;
     this._composerScale = nextScale;
-    this._nextScaleChangeAt = resetCooldown ? now : now + this.tuning.performance.scaleChangeCooldownMs;
+    this._nextScaleChangeAt = skipCooldown ? now : now + this.tuning.performance.scaleChangeCooldownMs;
     if (holdRecovery) {
       this._recoveryAllowedAt = Math.max(
         this._recoveryAllowedAt,
@@ -552,6 +556,15 @@ export class UnderwaterEffect {
       this._renderEmaMs > this.tuning.performance.degradeThresholdMs;
     const emergencyFrame = renderMs > this.tuning.performance.emergencyThresholdMs;
 
+    // Require ≥2 consecutive emergency frames before snapping to minimum scale / suspending
+    // bloom, to avoid overreacting to isolated one-off spikes (shader compilation, tab focus, etc.).
+    if (emergencyFrame) {
+      this._consecutiveEmergencyFrames = Math.min(this._consecutiveEmergencyFrames + 1, 2);
+    } else {
+      this._consecutiveEmergencyFrames = 0;
+    }
+    const sustainedEmergency = this._consecutiveEmergencyFrames >= 2;
+
     // Items 1/8: track sustained moderate-EMA pressure for early degradation
     const moderatePressure = this._renderEmaMs > this.tuning.performance.moderatePressureThresholdMs;
     if (moderatePressure) {
@@ -575,17 +588,18 @@ export class UnderwaterEffect {
     if (underPressure) {
       this._stableRecoveryFrames = 0;
 
-      // Item 3: suspend bloom at pressured state, not only at emergency
+      // Item 3: suspend bloom at pressured state, not only at emergency.
+      // For the emergency path, require sustained emergency to avoid overreacting to single-frame spikes.
       if (this._bloomPass && !this._bloomSuspended &&
-          (emergencyFrame || renderMs > this.tuning.performance.bloomSuspendThresholdMs)) {
+          (sustainedEmergency || renderMs > this.tuning.performance.bloomSuspendThresholdMs)) {
         this._setBloomSuspended(true, now);
       }
 
       if (now >= this._nextScaleChangeAt) {
-        const nextIndex = emergencyFrame
+        const nextIndex = sustainedEmergency
           ? this._scaleLadder.length - 1
           : this._scaleIndex + 1;
-        this._setScaleIndex(nextIndex, { now, holdRecovery: emergencyFrame });
+        this._setScaleIndex(nextIndex, { now, holdRecovery: sustainedEmergency });
       }
     } else if (sustainedModeratePressure && now >= this._nextScaleChangeAt) {
       // Item 1: degrade one rung earlier under sustained moderate-EMA pressure
@@ -668,7 +682,7 @@ export class UnderwaterEffect {
     const clampedIndex = this._findScaleIndex(Math.min(this._composerScale, newMax));
     // force:true ensures the cap is always enforced even when the index matches the current value,
     // preventing the composer from rendering above the depth-based scale ceiling.
-    this._setScaleIndex(clampedIndex, { force: true, resetCooldown: false });
+    this._setScaleIndex(clampedIndex, { force: true });
   }
 
   /**
@@ -679,7 +693,7 @@ export class UnderwaterEffect {
     this._isSoftwareRenderer = true;
     this._reducedShaderMode = true;
     this.underwaterPass.uniforms.reducedMode.value = 1.0;
-    this._setScaleIndex(this._scaleLadder.length - 1, { force: true, resetCooldown: true });
+    this._setScaleIndex(this._scaleLadder.length - 1, { force: true, skipCooldown: true });
     if (this._bloomPass && !this._bloomSuspended) {
       this._setBloomSuspended(true);
     }
@@ -701,5 +715,15 @@ export class UnderwaterEffect {
       this._bloomSuspended = false;
       this._bloomPass.enabled = true;
     }
+  }
+
+  /**
+   * Render one frame without updating EMA or adaptive state.
+   * Use this during GPU warm-up to avoid polluting adaptive metrics with
+   * one-time shader-compilation / render-target-allocation spikes.
+   */
+  warmRender(depth = 0, { flashlightOn = false, exposure = 0.76 } = {}) {
+    this._updatePassState(depth, flashlightOn, exposure);
+    this.composer.render();
   }
 }
