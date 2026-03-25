@@ -16,6 +16,8 @@ const _sharedTextures = new Set();
 
 let _bodyNormalTexture = null;
 let _finNormalTexture = null;
+let _bodyDisplacementTexture = null;
+let _finDisplacementTexture = null;
 
 const LOD_PROFILE = {
   near: {
@@ -135,6 +137,60 @@ function _getFinNormalTexture() {
   return _finNormalTexture;
 }
 
+function _getBodyDisplacementTexture() {
+  if (_bodyDisplacementTexture) return _bodyDisplacementTexture;
+  _bodyDisplacementTexture = _makeCanvasTexture(256, 256, (ctx, width, height) => {
+    const img = ctx.createImageData(width, height);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        // Muscle surface: segmented banding along tube length (y = along V)
+        const muscleBand = Math.pow(Math.abs(Math.sin(y * 0.28)), 2.8) * 0.6;
+        // Spinal ridge: concentrated near U=0.5 which maps to the dorsal apex
+        const uNorm = x / (width - 1);
+        const ridgePeak = Math.exp(-Math.pow((uNorm - 0.5) * 6.0, 2.0)) * 0.55;
+        const lateralRipple = Math.abs(Math.sin(uNorm * Math.PI * 4 + y * 0.12)) * 0.18;
+        const d = Math.min(1.0, muscleBand + ridgePeak + lateralRipple);
+        const val = Math.round(d * 255);
+        const index = (y * width + x) * 4;
+        img.data[index] = val;
+        img.data[index + 1] = val;
+        img.data[index + 2] = val;
+        img.data[index + 3] = 255;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+  });
+  // keep the default repeat(3,2) set by _makeCanvasTexture
+  return _bodyDisplacementTexture;
+}
+
+function _getFinDisplacementTexture() {
+  if (_finDisplacementTexture) return _finDisplacementTexture;
+  _finDisplacementTexture = _makeCanvasTexture(128, 128, (ctx, width, height) => {
+    const img = ctx.createImageData(width, height);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        // Fin membrane ribbing: parallel veins running across the fin span
+        const uNorm = x / (width - 1);
+        const rib = Math.pow(Math.max(0, Math.cos(uNorm * Math.PI * 9.0)), 4.0);
+        // Taper toward fin edges so displacement fades at tips
+        const vNorm = y / (height - 1);
+        const taper = Math.sin(vNorm * Math.PI);
+        const d = rib * taper * 0.7;
+        const val = Math.round(d * 255);
+        const index = (y * width + x) * 4;
+        img.data[index] = val;
+        img.data[index + 1] = val;
+        img.data[index + 2] = val;
+        img.data[index + 3] = 255;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+  });
+  _finDisplacementTexture.repeat.set(1.5, 2.5);
+  return _finDisplacementTexture;
+}
+
 function _applyOrganicShader(material, uniformRefs, options = {}) {
   const uniforms = {
     uTime: { value: 0 },
@@ -232,14 +288,9 @@ function _applyOrganicShader(material, uniformRefs, options = {}) {
     );
   };
 
-  material.customProgramCacheKey = () => JSON.stringify({
-    organicShader: true,
-    amplitude: options.amplitude ?? 0.16,
-    rotAmplitude: options.rotAmplitude ?? 0.22,
-    finFlutter: options.finFlutter ?? 0,
-    jawGlow: options.jawGlow ?? 0,
-    length: options.length ?? 1,
-  });
+  // Static key: all organic shader variants use identical GLSL — differences
+  // are uniform values only, so there is no need for per-tier shader variants.
+  material.customProgramCacheKey = () => 'organicShader_v1';
 
   return material;
 }
@@ -255,6 +306,10 @@ function _createBodyMaterial(uniformRefs, length, tierName) {
     emissiveIntensity: tierName === 'far' ? 0.7 : 1.0,
     normalMap: _getBodyNormalTexture(),
     normalScale: new THREE.Vector2(0.65, 0.65),
+    // Displacement for spinal ridge and muscle surface (far tier omitted — too few
+    // geometry segments for displacement to contribute meaningfully)
+    displacementMap: tierName !== 'far' ? _getBodyDisplacementTexture() : null,
+    displacementScale: tierName === 'near' ? 0.04 : tierName === 'medium' ? 0.025 : 0,
   });
   return _applyOrganicShader(mat, uniformRefs, {
     amplitude: tierName === 'far' ? 0.08 : tierName === 'medium' ? 0.13 : 0.18,
@@ -316,7 +371,7 @@ function _createJawMaterial(uniformRefs, length) {
   });
 }
 
-function _createFinMaterial(uniformRefs, length, flutterAmount) {
+function _createFinMaterial(uniformRefs, length, flutterAmount, tierName) {
   const mat = new THREE.MeshPhysicalMaterial({
     color: 0x172226,
     roughness: 0.12,
@@ -331,6 +386,9 @@ function _createFinMaterial(uniformRefs, length, flutterAmount) {
     emissiveIntensity: 0.7,
     normalMap: _getFinNormalTexture(),
     normalScale: new THREE.Vector2(0.45, 0.45),
+    // Displacement for fin membrane ribbing (near: full, medium: reduced)
+    displacementMap: _getFinDisplacementTexture(),
+    displacementScale: tierName === 'near' ? 0.02 : 0.01,
     side: THREE.DoubleSide,
   });
   return _applyOrganicShader(mat, uniformRefs, {
@@ -387,7 +445,7 @@ function _createBodyCurve(length) {
   return new THREE.CatmullRomCurve3(points, false, 'catmullrom', 0.45);
 }
 
-function _shapeTubeGeometry(geometry, length, tierName) {
+function _shapeTubeGeometry(geometry, length) {
   const pos = geometry.attributes.position;
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i);
@@ -406,7 +464,11 @@ function _shapeTubeGeometry(geometry, length, tierName) {
     );
   }
   geometry.computeVertexNormals();
-  if (tierName !== 'far') geometry.rotateZ(Math.PI);
+  // NOTE: do NOT bake the orientation flip into the geometry — the shader reads
+  // raw geometry positions to compute eelProgress (clamp(-x/uLength, 0, 1)).
+  // geometry.rotateZ(PI) would negate X, collapsing progress to zero on
+  // near/medium LODs and breaking wave/glow animation.  The visual flip is
+  // applied instead as body.rotation.z = Math.PI on the mesh object.
 }
 
 function _shapeHeadGeometry(geometry, detailEnabled) {
@@ -516,15 +578,19 @@ export class SpinalEel {
     const bodyMat = _createBodyMaterial(shaderUniforms, profile.length, tierName);
     const headMat = _createHeadMaterial(shaderUniforms, profile.length * 0.3);
     const jawMat = _createJawMaterial(shaderUniforms, profile.length * 0.2);
-    const finMat = _createFinMaterial(shaderUniforms, profile.length, profile.hasPerVertexFinFlutter ? 0.065 : 0.0);
+    const finMat = _createFinMaterial(shaderUniforms, profile.length, profile.hasPerVertexFinFlutter ? 0.065 : 0.0, tierName);
     const spineMat = _createSpineMaterial();
     const boneMat = _createBoneMaterial();
     const eyeMat = _createEyeMaterial();
 
     const bodyCurve = _createBodyCurve(profile.length);
     const bodyGeo = new THREE.TubeGeometry(bodyCurve, profile.tubularSegments, 0.34, profile.radialSegments, false);
-    _shapeTubeGeometry(bodyGeo, profile.length, tierName);
+    _shapeTubeGeometry(bodyGeo, profile.length);
     const body = new THREE.Mesh(bodyGeo, bodyMat);
+    // Flip the body tube so it faces forward.  Applying the PI rotation on the
+    // mesh object (not the geometry) keeps geometry positions intact so the
+    // shader eelProgress = clamp(-position.x / uLength, 0, 1) stays valid.
+    body.rotation.z = Math.PI;
     group.add(body);
 
     const spineGeo = new THREE.TubeGeometry(bodyCurve, Math.max(18, Math.floor(profile.tubularSegments * 0.35)), 0.06, 6, false);
