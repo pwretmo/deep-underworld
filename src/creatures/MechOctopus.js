@@ -19,14 +19,14 @@ export class MechOctopus {
 
   _buildModel() {
     const bodyMat = new THREE.MeshPhysicalMaterial({
-      color: 0x182028, roughness: 0.15, metalness: 0,
-      clearcoat: 1.0, clearcoatRoughness: 0.08,
-      emissive: 0x203858, emissiveIntensity: 0.6,
+      color: 0x182028, roughness: 0.28, metalness: 0,
+      clearcoat: 0.65, clearcoatRoughness: 0.36,
+      emissive: 0x203858, emissiveIntensity: 0.45,
     });
     const metalMat = new THREE.MeshPhysicalMaterial({
-      color: 0x141414, roughness: 0.1, metalness: 0.9,
-      clearcoat: 1.0,
-      emissive: 0x204060, emissiveIntensity: 0.3,
+      color: 0x141414, roughness: 0.26, metalness: 0.7,
+      clearcoat: 0.5, clearcoatRoughness: 0.4,
+      emissive: 0x204060, emissiveIntensity: 0.22,
     });
     const organicMat = new THREE.MeshPhysicalMaterial({
       color: 0x201828, roughness: 0.3, metalness: 0,

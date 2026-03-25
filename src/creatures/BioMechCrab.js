@@ -20,12 +20,12 @@ export class BioMechCrab {
   _buildModel() {
     const shellMat = new THREE.MeshPhysicalMaterial({
       color: 0x182028, roughness: 0.2, metalness: 0,
-      clearcoat: 1.0, clearcoatRoughness: 0.1,
+      clearcoat: 0.7, clearcoatRoughness: 0.34,
       emissive: 0x203858, emissiveIntensity: 0.6,
     });
     const metalMat = new THREE.MeshPhysicalMaterial({
-      color: 0x181818, roughness: 0.15, metalness: 0.9,
-      clearcoat: 1.0,
+      color: 0x181818, roughness: 0.3, metalness: 0.62,
+      clearcoat: 0.55, clearcoatRoughness: 0.38,
       emissive: 0x204060, emissiveIntensity: 0.3,
     });
     const jointMat = new THREE.MeshPhysicalMaterial({
