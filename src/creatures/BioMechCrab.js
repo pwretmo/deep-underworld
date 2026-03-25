@@ -90,7 +90,8 @@ function _getSpineGeo() {
 const LOD_PROFILE = {
   near: {
     carapaceWSeg: 48, carapaceHSeg: 32,
-    legRadial: 6, pistonRadial: 6,
+    legRadial: 12, pistonRadial: 12,
+    footRadial: 12,
     mandibleRadial: 6,
     eyeDetail: 10, eyeStalkRadial: 6,
     barnacleCount: 24, spineCount: 16,
@@ -100,7 +101,8 @@ const LOD_PROFILE = {
   },
   medium: {
     carapaceWSeg: 24, carapaceHSeg: 16,
-    legRadial: 4, pistonRadial: 4,
+    legRadial: 6, pistonRadial: 6,
+    footRadial: 6,
     mandibleRadial: 4,
     eyeDetail: 6, eyeStalkRadial: 4,
     barnacleCount: 8, spineCount: 6,
@@ -111,6 +113,7 @@ const LOD_PROFILE = {
   far: {
     carapaceWSeg: 10, carapaceHSeg: 6,
     legRadial: 3, pistonRadial: 3,
+    footRadial: 4,
     mandibleRadial: 3,
     eyeDetail: 4, eyeStalkRadial: 3,
     barnacleCount: 0, spineCount: 0,
@@ -127,6 +130,7 @@ const _tmpVec2 = new THREE.Vector3();
 const _toPlayer = new THREE.Vector3();
 const _tmpMatrix = new THREE.Matrix4();
 const _tmpQuat = new THREE.Quaternion();
+const _invWorldQuat = new THREE.Quaternion();
 const _upVec = new THREE.Vector3(0, 1, 0);
 
 // Biomechanical crab — hydraulic-piston legs, chitinous carapace, mandible articulation
@@ -159,6 +163,7 @@ export class BioMechCrab {
     this._velocity = new THREE.Vector3();
     this._desiredDir = new THREE.Vector3().copy(this.direction);
     this._jointPulse = 0;
+    this._baseY = position.y;
 
     this._buildModel();
     this.group.position.copy(position);
@@ -205,7 +210,8 @@ export class BioMechCrab {
       };
     }
 
-    return tierName === 'far' ? toStandardMaterial(mat) : mat;
+    if (tierName === 'far') { const std = toStandardMaterial(mat); mat.dispose(); return std; }
+    return mat;
   }
 
   _createMetalMaterial(tierName) {
@@ -218,7 +224,8 @@ export class BioMechCrab {
       emissive: 0x0c1828,
       emissiveIntensity: 0.2,
     });
-    return tierName === 'far' ? toStandardMaterial(mat) : mat;
+    if (tierName === 'far') { const std = toStandardMaterial(mat); mat.dispose(); return std; }
+    return mat;
   }
 
   _createJointMaterial(tierName) {
@@ -230,7 +237,8 @@ export class BioMechCrab {
       emissive: 0x1a4878,
       emissiveIntensity: 0.6,
     });
-    return tierName === 'far' ? toStandardMaterial(mat) : mat;
+    if (tierName === 'far') { const std = toStandardMaterial(mat); mat.dispose(); return std; }
+    return mat;
   }
 
   _createEyeMaterial() {
@@ -347,26 +355,28 @@ export class BioMechCrab {
         upper.position.y = -0.5;
         upper.rotation.z = side * 0.6;
         legGroup.add(upper);
+        legGroup.userData.upper = upper;
+        legGroup.userData.upperLen = 1.4;
 
-        // Hydraulic piston housing
-        const pistonOuterGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.5, profile.pistonRadial);
-        const pistonOuter = new THREE.Mesh(pistonOuterGeo, jointMat);
-        pistonOuter.position.set(side * 0.3, -1, 0);
-        legGroup.add(pistonOuter);
+        // Hydraulic piston housing & rod (only when pistons enabled)
+        if (profile.usePistonAnim) {
+          const pistonOuterGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.5, profile.pistonRadial);
+          const pistonOuter = new THREE.Mesh(pistonOuterGeo, jointMat);
+          pistonOuter.position.set(side * 0.3, -1, 0);
+          legGroup.add(pistonOuter);
 
-        // Inner piston rod (extends/retracts during gait)
-        const pistonInnerGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.35, profile.pistonRadial);
-        const pistonInner = new THREE.Mesh(pistonInnerGeo, metalMat);
-        pistonInner.position.set(side * 0.3, -1.25, 0);
-        legGroup.add(pistonInner);
-        tier.pistons.push(pistonInner);
+          const pistonInnerGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.35, profile.pistonRadial);
+          const pistonInner = new THREE.Mesh(pistonInnerGeo, metalMat);
+          pistonInner.position.set(side * 0.3, -1.25, 0);
+          legGroup.add(pistonInner);
+          tier.pistons.push(pistonInner);
 
-        // Joint collar
-        const collarGeo = new THREE.TorusGeometry(0.065, 0.02, 4, profile.pistonRadial);
-        const collar = new THREE.Mesh(collarGeo, jointMat);
-        collar.position.set(side * 0.3, -1, 0);
-        collar.rotation.x = HALF_PI;
-        legGroup.add(collar);
+          const collarGeo = new THREE.TorusGeometry(0.065, 0.02, 4, profile.pistonRadial);
+          const collar = new THREE.Mesh(collarGeo, jointMat);
+          collar.position.set(side * 0.3, -1, 0);
+          collar.rotation.x = HALF_PI;
+          legGroup.add(collar);
+        }
 
         // Lower leg (tibia)
         const lowerGeo = new THREE.CylinderGeometry(0.055, 0.03, 1.3, profile.legRadial);
@@ -374,12 +384,15 @@ export class BioMechCrab {
         lower.position.set(side * 0.5, -1.55, 0);
         lower.rotation.z = side * 1.2;
         legGroup.add(lower);
+        legGroup.userData.lower = lower;
+        legGroup.userData.lowerLen = 1.3;
 
         // Foot claw
-        const footGeo = new THREE.ConeGeometry(0.045, 0.28, 4);
+        const footGeo = new THREE.ConeGeometry(0.045, 0.28, profile.footRadial);
         const foot = new THREE.Mesh(footGeo, shellMat);
         foot.position.set(side * 1.0, -2.05, 0);
         legGroup.add(foot);
+        legGroup.userData.foot = foot;
 
         legGroup.position.set(Math.cos(angle) * 0.8, 0, side * (0.6 + i * 0.2));
         tier.legGroups.push(legGroup);
@@ -417,6 +430,7 @@ export class BioMechCrab {
 
       stalkGroup.position.set(1.3, 0.15, side * 0.25);
       stalkGroup.rotation.z = -0.4;
+      stalkGroup.userData.baseRotZ = -0.4;
       tier.eyeStalks.push(stalkGroup);
       g.add(stalkGroup);
     }
@@ -477,7 +491,6 @@ export class BioMechCrab {
           });
 
       const barnInst = new THREE.InstancedMesh(barnGeo, barnMat, profile.barnacleCount);
-      barnInst.frustumCulled = false;
       for (let b = 0; b < profile.barnacleCount; b++) {
         const theta = _hash(b, 0, this._instanceSeed) * TWO_PI;
         const phi = _hash(b, 1, this._instanceSeed) * Math.PI * 0.4;
@@ -491,6 +504,7 @@ export class BioMechCrab {
         barnInst.setMatrixAt(b, _tmpMatrix);
       }
       barnInst.instanceMatrix.needsUpdate = true;
+      barnInst.computeBoundingSphere();
       g.add(barnInst);
     }
 
@@ -507,7 +521,6 @@ export class BioMechCrab {
           });
 
       const spnInst = new THREE.InstancedMesh(spnGeo, spnMat, profile.spineCount);
-      spnInst.frustumCulled = false;
       for (let s = 0; s < profile.spineCount; s++) {
         const theta = _hash(s, 10, this._instanceSeed) * TWO_PI;
         const phi = _hash(s, 11, this._instanceSeed) * Math.PI * 0.3;
@@ -522,6 +535,7 @@ export class BioMechCrab {
         spnInst.setMatrixAt(s, _tmpMatrix);
       }
       spnInst.instanceMatrix.needsUpdate = true;
+      spnInst.computeBoundingSphere();
       g.add(spnInst);
     }
 
@@ -563,11 +577,58 @@ export class BioMechCrab {
       const swing = Math.sin(legPhase);
       const lift = Math.max(0, Math.sin(legPhase)) * liftHeight;
 
-      leg.rotation.x = swing * amplitude;
-      leg.position.y = lift;
+      // 2-bone IK: compute target foot position, solve for upper/lower angles
+      const upperLen = leg.userData.upperLen || 1.4;
+      const lowerLen = leg.userData.lowerLen || 1.3;
+      const upper = leg.userData.upper;
+      const lower = leg.userData.lower;
+      const foot = leg.userData.foot;
+
+      // Target foot ground contact point (stride + lift)
+      const strideX = swing * amplitude * side;
+      const groundY = -upperLen - lowerLen + 0.1 + lift;
+
+      // Distance from hip to target foot
+      const dx = strideX;
+      const dy = groundY;
+      const dist2 = dx * dx + dy * dy;
+      const dist = Math.sqrt(dist2);
+
+      // Clamp reach to prevent impossible solutions
+      const maxReach = upperLen + lowerLen - 0.05;
+      const minReach = Math.abs(upperLen - lowerLen) + 0.05;
+      const clampedDist = THREE.MathUtils.clamp(dist, minReach, maxReach);
+
+      // Law of cosines for knee angle
+      const cosKnee = (upperLen * upperLen + lowerLen * lowerLen - clampedDist * clampedDist) / (2 * upperLen * lowerLen);
+      const kneeAngle = Math.acos(THREE.MathUtils.clamp(cosKnee, -1, 1));
+
+      // Hip angle
+      const cosHip = (upperLen * upperLen + clampedDist * clampedDist - lowerLen * lowerLen) / (2 * upperLen * clampedDist);
+      const hipOffset = Math.acos(THREE.MathUtils.clamp(cosHip, -1, 1));
+      const targetAngle = Math.atan2(dx, -dy);
+      const hipAngle = targetAngle + hipOffset * side;
+
+      // Apply to upper leg
+      if (upper) {
+        upper.rotation.z = side * 0.6 + hipAngle;
+      }
+
+      // Apply to lower leg
+      if (lower) {
+        lower.rotation.z = side * 1.2 + (Math.PI - kneeAngle) * side;
+      }
+
+      // Foot stays pointed down
+      if (foot) {
+        foot.position.y = -2.05 + lift;
+        foot.position.x = side * 1.0 + strideX * 0.5;
+      }
+
+      leg.position.y = 0; // don't move entire group, IK handles positioning
 
       // Hydraulic piston extension during stance phase
-      if (tier.isNear && l < tier.pistons.length) {
+      if (l < tier.pistons.length) {
         const extension = Math.max(0, -swing) * 0.12;
         tier.pistons[l].scale.y = 1.0 + extension;
         tier.pistons[l].position.y = -1.25 - extension * 0.06;
@@ -599,22 +660,27 @@ export class BioMechCrab {
   // ── Eye stalk tracking ──
 
   _animateEyeTracking(tier, dt) {
+    // Convert world-space player direction into crab local space
+    _invWorldQuat.copy(this.group.quaternion).invert();
+    const localTarget = _tmpVec.copy(_toPlayer).applyQuaternion(_invWorldQuat);
+
     const blendSpeed = 1 - Math.exp(-3 * dt);
-    this._eyeTrackBlend.lerp(_toPlayer, blendSpeed);
+    this._eyeTrackBlend.lerp(localTarget, blendSpeed);
 
     for (let e = 0; e < tier.eyeStalks.length; e++) {
       const stalk = tier.eyeStalks[e];
       const localDir = _tmpVec.copy(this._eyeTrackBlend).normalize();
       const pitch = Math.atan2(localDir.y, Math.sqrt(localDir.x * localDir.x + localDir.z * localDir.z));
       const yaw = Math.atan2(localDir.x, localDir.z);
+      const baseZ = stalk.userData.baseRotZ || 0;
 
       stalk.rotation.x = THREE.MathUtils.clamp(
         -0.4 + pitch * 0.3 + Math.sin(this.time * 1.5 + e * 2) * 0.03,
         -0.8, 0.1
       );
       stalk.rotation.z = THREE.MathUtils.clamp(
-        yaw * 0.15 + Math.sin(this.time * 1.1 + e * 3) * 0.04,
-        -0.4, 0.4
+        baseZ + yaw * 0.15 + Math.sin(this.time * 1.1 + e * 3) * 0.04,
+        baseZ - 0.4, baseZ + 0.4
       );
     }
   }
@@ -665,8 +731,8 @@ export class BioMechCrab {
     const targetAngle = Math.atan2(this.direction.x, this.direction.z);
     this.group.rotation.y = THREE.MathUtils.lerp(this.group.rotation.y, targetAngle, dt * 1.5);
 
-    // Subtle body bob
-    this.group.position.y += Math.sin(this._gaitPhase * 0.5) * 0.015 * velMag;
+    // Subtle body bob (relative to base Y to prevent drift)
+    this.group.position.y = this._baseY + Math.sin(this._gaitPhase * 0.5) * 0.015 * velMag;
 
     // LOD resolution
     _toPlayer.subVectors(playerPos, this.group.position);
@@ -719,6 +785,7 @@ export class BioMechCrab {
         playerPos.y,
         playerPos.z + Math.sin(a) * 70
       );
+      this._baseY = playerPos.y;
     }
   }
 
@@ -727,7 +794,9 @@ export class BioMechCrab {
   dispose() {
     this.scene.remove(this.group);
     this.group.traverse(child => {
-      if (child.geometry) child.geometry.dispose();
+      if (child.geometry && child.geometry !== _barnacleGeo && child.geometry !== _spineGeo) {
+        child.geometry.dispose();
+      }
       if (child.material) {
         if (Array.isArray(child.material)) {
           for (const m of child.material) m.dispose();
