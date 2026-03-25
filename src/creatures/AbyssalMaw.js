@@ -23,7 +23,6 @@ const MAW_LOD = {
     hasShader: true,
     hasBarbs: true,
     hasLureFilaments: true,
-    hasInnerLight: true,
   },
   medium: {
     throatSegs: [24, 16],
@@ -41,7 +40,6 @@ const MAW_LOD = {
     hasShader: false,
     hasBarbs: false,
     hasLureFilaments: false,
-    hasInnerLight: false,
   },
   far: {
     throatSegs: [10, 6],
@@ -59,7 +57,6 @@ const MAW_LOD = {
     hasShader: false,
     hasBarbs: false,
     hasLureFilaments: false,
-    hasInnerLight: false,
   },
 };
 
@@ -232,10 +229,6 @@ export class AbyssalMaw {
     ).normalize();
     this.turnTimer = 0;
     this.turnInterval = 20 + Math.random() * 20;
-
-    // LOD state
-    this._lodTier = 'near';
-    this._lastLodTier = 'near';
 
     // Animation state (pre-allocated, zero GC)
     this._breathPhase = Math.random() * Math.PI * 2;
@@ -410,6 +403,7 @@ export class AbyssalMaw {
         }
       }
       toothGeo.computeVertexNormals();
+      toothGeo.rotateX(-Math.PI / 2);
 
       let ringGroup;
 
@@ -581,8 +575,6 @@ export class AbyssalMaw {
 
     // Determine visible LOD tier
     const currentTier = this._getVisibleTierName();
-    this._lastLodTier = this._lodTier;
-    this._lodTier = currentTier;
 
     // ── Breathing pulse (all tiers, cheap uniform scale) ────────────────
     this._breathPhase += dt * BREATHING_SPEED;
@@ -624,8 +616,8 @@ export class AbyssalMaw {
       entry.uniforms.uPlayerProximity.value = this._playerProximity;
     }
 
-    // ── Tendril luring animation (near + medium) ────────────────────────
-    if (currentTier !== 'far') {
+    // ── Tendril luring animation (near only) ────────────────────────────
+    if (currentTier === 'near') {
       const activeTier = this.tiers[currentTier];
       if (activeTier && activeTier.tendrilMeshes) {
         for (let i = 0; i < activeTier.tendrilMeshes.length; i++) {
@@ -651,14 +643,15 @@ export class AbyssalMaw {
       }
     }
 
-    // ── Lure bioluminescence pulse (independent rhythm per lure) ────────
-    if (currentTier !== 'far') {
+    // ── Lure bioluminescence pulse (near only) ──────────────────────────
+    if (currentTier === 'near') {
       const activeTier = this.tiers[currentTier];
       if (activeTier && activeTier.lureMeshes) {
         for (let i = 0; i < activeTier.lureMeshes.length; i++) {
           const lure = activeTier.lureMeshes[i];
           const phase = lure.userData.pulsePhase + this.time * (LURE_PULSE_SPEED_BASE + i * 0.3);
-          const intensity = 1.5 + Math.sin(phase) * 1.0 + Math.sin(phase * 2.3) * 0.4;
+          const base = lure.userData.baseEmissiveIntensity;
+          const intensity = base * (0.75 + Math.sin(phase) * 0.5 + Math.sin(phase * 2.3) * 0.2);
           if (lure.material.emissiveIntensity !== undefined) {
             lure.material.emissiveIntensity = intensity;
           }
