@@ -221,6 +221,11 @@ export class MusicSystem {
     env.connect(destination);
     source.start(now, Math.random() * this.noiseBuffer.duration);
     source.stop(now + duration);
+    source.onended = () => {
+      source.disconnect();
+      filter.disconnect();
+      env.disconnect();
+    };
   }
 
   _playMelodyNote(scale, rootMidi, duration, threat, startTime = null) {
@@ -269,6 +274,14 @@ export class MusicSystem {
     shadow.start(now);
     osc.stop(now + duration + 0.1);
     shadow.stop(now + duration + 0.1);
+    osc.onended = () => {
+      osc.disconnect();
+      shadow.disconnect();
+      vibrato.disconnect();
+      vibratoD.disconnect();
+      filter.disconnect();
+      env.disconnect();
+    };
 
     this._playNoiseAccent({
       duration: Math.max(0.8, duration * 0.8),
