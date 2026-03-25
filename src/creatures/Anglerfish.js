@@ -77,12 +77,6 @@ export class Anglerfish {
     this.lureFlickerFreqB = 12 + Math.random() * 4.5;
     this.lurePulsePhase = Math.random() * Math.PI * 2;
 
-    this._qualityTier = qualityManager.tier;
-    this._qualityHandler = (event) => {
-      this._qualityTier = event.detail?.tier || this._qualityTier;
-    };
-    window.addEventListener('qualitychange', this._qualityHandler);
-
     this._velocity = new THREE.Vector3();
     this._toPlayer = new THREE.Vector3();
     this._moveTarget = new THREE.Vector3();
@@ -120,11 +114,11 @@ export class Anglerfish {
       far: this._buildTier('far'),
     };
 
-    this.lod = new THREE.LOD();
-    this.lod.addLevel(this.tiers.near.group, 0);
-    this.lod.addLevel(this.tiers.medium.group, 30);
-    this.lod.addLevel(this.tiers.far.group, 80);
-    this.group.add(this.lod);
+    this.group.add(this.tiers.near.group);
+    this.group.add(this.tiers.medium.group);
+    this.group.add(this.tiers.far.group);
+    this.tiers.medium.group.visible = false;
+    this.tiers.far.group.visible = false;
 
     this.group.scale.setScalar(1.5 + Math.random() * 1);
   }
@@ -665,8 +659,7 @@ transformed.y += sin(position.x * 6.0 + uFinTime * 5.3) * 0.02 * uFinWave;`
     this.group.position.addScaledVector(this._velocity, dt);
   }
 
-  _updateOrientation(dt, playerPos) {
-    this._toPlayer.subVectors(playerPos, this.group.position);
+  _updateOrientation(dt) {
     const toPlayerLen = this._toPlayer.length();
     if (toPlayerLen > 0.0001) this._toPlayer.multiplyScalar(1 / toPlayerLen);
 
@@ -790,10 +783,12 @@ transformed.y += sin(position.x * 6.0 + uFinTime * 5.3) * 0.02 * uFinWave;`
     this._frameCounter += 1;
 
     this._toPlayer.subVectors(playerPos, this.group.position);
-    const distToPlayer = this._toPlayer.length();
+    let distToPlayer = this._toPlayer.length();
 
     this._updateStateAndVelocity(dt, playerPos, distToPlayer);
-    this._updateOrientation(dt, playerPos);
+    this._toPlayer.addScaledVector(this._velocity, -dt);
+    distToPlayer = this._toPlayer.length();
+    this._updateOrientation(dt);
 
     this._lodTier = this._resolveLodTier(distToPlayer);
     this._lastLodTier = this._lodTier;
@@ -803,7 +798,7 @@ transformed.y += sin(position.x * 6.0 + uFinTime * 5.3) * 0.02 * uFinWave;`
     this.tiers.medium.group.visible = this._lodTier === 'medium';
     this.tiers.far.group.visible = this._lodTier === 'far';
 
-    const farStep = this._qualityTier === 'ultra' ? 4 : 3;
+    const farStep = qualityManager.tier === 'ultra' ? 4 : 3;
     const shouldSkipFarAnimation = this._lodTier === 'far' && (this._frameCounter % farStep) !== 0;
     if (shouldSkipFarAnimation) return;
 
@@ -819,7 +814,6 @@ transformed.y += sin(position.x * 6.0 + uFinTime * 5.3) * 0.02 * uFinWave;`
   getPosition() { return this.group.position; }
 
   dispose() {
-    window.removeEventListener('qualitychange', this._qualityHandler);
     this.scene.remove(this.group);
     this.group.traverse(child => {
       if (child.geometry) child.geometry.dispose();
