@@ -505,11 +505,22 @@ export class UnderwaterEffect {
   }
 
   getDiagnostics() {
+    const emergency =
+      this._bloomSuspended ||
+      this._lastRenderMs > this.tuning.performance.emergencyThresholdMs;
+    const pressured =
+      emergency ||
+      this._lastRenderMs > this.tuning.performance.severeThresholdMs ||
+      this._renderEmaMs > this.tuning.performance.degradeThresholdMs;
+
     return {
       composerScale: this._composerScale,
       renderEmaMs: this._renderEmaMs,
       lastRenderMs: this._lastRenderMs,
       bloomSuspended: this._bloomSuspended,
+      renderPressure: emergency ? 'emergency' : pressured ? 'pressured' : 'normal',
+      stallRisk: emergency ? 'emergency' : pressured ? 'pressured' : 'normal',
+      stallRiskLabel: emergency ? 'Emergency' : pressured ? 'Pressured' : 'Normal',
     };
   }
 }

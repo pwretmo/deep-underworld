@@ -238,21 +238,38 @@ export class HUD {
     if (now - this._diagLastUpdate < 200) return;
     this._diagLastUpdate = now;
 
-    const lines = [
-      `FPS          ${this._fmtNumber(snapshot.fps, 0)} | Depth ${this._fmtNumber(snapshot.depth, 0)}m | Max ${this._fmtNumber(snapshot.maxDepth, 0)}m`,
-      `Creatures     ${this._fmtNumber(snapshot.creaturesActive, 0)} active | ${this._fmtNumber(snapshot.queuedSpawns, 0)} queued`,
-      `Quality       ${snapshot.qualityTier ?? 'unknown'} | ${snapshot.graphics?.context ?? 'webgl'}`,
-      `Renderer      ${snapshot.graphics?.hardwareAcceleratedLabel ?? 'Unknown'}`,
-      this._truncateLine(`GPU           ${snapshot.graphics?.renderer ?? 'Unavailable'}`),
-      `Vendor        ${snapshot.graphics?.vendor ?? 'Unknown'}`,
-      `Post FX       scale ${this._fmtFixed(snapshot.postProcess?.composerScale, 2)} | EMA ${this._fmtFixed(snapshot.postProcess?.renderEmaMs, 1)}ms`,
-      `Render        last ${this._fmtFixed(snapshot.postProcess?.lastRenderMs, 1)}ms | bloom ${snapshot.postProcess?.bloomSuspended ? 'suspended' : 'active'}`,
-      `Exposure      ${this._fmtFixed(snapshot.exposure, 2)} | Flashlight ${snapshot.flashlightOn ? 'on' : 'off'}`,
-      `Player        x ${this._fmtFixed(snapshot.playerPosition?.x, 1)}  y ${this._fmtFixed(snapshot.playerPosition?.y, 1)}  z ${this._fmtFixed(snapshot.playerPosition?.z, 1)}`,
-      `State         ${snapshot.running ? 'running' : 'idle'}${snapshot.autoplay ? ' | autoplay' : ''}${snapshot.physicsReady ? ' | physics' : ''}`,
+    const stallRiskClass = this._statusClass(snapshot.postProcess?.stallRisk);
+    const renderClass = this._statusClass(snapshot.postProcess?.renderPressure);
+    const rendererClass = snapshot.graphics?.hardwareAccelerated === false ? 'status-fallback' : 'status-normal';
+    const bloomClass = snapshot.postProcess?.bloomSuspended ? 'status-pressured' : 'status-normal';
+
+    const rows = [
+      this._diagRow('Stall risk', snapshot.postProcess?.stallRiskLabel ?? 'Unknown', stallRiskClass),
+      this._diagRow('FPS / depth', `${this._fmtNumber(snapshot.fps, 0)} FPS | ${this._fmtNumber(snapshot.depth, 0)}m | max ${this._fmtNumber(snapshot.maxDepth, 0)}m`),
+      this._diagRow('Creatures', `${this._fmtNumber(snapshot.creaturesActive, 0)} active | ${this._fmtNumber(snapshot.queuedSpawns, 0)} queued`),
+      this._diagRow('Quality', `${snapshot.qualityTier ?? 'unknown'} | ${snapshot.graphics?.context ?? 'webgl'}`),
+      this._diagRow('Renderer', snapshot.graphics?.hardwareAcceleratedLabel ?? 'Unknown', rendererClass),
+      this._diagRow('GPU', this._truncateLine(snapshot.graphics?.renderer ?? 'Unavailable'), rendererClass),
+      this._diagRow('Vendor', snapshot.graphics?.vendor ?? 'Unknown', 'muted'),
+      this._diagRow('Post FX', `scale ${this._fmtFixed(snapshot.postProcess?.composerScale, 2)} | EMA ${this._fmtFixed(snapshot.postProcess?.renderEmaMs, 1)}ms`, renderClass),
+      this._diagRow('Render', `last ${this._fmtFixed(snapshot.postProcess?.lastRenderMs, 1)}ms`, renderClass),
+      this._diagRow('Bloom', snapshot.postProcess?.bloomSuspended ? 'Suspended' : 'Active', bloomClass),
+      this._diagRow('Exposure', `${this._fmtFixed(snapshot.exposure, 2)} | flashlight ${snapshot.flashlightOn ? 'on' : 'off'}`),
+      this._diagRow('Player', `x ${this._fmtFixed(snapshot.playerPosition?.x, 1)}  y ${this._fmtFixed(snapshot.playerPosition?.y, 1)}  z ${this._fmtFixed(snapshot.playerPosition?.z, 1)}`),
+      this._diagRow('State', `${snapshot.running ? 'running' : 'idle'}${snapshot.autoplay ? ' | autoplay' : ''}${snapshot.physicsReady ? ' | physics' : ''}`),
     ];
 
-    this.diagnosticsContent.textContent = lines.join('\n');
+    this.diagnosticsContent.innerHTML = rows.join('');
+  }
+
+  _diagRow(label, value, valueClass = '') {
+    return `<div class="diagnostics-row"><span class="diagnostics-label">${this._escapeHtml(label)}</span><span class="diagnostics-value ${valueClass}">${this._escapeHtml(value)}</span></div>`;
+  }
+
+  _statusClass(status) {
+    if (status === 'emergency') return 'status-emergency';
+    if (status === 'pressured') return 'status-pressured';
+    return 'status-normal';
   }
 
   _fmtNumber(value, digits = 0) {
@@ -268,6 +285,15 @@ export class HUD {
   _truncateLine(text) {
     if (!text) return '--';
     return text.length > 42 ? `${text.slice(0, 39)}...` : text;
+  }
+
+  _escapeHtml(value) {
+    return String(value)
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
   }
 
   handleLocatorNavigation(code) {

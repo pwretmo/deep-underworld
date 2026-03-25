@@ -296,11 +296,39 @@
       border-bottom: 1px solid #22445566; padding-bottom: 5px;
     }
     #diagnostics-content {
-      white-space: pre-wrap; font-size: 0.7rem; line-height: 1.55;
+      font-size: 0.7rem; line-height: 1.55;
       color: #d7ebf7;
     }
-    #diagnostics-content .muted {
+    .diagnostics-row {
+      display: flex; align-items: baseline; justify-content: space-between;
+      gap: 10px; padding: 2px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    }
+    .diagnostics-row:last-child {
+      border-bottom: none;
+    }
+    .diagnostics-label {
+      color: #82a5ba; min-width: 92px; flex-shrink: 0;
+      text-transform: uppercase; letter-spacing: 0.08em;
+    }
+    .diagnostics-value {
+      color: #d7ebf7; text-align: right;
+      word-break: break-word;
+    }
+    .diagnostics-value.muted {
       color: #82a5ba;
+    }
+    .diagnostics-value.status-normal {
+      color: #7ce3ba;
+    }
+    .diagnostics-value.status-pressured {
+      color: #ffd36d;
+    }
+    .diagnostics-value.status-emergency {
+      color: #ff7a7a;
+    }
+    .diagnostics-value.status-fallback {
+      color: #ffb36d;
     }
   </style>
 </head>
