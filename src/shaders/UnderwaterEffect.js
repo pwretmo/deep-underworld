@@ -277,6 +277,10 @@ export class UnderwaterEffect {
     this._passStateCacheDepth = -9999;
     this._passStateCacheFlashlight = null;
     this._passStateCacheExposure = -1;
+    // Cached bloom targets — updated on cache miss, applied every frame via lerp
+    this._bloomTargetStrength = this.tuning.bloom.surfaceStrength;
+    this._bloomTargetThreshold = this.tuning.bloom.surfaceThreshold;
+    this._bloomTargetRadius = this.tuning.bloom.radius * 2.0;
     this._rebuildScaleLadder();
     this._applyComposerScale(true);
 
@@ -462,61 +466,64 @@ export class UnderwaterEffect {
     this.underwaterPass.uniforms.exposure.value = exposure;
     this.underwaterPass.uniforms.flashlightActive.value = flashlightOn ? 1 : 0;
 
-    // Item 4: quantize inputs — skip bloom target recomputation when nothing meaningful changed.
+    // Item 4: quantize inputs — skip expensive bloom target recomputation when nothing meaningful
+    // changed. The lerp convergence itself must still run every frame so bloom params converge
+    // smoothly rather than freezing until the next cache miss.
     const qDepth = Math.round(depth / 5) * 5;
     const qExposure = Math.round(exposure * 100) / 100;
     if (
-      qDepth === this._passStateCacheDepth &&
-      flashlightOn === this._passStateCacheFlashlight &&
-      qExposure === this._passStateCacheExposure
+      qDepth !== this._passStateCacheDepth ||
+      flashlightOn !== this._passStateCacheFlashlight ||
+      qExposure !== this._passStateCacheExposure
     ) {
-      return;
-    }
-    this._passStateCacheDepth = qDepth;
-    this._passStateCacheFlashlight = flashlightOn;
-    this._passStateCacheExposure = qExposure;
+      this._passStateCacheDepth = qDepth;
+      this._passStateCacheFlashlight = flashlightOn;
+      this._passStateCacheExposure = qExposure;
 
-    const depthNorm = THREE.MathUtils.smoothstep(
-      depth,
-      this.tuning.depthThresholds.mid,
-      this.tuning.depthThresholds.abyss
-    );
+      const depthNorm = THREE.MathUtils.smoothstep(
+        depth,
+        this.tuning.depthThresholds.mid,
+        this.tuning.depthThresholds.abyss
+      );
 
-    const targetStrength = THREE.MathUtils.lerp(
-      this.tuning.bloom.surfaceStrength,
-      this.tuning.bloom.deepStrength,
-      depthNorm
-    ) * (flashlightOn ? 0.88 : 1.0);
-
-    const targetThreshold = THREE.MathUtils.lerp(
-      this.tuning.bloom.surfaceThreshold,
-      this.tuning.bloom.deepThreshold,
-      depthNorm
-    ) + (flashlightOn ? 0.08 : 0.0);
-
-    const targetRadius = THREE.MathUtils.lerp(
-      this.tuning.bloom.radius * 2.0,
-      this.tuning.bloom.radius * 2.8,
-      depthNorm
-    );
-
-    const bloomParams = this.underwaterPass.uniforms.bloomParams.value;
-    const shaderBloomScale = this._bloomPass && !this._bloomSuspended ? 0.3 : 1.0;
-    bloomParams.x = THREE.MathUtils.lerp(bloomParams.x, targetStrength * shaderBloomScale, 0.09);
-    bloomParams.y = THREE.MathUtils.lerp(bloomParams.y, targetThreshold, 0.09);
-    bloomParams.z = THREE.MathUtils.lerp(bloomParams.z, targetRadius, 0.09);
-
-    if (this._bloomPass && !this._bloomSuspended) {
-      this._bloomPass.strength = THREE.MathUtils.lerp(
+      this._bloomTargetStrength = THREE.MathUtils.lerp(
         this.tuning.bloom.surfaceStrength,
         this.tuning.bloom.deepStrength,
         depthNorm
       ) * (flashlightOn ? 0.88 : 1.0);
-      this._bloomPass.threshold = THREE.MathUtils.lerp(
+
+      this._bloomTargetThreshold = THREE.MathUtils.lerp(
         this.tuning.bloom.surfaceThreshold,
         this.tuning.bloom.deepThreshold,
         depthNorm
       ) + (flashlightOn ? 0.08 : 0.0);
+
+      this._bloomTargetRadius = THREE.MathUtils.lerp(
+        this.tuning.bloom.radius * 2.0,
+        this.tuning.bloom.radius * 2.8,
+        depthNorm
+      );
+    }
+
+    // Lerp convergence runs every frame regardless of cache state so bloom params
+    // converge smoothly rather than freezing at stale values on cache hits.
+    const shaderBloomScale = this._bloomPass && !this._bloomSuspended ? 0.3 : 1.0;
+    const bloomParams = this.underwaterPass.uniforms.bloomParams.value;
+    bloomParams.x = THREE.MathUtils.lerp(bloomParams.x, this._bloomTargetStrength * shaderBloomScale, 0.09);
+    bloomParams.y = THREE.MathUtils.lerp(bloomParams.y, this._bloomTargetThreshold, 0.09);
+    bloomParams.z = THREE.MathUtils.lerp(bloomParams.z, this._bloomTargetRadius, 0.09);
+
+    if (this._bloomPass && !this._bloomSuspended) {
+      this._bloomPass.strength = THREE.MathUtils.lerp(
+        this._bloomPass.strength,
+        this._bloomTargetStrength,
+        0.09
+      );
+      this._bloomPass.threshold = THREE.MathUtils.lerp(
+        this._bloomPass.threshold,
+        this._bloomTargetThreshold,
+        0.09
+      );
     }
   }
 
@@ -530,7 +537,9 @@ export class UnderwaterEffect {
     this._lastRenderMs = renderMs;
     this._renderEmaMs = this._renderEmaMs * 0.92 + renderMs * 0.08;
 
-    if (this._bloomSuspended &&
+    // Software-renderer sessions hold their reduced profile permanently — never recover.
+    if (!this._isSoftwareRenderer &&
+      this._bloomSuspended &&
       this._bloomPass &&
       now >= this._bloomSuspendedUntil &&
       this._scaleIndex === 0 &&
@@ -582,7 +591,8 @@ export class UnderwaterEffect {
       // Item 1: degrade one rung earlier under sustained moderate-EMA pressure
       this._stableRecoveryFrames = 0;
       this._setScaleIndex(this._scaleIndex + 1, { now });
-    } else if (this._renderEmaMs < this.tuning.performance.recoveryThresholdMs) {
+    } else if (!this._isSoftwareRenderer && this._renderEmaMs < this.tuning.performance.recoveryThresholdMs) {
+      // Software-renderer sessions stay in reduced profile and never scale back up.
       this._stableRecoveryFrames++;
       if (
         this._scaleIndex > 0 &&
@@ -656,7 +666,9 @@ export class UnderwaterEffect {
     this._postProcessMaxScale = newMax;
     this._rebuildScaleLadder();
     const clampedIndex = this._findScaleIndex(Math.min(this._composerScale, newMax));
-    this._setScaleIndex(clampedIndex, { force: false, resetCooldown: false });
+    // force:true ensures the cap is always enforced even when the index matches the current value,
+    // preventing the composer from rendering above the depth-based scale ceiling.
+    this._setScaleIndex(clampedIndex, { force: true, resetCooldown: false });
   }
 
   /**
