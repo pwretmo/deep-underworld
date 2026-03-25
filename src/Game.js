@@ -442,9 +442,15 @@ export class Game {
       this.player.updateFogUniforms(this._fog);
     }
     this.ocean.update(dt, depth, this.player.position);
+
+    // Time terrain + flora chunk work so creature spawning can be deferred
+    // when the frame is already heavy (prevents compounding expensive operations).
+    const _initStart = performance.now();
     this.terrain.update(this.player.position);
     this.flora.update(dt, this.player.position);
-    this.creatures.update(dt, this.player.position, depth);
+    const _initElapsed = performance.now() - _initStart;
+    const _spawnBudget = Math.max(0, 12 - _initElapsed);
+    this.creatures.update(dt, this.player.position, depth, _spawnBudget);
 
     const nearestCreatureDist = this.creatures.getNearestCreatureDistance(this.player.position);
 
@@ -470,8 +476,12 @@ export class Game {
 
     this._updatePointLightBudget(dt, depth, this.player.position);
 
-    // Keep descent assist pumping in both regular and autoplay starts.
-    this.preload.pumpDescentAssist();
+    // Keep descent assist pumping in both regular and autoplay starts,
+    // but only when the frame hasn't already spent its initialization budget
+    // on terrain/flora/creature work.
+    if ((performance.now() - _initStart) < 14) {
+      this.preload.pumpDescentAssist();
+    }
 
     // Safety-net: dismiss descent overlay if still active (normally handled in _primeAndEnterGameplay)
     if (this._descentActive) {
