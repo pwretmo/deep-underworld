@@ -17,7 +17,13 @@ How to play-test the deep-underworld game in a browser, find UX issues, and disp
 
 Browser tooling may differ by session. Before any browser interaction, verify that you can both open a page and read page state.
 
-Acceptable open-page tools:
+### ⚠️ Chrome Required — VS Code Simple Browser is Forbidden
+
+**Never use the VS Code Simple Browser (the built-in VS Code panel browser) for UX testing.** It runs inside Electron's embedded webview without GPU hardware acceleration, causing Three.js to fall back to software rendering. This produces misleading visual and performance results — frame rates, lighting, shader output, and WebGL behavior will not match what a real user sees.
+
+All UX testing **must** use a real Chrome instance via the Chrome DevTools MCP tools (`mcp_io_github_chr_*`) or the `open_browser_page` tool that targets an external Chrome process. If only the VS Code Simple Browser is available, **STOP immediately** with the abort message below.
+
+Acceptable open-page tools (Chrome only):
 
 - `open_browser_page`
 - `mcp_io_github_chr_new_page`
