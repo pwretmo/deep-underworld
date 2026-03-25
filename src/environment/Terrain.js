@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { fbm2D, noise2D } from '../utils/noise.js';
 import { qualityManager } from '../QualityManager.js';
 
 export class Terrain {
@@ -13,6 +12,31 @@ export class Terrain {
     this.viewDistance = qualityManager.getSettings().terrainViewDistance;
     this._pendingChunks = []; // queue for staggered generation
     this._physicsWorld = null;
+    this._neededChunkKeys = new Set();
+    this._readyPayloads = [];
+    this._requestSeq = 0;
+    this._inFlightById = new Map();
+    this._inFlightByKey = new Map();
+    this._maxInFlight = 2;
+    this._chunkWorker = new Worker(new URL('./chunkPayloadWorker.js', import.meta.url), { type: 'module' });
+    this._chunkWorker.onmessage = (event) => {
+      const data = event.data;
+      if (!data || data.type !== 'terrainPayload') return;
+
+      const request = this._inFlightById.get(data.requestId);
+      if (!request) return;
+
+      this._inFlightById.delete(data.requestId);
+      if (this._inFlightByKey.get(request.key) === data.requestId) {
+        this._inFlightByKey.delete(request.key);
+      }
+
+      if (request.cancelled || !this._neededChunkKeys.has(request.key) || this.chunks.has(request.key)) {
+        return;
+      }
+
+      this._readyPayloads.push({ key: request.key, cx: data.cx, cz: data.cz, payload: data.payload });
+    };
 
     window.addEventListener('qualitychange', (e) => {
       this.viewDistance = e.detail.settings.terrainViewDistance;
@@ -43,129 +67,57 @@ export class Terrain {
     return `${cx},${cz}`;
   }
 
-  _getTerrainHeight(x, z) {
-    // Multi-layered terrain
-    let h = fbm2D(x * 0.003, z * 0.003, 6) * 40;
-    // Add ridges
-    h += Math.abs(noise2D(x * 0.01, z * 0.01)) * 15;
-    // Deep trenches
-    const trench = noise2D(x * 0.005 + 100, z * 0.005 + 100);
-    if (trench > 0.3) {
-      h -= (trench - 0.3) * 100;
+  _cancelInFlightRequest(requestId) {
+    const req = this._inFlightById.get(requestId);
+    if (!req) return;
+
+    req.cancelled = true;
+    this._inFlightById.delete(requestId);
+    if (this._inFlightByKey.get(req.key) === requestId) {
+      this._inFlightByKey.delete(req.key);
     }
-    return h;
+    this._chunkWorker.postMessage({ type: 'cancel', requestId });
   }
 
-  _createChunk(cx, cz) {
-    const size = this.chunkSize;
-    const res = this.resolution;
-    const geo = new THREE.PlaneGeometry(size, size, res, res);
-    geo.rotateX(-Math.PI / 2);
-
-    const positions = geo.attributes.position.array;
-    const colors = new Float32Array(positions.length);
-
-    const offsetX = cx * size;
-    const offsetZ = cz * size;
-
-    for (let i = 0; i < positions.length; i += 3) {
-      const worldX = positions[i] + offsetX;
-      const worldZ = positions[i + 2] + offsetZ;
-      const h = this._getTerrainHeight(worldX, worldZ);
-
-      // Terrain depth base: -50 to -800 depending on position
-      const baseDepth = -80 - Math.abs(fbm2D(worldX * 0.001, worldZ * 0.001)) * 600;
-      positions[i + 1] = baseDepth + h;
-
-      // Color based on depth
-      const depth = -positions[i + 1];
-      if (depth < 80) {
-        // Sandy/coral
-        colors[i] = 0.6; colors[i + 1] = 0.5; colors[i + 2] = 0.3;
-      } else if (depth < 200) {
-        // Darker sand/rock
-        colors[i] = 0.3; colors[i + 1] = 0.25; colors[i + 2] = 0.2;
-      } else if (depth < 500) {
-        // Dark rock
-        colors[i] = 0.15; colors[i + 1] = 0.12; colors[i + 2] = 0.15;
-      } else {
-        // Abyss - dark with slight purple
-        colors[i] = 0.08; colors[i + 1] = 0.05; colors[i + 2] = 0.1;
-      }
-
-      // Small color variation
-      const v = noise2D(worldX * 0.1, worldZ * 0.1) * 0.05;
-      colors[i] += v; colors[i + 1] += v; colors[i + 2] += v;
-    }
-
-    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    geo.computeVertexNormals();
-
-    const mat = new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      roughness: 0.9,
-      metalness: 0.1,
-      flatShading: true,
+  _requestChunkPayload(key, cx, cz) {
+    if (this._inFlightByKey.has(key)) return false;
+    const requestId = ++this._requestSeq;
+    this._inFlightById.set(requestId, { key, cancelled: false });
+    this._inFlightByKey.set(key, requestId);
+    this._chunkWorker.postMessage({
+      type: 'generateTerrain',
+      requestId,
+      key,
+      cx,
+      cz,
+      chunkSize: this.chunkSize,
+      resolution: this.resolution,
     });
-
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(offsetX, 0, offsetZ);
-    mesh.receiveShadow = true;
-
-    // Add rocks
-    this._addRocks(mesh, offsetX, offsetZ, size);
-
-    // Create physics trimesh collider for this chunk
-    if (this._physicsWorld) {
-      this._createChunkCollider(mesh, positions, geo.index, offsetX, offsetZ);
-    }
-
-    return mesh;
+    return true;
   }
 
   /**
-   * Build a trimesh collider from chunk geometry.
+   * Build a trimesh collider from worker-generated world-space vertices.
    */
-  _createChunkCollider(mesh, positions, geoIndex, offsetX, offsetZ) {
-    // Build world-space vertices
-    const vertCount = positions.length / 3;
-    const worldVerts = new Float32Array(positions.length);
-    for (let i = 0; i < vertCount; i++) {
-      worldVerts[i * 3] = positions[i * 3] + offsetX;
-      worldVerts[i * 3 + 1] = positions[i * 3 + 1];
-      worldVerts[i * 3 + 2] = positions[i * 3 + 2] + offsetZ;
-    }
-
-    // Extract indices from the geometry index (PlaneGeometry always has an index)
-    const srcIndex = geoIndex.array;
-    const indices = new Uint32Array(srcIndex.length);
-    for (let i = 0; i < srcIndex.length; i++) {
-      indices[i] = srcIndex[i];
-    }
-
-    const handle = this._physicsWorld.createTrimeshCollider(worldVerts, indices);
+  _createChunkCollider(mesh, colliderVertices, indices) {
+    const handle = this._physicsWorld.createTrimeshCollider(colliderVertices, indices);
     mesh.userData.physicsColliderHandles = [handle];
   }
 
-  _addRocks(parent, offsetX, offsetZ, size) {
-    const count = 8 + Math.floor(Math.random() * 8);
+  _addRocksFromPayload(parent, payload) {
+    const count = payload.rockTransforms.length / 9;
+    if (count <= 0) return;
+
     const dummy = new THREE.Object3D();
     const instancedRocks = new THREE.InstancedMesh(this._rockGeo, this._rockMat, count);
     instancedRocks.castShadow = true;
     instancedRocks.receiveShadow = true;
 
     for (let i = 0; i < count; i++) {
-      const rx = (Math.random() - 0.5) * size * 0.8;
-      const rz = (Math.random() - 0.5) * size * 0.8;
-      const worldX = rx + offsetX;
-      const worldZ = rz + offsetZ;
-      const h = this._getTerrainHeight(worldX, worldZ);
-      const baseDepth = -80 - Math.abs(fbm2D(worldX * 0.001, worldZ * 0.001)) * 600;
-
-      const scale = 1 + Math.random() * 4;
-      dummy.position.set(rx, baseDepth + h + scale * 0.3, rz);
-      dummy.scale.set(scale, scale * (0.5 + Math.random() * 0.8), scale);
-      dummy.rotation.set(Math.random(), Math.random(), Math.random());
+      const idx = i * 9;
+      dummy.position.set(payload.rockTransforms[idx], payload.rockTransforms[idx + 1], payload.rockTransforms[idx + 2]);
+      dummy.scale.set(payload.rockTransforms[idx + 3], payload.rockTransforms[idx + 4], payload.rockTransforms[idx + 5]);
+      dummy.rotation.set(payload.rockTransforms[idx + 6], payload.rockTransforms[idx + 7], payload.rockTransforms[idx + 8]);
       dummy.updateMatrix();
       instancedRocks.setMatrixAt(i, dummy.matrix);
     }
@@ -173,27 +125,79 @@ export class Terrain {
     instancedRocks.instanceMatrix.needsUpdate = true;
     parent.add(instancedRocks);
 
-    // Create physics sphere colliders for each rock
+    // Create physics sphere colliders for each rock from worker payload
     if (this._physicsWorld) {
       const handles = parent.userData.physicsColliderHandles || [];
-      const mat4 = new THREE.Matrix4();
-      const pos = new THREE.Vector3();
-      const scl = new THREE.Vector3();
-      const quat = new THREE.Quaternion();
       for (let i = 0; i < count; i++) {
-        instancedRocks.getMatrixAt(i, mat4);
-        mat4.decompose(pos, quat, scl);
-        // World-space position: rock local pos + chunk offset
-        const wx = pos.x + offsetX;
-        const wy = pos.y;
-        const wz = pos.z + offsetZ;
-        // Use average scale as sphere radius
-        const radius = (scl.x + scl.y + scl.z) / 3;
+        const idx = i * 4;
+        const wx = payload.rockColliders[idx];
+        const wy = payload.rockColliders[idx + 1];
+        const wz = payload.rockColliders[idx + 2];
+        const radius = payload.rockColliders[idx + 3];
         const handle = this._physicsWorld.createSphereCollider(wx, wy, wz, radius);
         handles.push(handle);
       }
       parent.userData.physicsColliderHandles = handles;
     }
+  }
+
+  _applyReadyPayloads(maxCount, cancelToken) {
+    let applied = 0;
+    while (this._readyPayloads.length > 0 && applied < maxCount) {
+      if (cancelToken?.cancelled) break;
+      const next = this._readyPayloads.shift();
+      if (!next) break;
+
+      const { key, cx, cz, payload } = next;
+      if (!this._neededChunkKeys.has(key) || this.chunks.has(key)) {
+        continue;
+      }
+
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(payload.positions, 3));
+      geo.setAttribute('color', new THREE.BufferAttribute(payload.colors, 3));
+      geo.setIndex(new THREE.BufferAttribute(payload.indices, 1));
+      geo.computeVertexNormals();
+
+      const mat = new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        roughness: 0.9,
+        metalness: 0.1,
+        flatShading: true,
+      });
+
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(cx * this.chunkSize, 0, cz * this.chunkSize);
+      mesh.receiveShadow = true;
+
+      this._addRocksFromPayload(mesh, payload);
+      if (this._physicsWorld) {
+        this._createChunkCollider(mesh, payload.colliderVertices, payload.indices);
+      }
+
+      this.scene.add(mesh);
+      this.chunks.set(key, mesh);
+      applied++;
+    }
+    return applied;
+  }
+
+  _requestPendingChunks(maxCount, cancelToken) {
+    let requested = 0;
+    while (this._pendingChunks.length > 0 && requested < maxCount) {
+      if (cancelToken?.cancelled) break;
+      if (this._inFlightByKey.size >= this._maxInFlight) break;
+
+      const { key, x, z } = this._pendingChunks.shift();
+      if (this.chunks.has(key) || this._inFlightByKey.has(key) || !this._neededChunkKeys.has(key)) {
+        continue;
+      }
+
+      if (this._requestChunkPayload(key, x, z)) {
+        requested++;
+      }
+    }
+    return requested;
   }
 
   _rebuildPendingAround(cx, cz) {
@@ -203,6 +207,15 @@ export class Terrain {
         needed.add(this._getChunkKey(cx + dx, cz + dz));
       }
     }
+    this._neededChunkKeys = needed;
+
+    // Cancel worker requests and drop ready payloads for chunks no longer needed
+    for (const [requestId, req] of this._inFlightById) {
+      if (!needed.has(req.key)) {
+        this._cancelInFlightRequest(requestId);
+      }
+    }
+    this._readyPayloads = this._readyPayloads.filter(entry => needed.has(entry.key));
 
     // Remove distant chunks
     for (const [key, mesh] of this.chunks) {
@@ -240,22 +253,29 @@ export class Terrain {
 
   preloadDrain(maxCount, cancelToken) {
     if (maxCount <= 0) return 0;
-    let built = 0;
-    while (this._pendingChunks.length > 0 && built < maxCount) {
+    let progress = 0;
+    while (progress < maxCount) {
       if (cancelToken?.cancelled) break;
-      const { key, x, z } = this._pendingChunks.shift();
-      if (!this.chunks.has(key)) {
-        const chunk = this._createChunk(x, z);
-        this.scene.add(chunk);
-        this.chunks.set(key, chunk);
-        built++;
+
+      const applied = this._applyReadyPayloads(1, cancelToken);
+      if (applied > 0) {
+        progress += applied;
+        continue;
       }
+
+      const requested = this._requestPendingChunks(1, cancelToken);
+      if (requested > 0) {
+        progress += requested;
+        continue;
+      }
+
+      break;
     }
-    return built;
+    return progress;
   }
 
   getPendingCount() {
-    return this._pendingChunks.length;
+    return this._pendingChunks.length + this._inFlightById.size + this._readyPayloads.length;
   }
 
   getChunkCount() {
@@ -266,15 +286,9 @@ export class Terrain {
     const cx = Math.round(playerPos.x / this.chunkSize);
     const cz = Math.round(playerPos.z / this.chunkSize);
 
-    // Build at most 1 pending chunk per frame to avoid frame spikes
-    if (this._pendingChunks.length > 0) {
-      const { key, x, z } = this._pendingChunks.shift();
-      if (!this.chunks.has(key)) {
-        const chunk = this._createChunk(x, z);
-        this.scene.add(chunk);
-        this.chunks.set(key, chunk);
-      }
-    }
+    // Build/apply at most 1 chunk payload per frame and request at most 1 new chunk
+    this._applyReadyPayloads(1);
+    this._requestPendingChunks(1);
 
     if (cx === this.lastChunkX && cz === this.lastChunkZ) return;
     this.lastChunkX = cx;
