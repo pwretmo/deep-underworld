@@ -121,15 +121,21 @@ float scaleDetail = sin(position.y * 23.0 + position.x * 17.0) * 0.007;
 transformed += normal * scaleDetail;`
         );
 
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <emissivemap_fragment>',
-        `#include <emissivemap_fragment>
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+uniform float uBodyFlex;`
+        )
+        .replace(
+          '#include <emissivemap_fragment>',
+          `#include <emissivemap_fragment>
 // Fresnel rim-light for silhouette visibility in dark water
 float rim = pow(1.0 - abs(dot(normalize(vViewPosition), normal)), 2.5);
 totalEmissiveRadiance += vec3(0.07, 0.03, 0.12) * rim * 0.6;
 // Lateral line threat glow
 totalEmissiveRadiance += vec3(0.35, 0.0, 0.25) * uBodyFlex * 0.25 * rim;`
-      );
+        );
 
       mat.userData.shader = shader;
     };
