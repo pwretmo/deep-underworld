@@ -233,7 +233,7 @@ export class Game {
   }
 
   start() {
-    if (this.gameOver || this.running || this.pendingStart || this._startTransition.startRequested) return;
+    if (this.gameOver || this.running || this.pendingStart || this.startPreparing || this._startTransition.startRequested) return;
     this.autoplay = false;
     this.player.clearAutoplayInput();
     this._startTransition.startRequested = true;
