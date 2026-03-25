@@ -255,6 +255,11 @@ export class PreloadCoordinator {
 
     this.renderer.compile(this.underwaterEffect.scene, this.underwaterEffect.camera);
     this.underwaterEffect.render(0);
+    this.underwaterEffect.warmPerformanceFallbacks({
+      depth: 0,
+      flashlightOn: false,
+      exposure: this.renderer.toneMappingExposure,
+    });
 
     // Warm flashlight materials so first toggle doesn't cause a shader-compile hitch
     this._warmFlashlightOnce();
