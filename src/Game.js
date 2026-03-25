@@ -126,11 +126,7 @@ export class Game {
     this.maxDepth = 0;
     this.depth = 0;
     this.autoplay = false;
-    this._autoplayDrive = {
-      minForward: 0.12,
-      maxForward: 0.3,
-      descend: -1,
-    };
+    this._autoplayState = this._createAutoplayState();
     this.menuOverlay = document.getElementById('menu');
     this.pauseOverlay = document.getElementById('paused');
     this.gameOverOverlay = document.getElementById('game-over');
@@ -269,7 +265,7 @@ export class Game {
     this.preload.cancel('autoplay-start');
     this.autoplay = true;
     this.player.locked = true; // simulate lock without real pointer lock
-    this._updateAutoplayDrive(Math.max(0, -this.player.position.y));
+    this._updateAutoplayDrive(Math.max(0, -this.player.position.y), 0);
     this.audio.start();
     void this._primeAndEnterGameplay('Autoplay mode active');
   }
@@ -289,6 +285,7 @@ export class Game {
     this._descentActive = false;
     this.descentOverlay.classList.remove('visible', 'fade-out');
     if (this.autoplay) {
+      this._autoplayState = this._createAutoplayState();
       this.startAutoplay();
     } else {
       this.start();
@@ -429,7 +426,7 @@ export class Game {
     const depth = Math.max(0, -this.player.position.y);
     this.depth = depth;
     this.player.depth = depth;
-    this._updateAutoplayDrive(depth);
+    this._updateAutoplayDrive(depth, dt);
 
     // Step physics before player update so collisions are current
     if (this.physicsWorld) {
@@ -677,7 +674,69 @@ export class Game {
     this.underwaterEffect.applyDepthScaleCap(depth);
   }
 
-  _updateAutoplayDrive(depth) {
+  _createAutoplayState() {
+    return {
+      // State machine — current behavior mode
+      mode: 'descend', // 'descend' | 'recover' | 'sonar' | 'showcase'
+
+      // Descent drive parameters
+      minForward: 0.12,
+      maxForward: 0.3,
+
+      // Heading drift: periodic gentle yaw so descent isn't perfectly straight
+      headingTimer: 0,
+      headingInterval: 7,      // seconds between heading drift changes
+      headingDrift: 0,         // current right input for drift (-1..1)
+      headingDriftDuration: 0, // how long to hold current drift
+      headingDriftElapsed: 0,
+
+      // Progress watchdog (issue #102)
+      watchdog: {
+        checkInterval: 2.5,
+        checkElapsed: 0,
+        lastDepth: 0,
+        lastX: 0,
+        lastZ: 0,
+        stallTime: 0,
+        stallThreshold: 4,      // seconds stalled before recovery
+        depthGainMin: 0.15,     // metres gained to count as progress
+        posGainMin: 0.25,       // world-unit change to count as progress
+      },
+
+      // Recovery state
+      recover: {
+        active: false,
+        timer: 0,
+        duration: 3.5,         // seconds of recovery steering
+        rightInput: 1,         // direction to steer out
+        verticalDampen: 0.25,  // reduce descent during recovery
+      },
+
+      // Sonar showcase
+      sonar: {
+        timer: 0,
+        interval: 22,          // seconds between autoplay sonar pings
+        minDepth: 40,          // don't ping in the very shallow zone
+      },
+
+      // Flashlight showcase
+      flashlight: {
+        timer: 0,
+        interval: 35,          // seconds between autoplay flashlight toggles
+        minDepth: 120,         // only below twilight zone
+      },
+
+      // Creature framing (brief turn toward nearby creature)
+      showcase: {
+        active: false,
+        timer: 0,
+        duration: 2.5,
+        rightInput: 0,
+      },
+    };
+  }
+
+  _updateAutoplayDrive(depth, dt) {
     if (!this.autoplay) {
       const autoplayInput = this.player.autoplayInput;
       if (autoplayInput.forward !== 0 || autoplayInput.right !== 0 || autoplayInput.vertical !== 0) {
@@ -686,16 +745,117 @@ export class Game {
       return;
     }
 
+    const s = this._autoplayState;
+    const wd = s.watchdog;
+    const rec = s.recover;
+
+    // ─── Progress watchdog (issue #102) ───────────────────────────────────
+    wd.checkElapsed += dt;
+    if (wd.checkElapsed >= wd.checkInterval) {
+      wd.checkElapsed = 0;
+      const px = this.player.position.x;
+      const pz = this.player.position.z;
+      const depthGain = depth - wd.lastDepth;
+      const posChange = Math.sqrt((px - wd.lastX) ** 2 + (pz - wd.lastZ) ** 2);
+      const makingProgress = depthGain >= wd.depthGainMin || posChange >= wd.posGainMin;
+      if (makingProgress) {
+        wd.stallTime = 0;
+      } else {
+        wd.stallTime += wd.checkInterval;
+      }
+      wd.lastDepth = depth;
+      wd.lastX = px;
+      wd.lastZ = pz;
+
+      // Trigger recovery when stalled long enough and not already recovering
+      if (wd.stallTime >= wd.stallThreshold && !rec.active) {
+        rec.active = true;
+        rec.timer = 0;
+        // Randomise recovery direction each stall to reduce chance of re-hitting the same wall
+        rec.rightInput = Math.random() < 0.5 ? 1 : -1;
+        wd.stallTime = 0;
+        console.log('[autoplay] Stall detected — entering recovery', { depth });
+      }
+    }
+
+    // ─── Recovery steering (issue #102) ───────────────────────────────────
+    if (rec.active) {
+      rec.timer += dt;
+      if (rec.timer >= rec.duration) {
+        rec.active = false;
+        console.log('[autoplay] Recovery complete — resuming descent');
+      }
+    }
+
+    // ─── Periodic sonar pings (issue #103) ────────────────────────────────
+    if (depth >= s.sonar.minDepth) {
+      s.sonar.timer += dt;
+      if (s.sonar.timer >= s.sonar.interval) {
+        s.sonar.timer = 0;
+        this._sonarPing();
+      }
+    }
+
+    // ─── Periodic flashlight toggles (issue #103) ─────────────────────────
+    if (depth >= s.flashlight.minDepth) {
+      s.flashlight.timer += dt;
+      if (s.flashlight.timer >= s.flashlight.interval) {
+        s.flashlight.timer = 0;
+        this._toggleFlashlight();
+      }
+    }
+
+    // ─── Creature showcase framing (issue #103) ───────────────────────────
+    if (!s.showcase.active && !rec.active) {
+      const nearDist = this.creatures.getNearestCreatureDistance(this.player.position);
+      if (nearDist < 18 && nearDist > 2) {
+        s.showcase.active = true;
+        s.showcase.timer = 0;
+        s.showcase.rightInput = Math.random() < 0.5 ? 0.4 : -0.4;
+      }
+    }
+    if (s.showcase.active) {
+      s.showcase.timer += dt;
+      if (s.showcase.timer >= s.showcase.duration) {
+        s.showcase.active = false;
+      }
+    }
+
+    // ─── Gentle heading drift (issue #103) ────────────────────────────────
+    s.headingTimer += dt;
+    if (s.headingTimer >= s.headingInterval) {
+      s.headingTimer = 0;
+      // Pick a new gentle drift direction for natural-feeling movement
+      const angle = Math.random() * Math.PI * 2;
+      s.headingDrift = Math.cos(angle) * 0.35;
+      s.headingDriftDuration = 1.5 + Math.random() * 2.5;
+      s.headingDriftElapsed = 0;
+    }
+    s.headingDriftElapsed += dt;
+    const driftActive = s.headingDriftElapsed < s.headingDriftDuration;
+    const driftInput = driftActive ? s.headingDrift : 0;
+
+    // ─── Compose final input ───────────────────────────────────────────────
     const forward = THREE.MathUtils.lerp(
-      this._autoplayDrive.minForward,
-      this._autoplayDrive.maxForward,
+      s.minForward,
+      s.maxForward,
       THREE.MathUtils.smoothstep(depth, 8, 80)
     );
 
-    this.player.setAutoplayInput({
-      forward,
-      vertical: this._autoplayDrive.descend,
-    });
+    let rightInput = driftInput;
+    let verticalInput = -1; // default: descend
+
+    if (rec.active) {
+      // Recovery: steer away from obstacle, reduce descent
+      const recoverStrength = THREE.MathUtils.smoothstep(rec.timer, 0, rec.duration * 0.3);
+      rightInput = rec.rightInput * THREE.MathUtils.lerp(0.8, 0.4, recoverStrength);
+      verticalInput = -rec.verticalDampen;
+    } else if (s.showcase.active) {
+      // Creature framing: blend in a gentle turn
+      rightInput = THREE.MathUtils.lerp(driftInput, s.showcase.rightInput, 0.6);
+    }
+
+    this.player.setAutoplayInput({ forward, right: rightInput, vertical: verticalInput });
   }
 
   _updatePointLightBudget(dt, depth, playerPos) {
