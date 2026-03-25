@@ -5,7 +5,15 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { qualityManager } from '../QualityManager.js';
 
-const RENDER_PIPELINE_TUNING = Object.freeze({
+function deepFreeze(obj) {
+  Object.freeze(obj);
+  Object.values(obj).forEach(v => {
+    if (v && typeof v === 'object' && !Object.isFrozen(v)) deepFreeze(v);
+  });
+  return obj;
+}
+
+const RENDER_PIPELINE_TUNING = deepFreeze({
   depthThresholds: {
     mid: 130,
     deep: 340,

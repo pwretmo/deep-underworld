@@ -69,11 +69,8 @@ export class Game {
     }
 
     this.renderTuning = {
-      depthThresholds: {
-        mid: 120,
-        deep: 340,
-        abyss: 700,
-      },
+      // Depth thresholds sourced from UnderwaterEffect to keep both in sync.
+      depthThresholds: this.underwaterEffect.tuning.depthThresholds,
       exposure: {
         surface: 0.76,
         mid: 0.68,
