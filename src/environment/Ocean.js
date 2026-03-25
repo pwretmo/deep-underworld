@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { qualityManager } from '../QualityManager.js';
 
 export class Ocean {
@@ -187,45 +186,18 @@ export class Ocean {
   }
 
   _createGodRays() {
-    // Photorealistic god rays: cross-hatch plane pairs (X-shape per ray) with a
-    // procedural noise shader that produces organic, shifting light shafts.
-    // Each ray is 2 perpendicular PlaneGeometry quads so it looks volumetric
-    // from any viewing angle.
-    this.godRayData = [];
-    const geometries = [];
-    const rayCount = 6;
-    const planeW = 12;
-    const planeH = 80;
+    // God rays: individual billboard planes that always face the camera
+    // on Y-axis. Each ray is a single tall PlaneGeometry with a soft
+    // procedural noise shader — no geometry edges visible.
+    this.godRayGroup = new THREE.Group();
+    this.godRays = [];
+    const rayCount = 8;
 
-    for (let i = 0; i < rayCount; i++) {
-      const phase = Math.random() * Math.PI * 2;
-      const offsetX = Math.sin(phase) * 45 + (Math.random() - 0.5) * 15;
-      const offsetZ = Math.cos(phase) * 45 + (Math.random() - 0.5) * 15;
-      const tiltZ = (Math.random() - 0.5) * 0.2;
-      const width = planeW * (0.7 + Math.random() * 0.6);
-
-      // Two perpendicular planes forming an X
-      for (let j = 0; j < 2; j++) {
-        const geo = new THREE.PlaneGeometry(width, planeH, 1, 1);
-        const m = new THREE.Matrix4();
-        m.makeRotationY(j * Math.PI * 0.5);
-        const rot = new THREE.Matrix4().makeRotationZ(tiltZ);
-        m.premultiply(rot);
-        m.setPosition(offsetX, -planeH * 0.35, offsetZ);
-        geo.applyMatrix4(m);
-        geometries.push(geo);
-      }
-      this.godRayData.push({ phase, offsetX, offsetZ });
-    }
-
-    const mergedGeo = mergeGeometries(geometries, false);
-    for (const geo of geometries) geo.dispose();
-
-    this.godRayMaterial = new THREE.ShaderMaterial({
+    const sharedMaterial = new THREE.ShaderMaterial({
       uniforms: {
         time: { value: 0 },
         opacity: { value: 1.0 },
-        rayColor: { value: new THREE.Color(0.35, 0.55, 0.7) },
+        seed: { value: 0.0 },
       },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
@@ -239,11 +211,10 @@ export class Ocean {
       fragmentShader: /* glsl */ `
         uniform float time;
         uniform float opacity;
-        uniform vec3 rayColor;
+        uniform float seed;
         varying vec2 vUv;
         varying vec3 vWorldPos;
 
-        // Smooth noise helpers
         float hash(vec2 p) {
           return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
         }
@@ -260,47 +231,51 @@ export class Ocean {
         float fbm(vec2 p) {
           float v = 0.0;
           float a = 0.5;
-          vec2 shift = vec2(100.0);
-          for (int i = 0; i < 4; i++) {
+          for (int i = 0; i < 5; i++) {
             v += a * noise(p);
-            p = p * 2.0 + shift;
+            p = p * 2.0 + vec2(100.0);
             a *= 0.5;
           }
           return v;
         }
 
         void main() {
-          // UV: x = across shaft width, y = 0 at bottom, 1 at top
           float u = vUv.x;
           float v = vUv.y;
 
-          // --- Axial fade: bright at top (surface), fading to zero at bottom ---
-          // Power curve for natural light extinction
-          float axial = smoothstep(0.0, 0.15, v) * pow(v, 0.6);
+          // Vertical extinction: bright at top (surface), exponential decay downward
+          float axial = pow(v, 0.35) * smoothstep(0.0, 0.05, v);
 
-          // --- Radial fade: bright centre, soft Gaussian edges ---
-          float centreU = abs(u - 0.5) * 2.0; // 0 at centre, 1 at edge
-          float radial = exp(-centreU * centreU * 4.0);
+          // Horizontal: very soft Gaussian — wide core, extremely soft edges
+          float cx = (u - 0.5) * 2.0; // -1..1
+          float radial = exp(-cx * cx * 8.0);
 
-          // --- Procedural noise for organic, shifting edges ---
-          // Slowly drifting world-space noise so shafts shimmer
-          vec2 np = vec2(vWorldPos.x * 0.04, vWorldPos.y * 0.025 + time * 0.08);
-          float n = fbm(np) * 2.0 - 1.0; // -1..1
+          // Edge noise: wispy, organic boundary modulation
+          float t = time * 0.06;
+          vec2 np = vec2(
+            vWorldPos.y * 0.03 + seed * 13.7 + t,
+            vWorldPos.x * 0.02 + seed * 7.3
+          );
+          float edgeNoise = fbm(np) * 2.0 - 1.0;
+          // Noise pushes the edge threshold inward/outward
+          radial = smoothstep(0.05, 0.55, radial + edgeNoise * 0.3);
 
-          // Noise widens/narrows the shaft edges organically
-          radial *= smoothstep(0.0, 0.3, radial + n * 0.35);
+          // Interior shimmer: slow caustic-like brightness variation
+          vec2 np2 = vec2(
+            vWorldPos.x * 0.05 + t * 0.8 + seed * 3.1,
+            vWorldPos.y * 0.04 - t * 0.5
+          );
+          float shimmer = fbm(np2);
+          float intensity = 0.55 + shimmer * 0.55;
 
-          // Second noise layer: slow caustic-like ripple within the shaft
-          vec2 np2 = vec2(vWorldPos.x * 0.08 + time * 0.05, vWorldPos.y * 0.06 - time * 0.03);
-          float caustic = fbm(np2);
-          float intensity = 0.6 + caustic * 0.5;
-
-          // --- Combine ---
           float alpha = axial * radial * intensity * opacity;
-          // Slight warmth at core, cooler at edges
-          vec3 col = mix(rayColor, rayColor * vec3(1.15, 1.1, 1.0), radial);
 
-          gl_FragColor = vec4(col, alpha * 0.18);
+          // Subtle colour gradient: warmer core, cooler edges; bluer near bottom
+          vec3 warm = vec3(0.5, 0.7, 0.85);
+          vec3 cool = vec3(0.25, 0.45, 0.65);
+          vec3 col = mix(cool, warm, radial * axial);
+
+          gl_FragColor = vec4(col, alpha * 0.13);
         }
       `,
       transparent: true,
@@ -308,8 +283,32 @@ export class Ocean {
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
-    this.godRayMesh = new THREE.Mesh(mergedGeo, this.godRayMaterial);
-    this.scene.add(this.godRayMesh);
+
+    for (let i = 0; i < rayCount; i++) {
+      const width = 5 + Math.random() * 10;
+      const height = 50 + Math.random() * 45;
+      const geo = new THREE.PlaneGeometry(width, height, 1, 1);
+      const mat = sharedMaterial.clone();
+      mat.uniforms.seed.value = i + Math.random();
+      const mesh = new THREE.Mesh(geo, mat);
+
+      // Spread rays around the player in a ring
+      const angle = (i / rayCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.6;
+      const dist = 15 + Math.random() * 40;
+      mesh.position.set(
+        Math.sin(angle) * dist,
+        -height * 0.3,
+        Math.cos(angle) * dist
+      );
+
+      // Slight random tilt for variety
+      mesh.rotation.z = (Math.random() - 0.5) * 0.15;
+
+      this.godRayGroup.add(mesh);
+      this.godRays.push({ mesh, mat, height });
+    }
+
+    this.scene.add(this.godRayGroup);
   }
 
   update(dt, depth, playerPos) {
@@ -384,15 +383,23 @@ export class Ocean {
       c.light.position.z = playerPos.z + Math.cos(c.offset + this.time * 0.15) * 20;
     }
 
-    // God rays visibility — single merged mesh follows player
+    // God rays: billboard each plane toward camera, update uniforms
     if (depth < 60) {
       const depthFade = 1.0 - depth / 60;
-      this.godRayMaterial.uniforms.opacity.value = depthFade;
-      this.godRayMaterial.uniforms.time.value = this.time;
-      this.godRayMesh.visible = true;
-      this.godRayMesh.position.set(playerPos.x, 0, playerPos.z);
+      this.godRayGroup.visible = true;
+      this.godRayGroup.position.set(playerPos.x, 0, playerPos.z);
+      // Camera is at player position; in group-local space that's (0, playerY, 0)
+      const localCamY = playerPos.y;
+      for (const ray of this.godRays) {
+        ray.mat.uniforms.opacity.value = depthFade;
+        ray.mat.uniforms.time.value = this.time;
+        // Y-axis billboard: face the camera horizontally
+        const dx = -ray.mesh.position.x; // cam local X is 0
+        const dz = -ray.mesh.position.z; // cam local Z is 0
+        ray.mesh.rotation.y = Math.atan2(dx, dz);
+      }
     } else {
-      this.godRayMesh.visible = false;
+      this.godRayGroup.visible = false;
     }
 
     // Sun light follows player but fades with depth; disable shadows when too deep
