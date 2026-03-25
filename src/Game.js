@@ -503,6 +503,16 @@ export class Game {
     this._envColorD = new THREE.Color();
     this._fog = new THREE.Fog(0x006994, 5, 300);
     this.scene.fog = this._fog;
+
+    // Generate a minimal IBL environment so metallic PBR surfaces have something
+    // to reflect instead of rendering solid black in the deep ocean.
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    const envScene = new THREE.Scene();
+    envScene.background = new THREE.Color(0x050a14);
+    envScene.add(new THREE.HemisphereLight(0x1a2540, 0x020408, 1.0));
+    this.scene.environment = pmrem.fromScene(envScene).texture;
+    this.scene.environmentIntensity = 0.5;
+    pmrem.dispose();
   }
 
   _detectGraphicsDiagnostics() {

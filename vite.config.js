@@ -3,7 +3,7 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   base: './',
   server: {
-    open: true,
+    open: false,
   },
   build: {
     outDir: 'dist',
