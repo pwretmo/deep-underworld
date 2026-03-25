@@ -90,6 +90,7 @@ export class Anglerfish {
     this._lookVec = new THREE.Vector3(0, 0, 1);
     this._localEyeTarget = new THREE.Vector3();
     this._patrolTarget = new THREE.Vector3();
+    this._worldQuat = new THREE.Quaternion();
 
     this._frameCounter = 0;
     this._lodTier = 'near';
@@ -735,7 +736,8 @@ transformed.y += sin(position.x * 6.0 + uFinTime * 5.3) * 0.02 * uFinWave;`
       }
     }
 
-    this._localEyeTarget.copy(this._toPlayer);
+    this.group.getWorldQuaternion(this._worldQuat);
+    this._localEyeTarget.copy(this._toPlayer).applyQuaternion(this._worldQuat.invert());
     for (let i = 0; i < tier.irises.length; i++) {
       const irisData = tier.irises[i];
       const iris = irisData.iris;
