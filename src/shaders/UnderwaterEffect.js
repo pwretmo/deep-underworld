@@ -51,6 +51,7 @@ const UnderwaterShader = {
     time: { value: 0 },
     depth: { value: 0 },
     exposure: { value: 0.76 },
+    flashlightActive: { value: 0 },
     resolution: { value: new THREE.Vector2() },
     depthThresholds: { value: new THREE.Vector3(130, 340, 720) },
     grading: { value: new THREE.Vector4(1.2, 0.88, 0.018, 0.24) },
@@ -69,6 +70,7 @@ const UnderwaterShader = {
     uniform float time;
     uniform float depth;
     uniform float exposure;
+    uniform float flashlightActive;
     uniform vec2 resolution;
     uniform vec3 depthThresholds;
     uniform vec4 grading;
@@ -118,9 +120,20 @@ const UnderwaterShader = {
         : mix(deepTint, abyssTint, (depthT - 0.5) * 2.0);
 
       // Exempt flashlight-illuminated pixels from the depth tint.
-      // Bright = short-path flashlight light, dark = long-path ambient.
+      // Bright emissive pixels should not read as flashlight spill on their own,
+      // so require both the flashlight to be active and nearby pixels to share
+      // similar brightness before relaxing the deep-water grading.
       float preTintLuma = max(max(color.r, color.g), color.b);
-      float litAmount = smoothstep(0.02, 0.15, preTintLuma);
+      vec2 lightProbe = max(vec2(1.0) / resolution, vec2(0.0005));
+      float nearbyLuma = 0.25 * (
+        max(max(texture2D(tDiffuse, uv + vec2(lightProbe.x, 0.0)).r, texture2D(tDiffuse, uv + vec2(lightProbe.x, 0.0)).g), texture2D(tDiffuse, uv + vec2(lightProbe.x, 0.0)).b) +
+        max(max(texture2D(tDiffuse, uv - vec2(lightProbe.x, 0.0)).r, texture2D(tDiffuse, uv - vec2(lightProbe.x, 0.0)).g), texture2D(tDiffuse, uv - vec2(lightProbe.x, 0.0)).b) +
+        max(max(texture2D(tDiffuse, uv + vec2(0.0, lightProbe.y)).r, texture2D(tDiffuse, uv + vec2(0.0, lightProbe.y)).g), texture2D(tDiffuse, uv + vec2(0.0, lightProbe.y)).b) +
+        max(max(texture2D(tDiffuse, uv - vec2(0.0, lightProbe.y)).r, texture2D(tDiffuse, uv - vec2(0.0, lightProbe.y)).g), texture2D(tDiffuse, uv - vec2(0.0, lightProbe.y)).b)
+      );
+      float localSpread = 1.0 - smoothstep(0.08, 0.38, abs(preTintLuma - nearbyLuma));
+      float nearbyLight = smoothstep(0.03, 0.16, nearbyLuma);
+      float litAmount = flashlightActive * smoothstep(0.05, 0.18, preTintLuma) * nearbyLight * localSpread;
       color.rgb *= mix(tint, vec3(1.0), litAmount);
 
       // Keep the deep-ocean depth darkening, but avoid crushing flashlight-lit
@@ -418,6 +431,7 @@ export class UnderwaterEffect {
     this.underwaterPass.uniforms.time.value = this.time;
     this.underwaterPass.uniforms.depth.value = depth;
     this.underwaterPass.uniforms.exposure.value = exposure;
+    this.underwaterPass.uniforms.flashlightActive.value = flashlightOn ? 1 : 0;
 
     const depthNorm = THREE.MathUtils.smoothstep(
       depth,
