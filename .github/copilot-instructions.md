@@ -86,7 +86,7 @@ These rules are **mandatory** for every agent role and the orchestrator. Violati
 4. **Reuse, don't duplicate.** If a game page is already open, reload or re-navigate it instead of opening a second one. Only open a fresh page if no existing page can be reused.
 5. **Probe pages are temporary.** If you open `about:blank` or any temporary page for a liveness check, close it immediately after the check.
 6. **Prove Chrome provenance before reuse.** A page shown in session context or a `Browser Pages` attachment is not automatically trustworthy. Reuse an existing game page only if the current run has already validated a Chrome-backed opener/read path and the page was opened by, or rediscovered from, that same Chrome tool family. Otherwise, ignore it and open a fresh Chrome page.
-7. **Use the declared Chrome MCP server for UX testing.** This repo declares `io.github.ChromeDevTools/chrome-devtools-mcp` in `.vscode/mcp.json`. For UX or gameplay testing, use that server family (`mcp_io_github_chr_*`) and do not fall back to `open_browser_page`.
+7. **Use the declared Chrome MCP server for UX testing.** This repo declares `io.github.ChromeDevTools/chrome-devtools-mcp` in `.vscode/mcp.json`. For UX or gameplay testing, use host-exposed tools backed by that server that map to canonical `chrome-devtools-mcp` operations such as `new_page`, `take_snapshot`, `list_pages`, `navigate_page`, `press_key`, `evaluate_script`, `list_console_messages`, `take_screenshot`, `performance_start_trace`, and `take_memory_snapshot`. Do not fall back to `open_browser_page`.
 
 #### Applying Browser Hygiene by Role
 

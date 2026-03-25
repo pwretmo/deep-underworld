@@ -21,7 +21,7 @@ Browser tooling may differ by session. Before any browser interaction, verify th
 
 **Never use the VS Code Simple Browser (the built-in VS Code panel browser) for UX testing.** It runs inside Electron's embedded webview without GPU hardware acceleration, causing Three.js to fall back to software rendering. This produces misleading visual and performance results — frame rates, lighting, shader output, and WebGL behavior will not match what a real user sees.
 
-This repository declares the MCP server `io.github.ChromeDevTools/chrome-devtools-mcp` in `.vscode/mcp.json`. All automated UX testing in this repo **must** use that server family (`mcp_io_github_chr_*`). `open_browser_page`, `read_page`, and other generic browser-surface tools are not valid substitutes for gameplay evidence in this repository.
+This repository declares the MCP server `io.github.ChromeDevTools/chrome-devtools-mcp` in `.vscode/mcp.json`. All automated UX testing in this repo **must** use tools backed by that server. The exact tool IDs exposed to the agent are host-specific and may be prefixed or wrapped differently, but they must map to the canonical `chrome-devtools-mcp` operations such as `new_page`, `take_snapshot`, `list_pages`, `navigate_page`, `press_key`, `evaluate_script`, `list_console_messages`, `take_screenshot`, `performance_start_trace`, and `take_memory_snapshot`. `open_browser_page`, `read_page`, and other generic browser-surface tools are not valid substitutes for gameplay evidence in this repository.
 
 If Chrome DevTools MCP page-open/page-read tools are unavailable in the current session, **STOP immediately** with the abort message below. Do not fall back to `open_browser_page`.
 
@@ -34,11 +34,11 @@ If you cannot prove a page is Chrome-backed, do not use it for gameplay evidence
 
 Acceptable open-page tools:
 
-- `mcp_io_github_chr_new_page`
+- a host-exposed Chrome DevTools MCP tool that maps to canonical `new_page`
 
 Acceptable page-state tools:
 
-- `mcp_io_github_chr_take_snapshot`
+- a host-exposed Chrome DevTools MCP tool that maps to canonical `take_snapshot`
 
 If none of the valid open/read combinations are available, **STOP immediately** — output the following and call `task_complete`:
 
@@ -50,7 +50,7 @@ Do NOT fall back to code-based analysis, file searching, or any substitute for l
 
 Once ready, do a liveness check by opening `about:blank` and reading a snapshot:
 
-- `mcp_io_github_chr_new_page` + `mcp_io_github_chr_take_snapshot`
+- canonical `new_page` + canonical `take_snapshot` (or the equivalent host-exposed tool IDs for those operations)
 
 After a successful liveness check, close the temporary `about:blank` page immediately. Do not keep probe tabs open for the rest of the session.
 
@@ -76,7 +76,7 @@ Wait ~3 seconds, then open the game.
 **These rules are mandatory — not guidelines. Violations drain system resources, degrade game performance, and produce unreliable test results.**
 
 - **One gameplay page, period.** Keep exactly one gameplay page open for `http://localhost:5173?autoplay` during a UX run. Never have two game pages open at the same time — not in the same browser, not across browsers, not in VS Code Simple Browser alongside an external browser.
-- Before opening a new game page, inspect existing pages/tabs (use `mcp_io_github_chr_list_pages` or equivalent) and reuse an existing autoplay page only if its Chrome provenance is known from the current run.
+- Before opening a new game page, inspect existing pages/tabs (use canonical `list_pages` or an equivalent host-exposed wrapper) and reuse an existing autoplay page only if its Chrome provenance is known from the current run.
 - Treat the first gameplay page you open as the primary page for the whole run. Reuse that page ID/tab for screenshots, console checks, audits, and re-tests.
 - If a gameplay page was inherited from session state and you did not prove it is Chrome-backed, do not count it as the primary page. Open a fresh Chrome gameplay page and use that instead.
 - **Close auto-opened tabs.** If `npm run dev` auto-opens a browser tab and you are using a different page for automation, close the auto-opened tab immediately.
@@ -86,52 +86,32 @@ Wait ~3 seconds, then open the game.
 
 ## Browser Interaction Patterns
 
-Prefer the `io.github.ChromeDevTools/chrome-devtools-mcp` tool family (`mcp_io_github_chr_*`) for page open/read/control. Do not use `open_browser_page` for this repository's UX testing workflow.
+Prefer tools backed by `io.github.ChromeDevTools/chrome-devtools-mcp` for page open/read/control. Use the host-exposed tools that correspond to canonical `chrome-devtools-mcp` operations. Do not use `open_browser_page` for this repository's UX testing workflow.
 
 ### Opening the game
 
-- Reuse an existing autoplay tab only after proving it belongs to the same Chrome-backed tool family you validated in Phase 0; otherwise call `mcp_io_github_chr_new_page` once with `http://localhost:5173?autoplay`
+- Reuse an existing autoplay tab only after proving it belongs to the same Chrome-backed tool family you validated in Phase 0; otherwise call the host-exposed tool that maps to canonical `new_page` once with `http://localhost:5173?autoplay`
 
 Always use `?autoplay` for automated UX testing.
 
 ### Taking a screenshot
 
-- Preferred: `screenshot_page`
-- Alternate: `mcp_io_github_chr_take_snapshot` (text/a11y snapshot)
+- Preferred: canonical `take_screenshot`
+- Alternate: canonical `take_snapshot` for a text/a11y snapshot
 
 ### Reading console errors
 
-```javascript
-async (page) => {
-  const logs = [];
-  page.on("console", (msg) => logs.push(`[${msg.type()}] ${msg.text()}`));
-  page.on("pageerror", (err) => logs.push(`[ERROR] ${err.message}`));
-
-  // Keep page open and let errors accumulate for ~2 seconds
-  await page.waitForTimeout(2000);
-
-  return logs.join("\n");
-};
-```
+- Use canonical `list_console_messages` to gather page logs after navigation.
+- Use canonical `get_console_message` for full detail on an individual message when needed.
 
 ### Playing the game
 
-- Preferred: `type_in_page` with key presses (WASD, arrows, Escape)
-- Alternate: `mcp_io_github_chr_press_key`
+- Preferred: canonical `press_key` for WASD, arrows, Escape, and other gameplay controls.
 
 ### Clicking the canvas (if not autoplay)
 
-```javascript
-async (page) => {
-  const canvas = (await page.$("#game-canvas")) || (await page.$("canvas"));
-  if (canvas) {
-    await canvas.click();
-    await page.waitForTimeout(500);
-    return "Canvas clicked (pointer lock acquired)";
-  }
-  return "Canvas not found";
-};
-```
+- Use canonical `take_snapshot` to obtain the canvas element uid.
+- Use canonical `click` on that uid, then wait briefly or inspect updated state.
 
 ### Lighthouse performance audit
 
@@ -143,9 +123,9 @@ npx lighthouse http://localhost:5173?autoplay --view
 
 # Open menu
 
-mcp_io_github_chr_press_key key: "Escape"
+Use canonical `press_key` with `Escape`.
 
-```
+````
 
 ### Querying game state via JavaScript
 
@@ -160,25 +140,23 @@ The `Game` instance is exposed on `window.game`. Key properties:
 - `game.running` / `game.gameOver` — game state flags
 - `game.autoplay` — true when in autoplay mode
 
-```
-
-mcp_io_github_chr_evaluate_script
-expression: "(() => {
-const game = window.game;
-if (!game) return { error: 'game not found on window' };
-return {
-playerPos: game.player?.position,
-depth: game.depth,
-fps: game.fps,
-creatureCount: game.creatureManager?.creatures?.length,
-oxygen: game.oxygen,
-battery: game.battery,
-running: game.running,
-gameOver: game.gameOver
-};
-})()"
-
-```
+```text
+evaluate_script
+function: () => {
+  const game = window.game;
+  if (!game) return { error: 'game not found on window' };
+  return {
+    playerPos: game.player?.position,
+    depth: game.depth,
+    fps: game.fps,
+    creatureCount: game.creatureManager?.creatures?.length,
+    oxygen: game.oxygen,
+    battery: game.battery,
+    running: game.running,
+    gameOver: game.gameOver,
+  };
+}
+````
 
 > **Tip**: If `window.game` isn't responding, check that the page has
 > finished loading. In autoplay mode the game starts immediately.
@@ -187,38 +165,25 @@ gameOver: game.gameOver
 
 The game logs state changes with a `[deep-underworld]` prefix. Filter for these to track game events (start, game over, depth zone changes), and filter for errors/warnings to catch runtime issues.
 
-```
-
-mcp_io_github_chr_list_console_messages
-
-```
+Use canonical `list_console_messages`.
 
 ### Performance trace
 
-```
-
-mcp_io_github_chr_performance_start_trace
-
-```
+Use canonical `performance_start_trace`.
 
 Returns Core Web Vitals and performance summary.
 
 ### Memory snapshot
 
-```
-
-mcp_io_github_chr_take_memory_snapshot
-
-```
+Use canonical `take_memory_snapshot`.
 
 ### Lighthouse audit
 
+```text
+lighthouse_audit
+mode: navigation
+device: desktop
 ```
-
-mcp_io_github_chr_lighthouse_audit
-categories: ["accessibility", "best-practices", "performance"]
-
-````
 
 ## What to Look For
 
@@ -269,7 +234,7 @@ git fetch origin main
 git worktree add -b agent/ux-fix-1 F:\repos\deep-underworld-worktrees\ux-fix-1 origin/main
 git worktree add -b agent/ux-fix-2 F:\repos\deep-underworld-worktrees\ux-fix-2 origin/main
 # ... one command per issue, run sequentially (shares .git state)
-````
+```
 
 ### Dispatch workers
 
