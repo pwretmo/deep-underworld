@@ -467,8 +467,7 @@ function _shapeTubeGeometry(geometry, length) {
   // NOTE: do NOT bake the orientation flip into the geometry — the shader reads
   // raw geometry positions to compute eelProgress (clamp(-x/uLength, 0, 1)).
   // geometry.rotateZ(PI) would negate X, collapsing progress to zero on
-  // near/medium LODs and breaking wave/glow animation.  The visual flip is
-  // applied instead as body.rotation.z = Math.PI on the mesh object.
+  // near/medium LODs and breaking wave/glow animation.
 }
 
 function _shapeHeadGeometry(geometry, detailEnabled) {
