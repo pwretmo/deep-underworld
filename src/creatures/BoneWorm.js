@@ -67,6 +67,15 @@ const JAW_OPEN_DISTANCE = 25;
 const JAW_OPEN_SPEED = 3.0;
 const JAW_MAX_ANGLE = 0.4;
 const HEAD_SNAP_DISTANCE = 30;
+const HEAD_SNAP_MAX_YAW = 0.9;
+const HEAD_SNAP_MAX_PITCH = 0.5;
+
+function _shortestAngle(a) {
+  let angle = a;
+  while (angle > Math.PI) angle -= Math.PI * 2;
+  while (angle < -Math.PI) angle += Math.PI * 2;
+  return angle;
+}
 
 // ── Shared canvas-based normal textures (module-level singletons) ───────────
 let _boneNormalTex = null;
@@ -320,7 +329,7 @@ export class BoneWorm {
       farGlow.position.set(1.6, 0, 0);
       tierGroup.add(farGlow);
 
-      return { group: tierGroup, segments: [], jaw: null, fleshMat, glowMat };
+      return { group: tierGroup, segments: [], jaw: null, head: null, fleshMat, glowMat };
     }
 
     // ── Head ──────────────────────────────────────────────────────────────
@@ -493,7 +502,7 @@ export class BoneWorm {
       });
     }
 
-    return { group: tierGroup, segments: segmentRefs, jaw, fleshMat, glowMat };
+    return { group: tierGroup, segments: segmentRefs, jaw, head, fleshMat, glowMat };
   }
 
   // ── LOD Resolution with hysteresis ────────────────────────────────────────
@@ -559,6 +568,7 @@ export class BoneWorm {
     if (this._lodTier !== 'far') {
       this._animateSegments(activeTier, dt, this._lodTier);
       this._animateJaw(activeTier, dt, distToPlayer);
+      this._animateHeadSnap(activeTier, dt, playerPos, distToPlayer);
     }
     this._animateEmissive(activeTier);
 
@@ -659,6 +669,27 @@ export class BoneWorm {
     this._jawAngle = THREE.MathUtils.lerp(this._jawAngle, targetAngle, dt * JAW_OPEN_SPEED);
     tier.jaw.upper.rotation.x = -this._jawAngle;
     tier.jaw.lower.rotation.x = this._jawAngle;
+  }
+
+  _animateHeadSnap(tier, dt, playerPos, distToPlayer) {
+    if (!tier.head) return;
+    const snapWeight = THREE.MathUtils.clamp(1 - distToPlayer / HEAD_SNAP_DISTANCE, 0, 1);
+    const toPlayerX = playerPos.x - this.group.position.x;
+    const toPlayerY = playerPos.y - this.group.position.y;
+    const toPlayerZ = playerPos.z - this.group.position.z;
+    const targetWorldYaw = Math.atan2(toPlayerX, toPlayerZ) + Math.PI / 2;
+    const yawDelta = _shortestAngle(targetWorldYaw - this.group.rotation.y);
+    const targetLocalYaw = THREE.MathUtils.clamp(yawDelta, -HEAD_SNAP_MAX_YAW, HEAD_SNAP_MAX_YAW) * snapWeight;
+
+    const horizontalDist = Math.sqrt(toPlayerX * toPlayerX + toPlayerZ * toPlayerZ);
+    const targetPitch = THREE.MathUtils.clamp(
+      Math.atan2(toPlayerY, Math.max(0.001, horizontalDist)),
+      -HEAD_SNAP_MAX_PITCH,
+      HEAD_SNAP_MAX_PITCH
+    ) * snapWeight;
+
+    tier.head.rotation.y = THREE.MathUtils.lerp(tier.head.rotation.y, targetLocalYaw, dt * 7);
+    tier.head.rotation.z = THREE.MathUtils.lerp(tier.head.rotation.z, -targetPitch, dt * 5);
   }
 
   // ── Emissive pulse animation ──────────────────────────────────────────────
