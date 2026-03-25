@@ -21,6 +21,38 @@ Parameters:
 
 This returns the PR title, description, diff, and list of changed files.
 
+## Copilot Comment Gate (Mandatory)
+
+Before approving any PR, reviewers and orchestrators must treat external Copilot review comments as first-class blocking feedback.
+
+### Required polling
+
+Poll both review summaries and review comments:
+
+```
+Tool: mcp_io_github_git_pull_request_read
+Parameters:
+  owner: "pwretmo"
+  repo: "deep-underworld"
+  pullNumber: <number>
+  method: "get_reviews"
+```
+
+```
+Tool: mcp_io_github_git_pull_request_read
+Parameters:
+  owner: "pwretmo"
+  repo: "deep-underworld"
+  pullNumber: <number>
+  method: "get_review_comments"
+```
+
+### Blocking rule
+
+- Any unresolved or unaddressed Copilot comment is a blocking issue.
+- A PR cannot be approved while any Copilot-raised request remains open or unaddressed.
+- If review API metadata lacks explicit thread state, use conservative behavior: treat recent Copilot comments as unresolved until the corresponding code change is verified.
+
 ## Verifying Issue Completeness
 
 When a PR implements a GitHub issue, verify that **all** requirements from the issue are addressed — not just some.
@@ -164,6 +196,14 @@ GitHub may be configured with an external Copilot reviewer that automatically re
 - **Don't duplicate feedback**: If the external reviewer already flagged an issue, the local Reviewer should skip it and focus on anything the external reviewer missed.
 - **Merge readiness**: A PR needs no outstanding `REQUEST_CHANGES` from **any** reviewer (external or local) before it can be merged.
 - **Re-poll after fixes**: When a worker pushes fixes, the external reviewer may run again. The orchestrator should poll for new external reviews before re-dispatching the local Reviewer.
+
+### Approval restrictions on self-authored PRs
+
+If GitHub prevents the reviewer account from submitting formal `REQUEST_CHANGES` or `APPROVE` on its own PR:
+
+- The reviewer must still return `REVIEW RESULT: REQUEST_CHANGES` when blockers exist.
+- The orchestrator must not set `agent-approved` while blockers exist, even if formal review submission is blocked by platform permissions.
+- The reviewer should post a normal PR comment describing blockers, and the orchestrator must treat that as authoritative.
 
 ## Return Format
 

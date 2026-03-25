@@ -218,11 +218,14 @@ Review PR #<number>.
 BLOCKING RULES:
 1. Reject any PR that removes, disables, or downgrades existing functionality to fix a bug. The fix must preserve the feature and address the root cause.
 2. If the PR references a GitHub issue (Fixes #X), verify that ALL requirements from that issue are implemented. Partial implementations are blocking — list the missing requirements.
+3. Treat external Copilot review comments/threads as blocking feedback until verified fixed. Do not approve while any Copilot-raised issue remains unresolved.
 See Engineering Quality Standards in copilot-instructions.md.
 
 Follow the review-workflow skill in .github/skills/review-workflow/SKILL.md.
 If issues found: post REQUEST_CHANGES review, add "agent-reviewed" label, return the list of issues.
 If approved: post APPROVE review, add "agent-reviewed" and "agent-approved" labels.
+
+If GitHub blocks formal review actions on self-authored PRs, still return REVIEW RESULT: REQUEST_CHANGES when blockers exist and do not allow `agent-approved` labeling until blockers are fixed.
 ```
 
 ### Re-dispatch Worker with Review Fixes
@@ -250,6 +253,7 @@ You are a Merger agent for the deep-underworld repo (owner: pwretmo, repo: deep-
 
 Follow the merge-workflow skill in .github/skills/merge-workflow/SKILL.md.
 Find all open PRs labeled "agent-approved" and squash-merge them one at a time.
+Before merging each PR, re-poll reviews and review comments and confirm there are no unresolved Copilot comments/threads and no outstanding REQUEST_CHANGES from any reviewer.
 After each merge, pull main locally and run npm run build to verify.
 Clean up worktrees for any merged local branches.
 ```

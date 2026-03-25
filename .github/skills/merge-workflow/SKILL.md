@@ -23,6 +23,32 @@ From the results, select only PRs that have the `agent-approved` label.
 
 ## Squash-Merging a PR
 
+Before merging, enforce merge-readiness gates:
+
+1. Poll PR reviews and review comments:
+
+```
+Tool: mcp_io_github_git_pull_request_read
+Parameters:
+  owner: "pwretmo"
+  repo: "deep-underworld"
+  pullNumber: <number>
+  method: "get_reviews"
+```
+
+```
+Tool: mcp_io_github_git_pull_request_read
+Parameters:
+  owner: "pwretmo"
+  repo: "deep-underworld"
+  pullNumber: <number>
+  method: "get_review_comments"
+```
+
+2. Confirm there is no outstanding `REQUEST_CHANGES` from any reviewer.
+3. Confirm there are no unresolved Copilot comments/threads.
+4. If either condition fails, do not merge. Return `FAILED — review blockers remain`.
+
 Merge one PR at a time:
 
 ```
@@ -89,12 +115,14 @@ If the worktree directory doesn't exist (already cleaned), just prune and move o
 
 ```
 For each approved PR:
-  1. Squash-merge via MCP
-  2. git pull origin main
-  3. npm run build
-  4. IF FAIL → stop, report
-  5. IF local branch → remove worktree, prune, delete branch
-  6. Report success, continue to next PR
+  1. Poll reviews + review comments
+  2. IF blockers remain → stop, report
+  3. Squash-merge via MCP
+  4. git pull origin main
+  5. npm run build
+  6. IF FAIL → stop, report
+  7. IF local branch → remove worktree, prune, delete branch
+  8. Report success, continue to next PR
 ```
 
 ## Return Format
