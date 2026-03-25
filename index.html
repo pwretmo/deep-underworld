@@ -330,6 +330,38 @@
     .diagnostics-value.status-fallback {
       color: #ffb36d;
     }
+    .diagnostics-value.flash-pressured,
+    .diagnostics-value.flash-emergency {
+      animation-duration: 0.9s;
+      animation-timing-function: ease-out;
+      animation-iteration-count: 1;
+    }
+    .diagnostics-value.flash-pressured {
+      animation-name: diagnosticsFlashPressured;
+    }
+    .diagnostics-value.flash-emergency {
+      animation-name: diagnosticsFlashEmergency;
+    }
+    @keyframes diagnosticsFlashPressured {
+      0% {
+        background: rgba(255, 211, 109, 0.4);
+        box-shadow: 0 0 0 0 rgba(255, 211, 109, 0.55);
+      }
+      100% {
+        background: rgba(255, 211, 109, 0);
+        box-shadow: 0 0 0 10px rgba(255, 211, 109, 0);
+      }
+    }
+    @keyframes diagnosticsFlashEmergency {
+      0% {
+        background: rgba(255, 122, 122, 0.45);
+        box-shadow: 0 0 0 0 rgba(255, 122, 122, 0.6);
+      }
+      100% {
+        background: rgba(255, 122, 122, 0);
+        box-shadow: 0 0 0 12px rgba(255, 122, 122, 0);
+      }
+    }
   </style>
 </head>
 <body>

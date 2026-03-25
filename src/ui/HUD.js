@@ -63,6 +63,8 @@ export class HUD {
     this.diagnosticsContent = document.getElementById('diagnostics-content');
     this.diagnosticsVisible = false;
     this._diagLastUpdate = 0;
+    this._diagStatusMemory = new Map();
+    this._diagFlashUntil = new Map();
 
     this.creatureList.addEventListener('click', (e) => {
       const entry = e.target.closest('.creature-entry');
@@ -229,6 +231,8 @@ export class HUD {
     this.diagnosticsVisible = false;
     this.diagnosticsPanel.classList.remove('visible');
     this._diagLastUpdate = 0;
+    this._diagStatusMemory.clear();
+    this._diagFlashUntil.clear();
   }
 
   updateDiagnostics(snapshot) {
@@ -239,9 +243,12 @@ export class HUD {
     this._diagLastUpdate = now;
 
     const stallRiskClass = this._statusClass(snapshot.postProcess?.stallRisk);
-    const renderClass = this._statusClass(snapshot.postProcess?.renderPressure);
+    const emaClass = this._statusClass(snapshot.postProcess?.emaPressure);
+    const renderClass = this._statusClass(snapshot.postProcess?.lastRenderPressure);
     const rendererClass = snapshot.graphics?.hardwareAccelerated === false ? 'status-fallback' : 'status-normal';
     const bloomClass = snapshot.postProcess?.bloomSuspended ? 'status-pressured' : 'status-normal';
+    const emaFlashClass = this._flashClass('ema', snapshot.postProcess?.emaPressure, now);
+    const renderFlashClass = this._flashClass('render', snapshot.postProcess?.lastRenderPressure, now);
 
     const rows = [
       this._diagRow('Stall risk', snapshot.postProcess?.stallRiskLabel ?? 'Unknown', stallRiskClass),
@@ -251,8 +258,8 @@ export class HUD {
       this._diagRow('Renderer', snapshot.graphics?.hardwareAcceleratedLabel ?? 'Unknown', rendererClass),
       this._diagRow('GPU', this._truncateLine(snapshot.graphics?.renderer ?? 'Unavailable'), rendererClass),
       this._diagRow('Vendor', snapshot.graphics?.vendor ?? 'Unknown', 'muted'),
-      this._diagRow('Post FX', `scale ${this._fmtFixed(snapshot.postProcess?.composerScale, 2)} | EMA ${this._fmtFixed(snapshot.postProcess?.renderEmaMs, 1)}ms`, renderClass),
-      this._diagRow('Render', `last ${this._fmtFixed(snapshot.postProcess?.lastRenderMs, 1)}ms`, renderClass),
+      this._diagRow('Post FX', `scale ${this._fmtFixed(snapshot.postProcess?.composerScale, 2)} | EMA ${this._fmtFixed(snapshot.postProcess?.renderEmaMs, 1)}ms`, `${emaClass} ${emaFlashClass}`.trim()),
+      this._diagRow('Render', `last ${this._fmtFixed(snapshot.postProcess?.lastRenderMs, 1)}ms`, `${renderClass} ${renderFlashClass}`.trim()),
       this._diagRow('Bloom', snapshot.postProcess?.bloomSuspended ? 'Suspended' : 'Active', bloomClass),
       this._diagRow('Exposure', `${this._fmtFixed(snapshot.exposure, 2)} | flashlight ${snapshot.flashlightOn ? 'on' : 'off'}`),
       this._diagRow('Player', `x ${this._fmtFixed(snapshot.playerPosition?.x, 1)}  y ${this._fmtFixed(snapshot.playerPosition?.y, 1)}  z ${this._fmtFixed(snapshot.playerPosition?.z, 1)}`),
@@ -270,6 +277,32 @@ export class HUD {
     if (status === 'emergency') return 'status-emergency';
     if (status === 'pressured') return 'status-pressured';
     return 'status-normal';
+  }
+
+  _flashClass(key, status, now) {
+    const currentRank = this._statusRank(status);
+    const previousStatus = this._diagStatusMemory.get(key) ?? 'normal';
+    const previousRank = this._statusRank(previousStatus);
+
+    if (currentRank > previousRank && currentRank >= this._statusRank('pressured')) {
+      this._diagFlashUntil.set(key, now + 900);
+    }
+
+    this._diagStatusMemory.set(key, status ?? 'normal');
+
+    const flashUntil = this._diagFlashUntil.get(key) ?? 0;
+    if (now >= flashUntil) {
+      this._diagFlashUntil.delete(key);
+      return '';
+    }
+
+    return status === 'emergency' ? 'flash-emergency' : 'flash-pressured';
+  }
+
+  _statusRank(status) {
+    if (status === 'emergency') return 2;
+    if (status === 'pressured') return 1;
+    return 0;
   }
 
   _fmtNumber(value, digits = 0) {

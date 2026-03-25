@@ -505,6 +505,16 @@ export class UnderwaterEffect {
   }
 
   getDiagnostics() {
+    const emaPressure = this._renderEmaMs > this.tuning.performance.emergencyThresholdMs
+      ? 'emergency'
+      : this._renderEmaMs > this.tuning.performance.degradeThresholdMs
+        ? 'pressured'
+        : 'normal';
+    const lastRenderPressure = this._lastRenderMs > this.tuning.performance.emergencyThresholdMs
+      ? 'emergency'
+      : this._lastRenderMs > this.tuning.performance.severeThresholdMs
+        ? 'pressured'
+        : 'normal';
     const emergency =
       this._bloomSuspended ||
       this._lastRenderMs > this.tuning.performance.emergencyThresholdMs;
@@ -518,6 +528,8 @@ export class UnderwaterEffect {
       renderEmaMs: this._renderEmaMs,
       lastRenderMs: this._lastRenderMs,
       bloomSuspended: this._bloomSuspended,
+      emaPressure,
+      lastRenderPressure,
       renderPressure: emergency ? 'emergency' : pressured ? 'pressured' : 'normal',
       stallRisk: emergency ? 'emergency' : pressured ? 'pressured' : 'normal',
       stallRiskLabel: emergency ? 'Emergency' : pressured ? 'Pressured' : 'Normal',
