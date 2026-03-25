@@ -7,7 +7,7 @@ const IDB_NAME = 'deep-underworld-procedural-cache';
 const IDB_STORE = 'snapshots';
 const LOCAL_META_KEY = 'duw.preload.meta';
 
-const MAX_PRELOADED_CREATURES = 12;
+const MAX_PRELOADED_CREATURES = 24;
 const MAX_PRELOADED_TERRAIN_CHUNKS = 6;
 const MAX_PRELOADED_FLORA_CHUNKS = 5;
 const FRAME_BUDGET_MS = 6;
@@ -169,6 +169,11 @@ export class PreloadCoordinator {
         await new Promise(resolve => window.requestAnimationFrame(() => resolve()));
       }
     }
+
+    // Force-compile shader programs for all preloaded creature materials
+    // so the first gameplay render doesn't trigger synchronous GPU compiles.
+    this.renderer.compile(this.underwaterEffect.scene, this.underwaterEffect.camera);
+    await new Promise(resolve => window.requestAnimationFrame(() => resolve()));
 
     await this._warmDepthBandRenders();
 

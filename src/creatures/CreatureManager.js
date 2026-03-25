@@ -75,7 +75,13 @@ export class CreatureManager {
         : 0;
       if (entryIndex === -1) break;
       const [entry] = this._spawnQueue.splice(entryIndex, 1);
-      this._add(entry.type, entry.createFn(), entry.depthMin, entry.depthMax);
+      const _t0 = performance.now();
+      const instance = entry.createFn();
+      const _spawnMs = performance.now() - _t0;
+      if (_spawnMs > 50) {
+        console.warn(`[CreatureManager] Slow spawn: ${entry.type} took ${_spawnMs.toFixed(1)}ms`);
+      }
+      this._add(entry.type, instance, entry.depthMin, entry.depthMax);
       if (entry.countsTowardLoad !== false) {
         this._spawnedCount++;
       }
@@ -332,11 +338,14 @@ export class CreatureManager {
     return { loaded: this._spawnedCount, total: this._spawnTotal };
   }
 
-  update(dt, playerPos, depth) {
+  update(dt, playerPos, depth, spawnBudgetMs = 8) {
     this.prepareInitialQueue(playerPos);
 
-    // Drain queued spawns gradually so dynamic creature bursts do not hitch descent.
-    if (this._spawnQueue.length > 0) {
+    // Drain queued spawns only when the frame has budget remaining.
+    // Terrain/flora chunk building in the same frame may have consumed the
+    // budget already — deferring one creature spawn to the next frame
+    // prevents compounding expensive initialization operations.
+    if (this._spawnQueue.length > 0 && spawnBudgetMs > 1) {
       this.preloadDrain(QUEUE_DRAIN_PER_FRAME, undefined, depth);
     }
 
@@ -423,6 +432,9 @@ export class CreatureManager {
   }
 
   _dynamicSpawn(playerPos, depth) {
+    // Early-out: skip all candidate evaluation when at capacity
+    if (this.creatures.length >= MAX_CREATURES) return;
+
     const candidates = [];
 
     // Original creatures
