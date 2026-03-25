@@ -279,6 +279,29 @@
       font-size: 0.65rem; color: #aaccdd; letter-spacing: 0.1em;
       text-shadow: 0 0 6px #000000cc, 0 1px 3px #000000aa;
     }
+
+    #diagnostics-panel {
+      position: absolute; top: 30px; right: 30px;
+      display: none; width: min(320px, calc(100vw - 60px));
+      background: rgba(3, 14, 24, 0.88); border: 1px solid #2f526833;
+      border-radius: 6px; padding: 12px 14px;
+      box-shadow: 0 14px 32px rgba(0, 0, 0, 0.35);
+      backdrop-filter: blur(6px);
+      pointer-events: none;
+    }
+    #diagnostics-panel.visible { display: block; }
+    #diagnostics-panel h3 {
+      font-size: 0.72rem; color: #84d8ff; letter-spacing: 0.16em;
+      text-transform: uppercase; margin-bottom: 8px;
+      border-bottom: 1px solid #22445566; padding-bottom: 5px;
+    }
+    #diagnostics-content {
+      white-space: pre-wrap; font-size: 0.7rem; line-height: 1.55;
+      color: #d7ebf7;
+    }
+    #diagnostics-content .muted {
+      color: #82a5ba;
+    }
   </style>
 </head>
 <body>
@@ -308,7 +331,7 @@
     <div id="warning-text"></div>
     <div id="crosshair"></div>
     <canvas id="sonar" width="150" height="150"></canvas>
-    <div id="help-hint">[H] CONTROLS</div>
+    <div id="help-hint">[H] CONTROLS  [V] DIAGNOSTICS</div>
     <div id="creature-locator">
       <h3>Creature Locator [C]</h3>
       <div id="creature-list"></div>
@@ -321,6 +344,10 @@
         <span id="track-dist"></span>
         <span id="track-elev"></span>
       </div>
+    </div>
+    <div id="diagnostics-panel" role="status" aria-label="Diagnostics">
+      <h3>Diagnostics [V]</h3>
+      <div id="diagnostics-content"></div>
     </div>
   </div>
 
@@ -347,6 +374,7 @@
         <div class="help-row"><span class="help-key"><kbd>Enter</kbd></span><span class="help-desc">Track selected row</span></div>
         <div class="help-row"><span class="help-key"><kbd>0</kbd></span><span class="help-desc">Stop tracking</span></div>
         <div class="help-row"><span class="help-key"><kbd>H</kbd></span><span class="help-desc">Toggle this help</span></div>
+        <div class="help-row"><span class="help-key"><kbd>V</kbd></span><span class="help-desc">Toggle diagnostics panel</span></div>
         <div class="help-row"><span class="help-key"><kbd>Esc</kbd></span><span class="help-desc">Release mouse / Pause</span></div>
       </div>
       <div class="help-dismiss">Press <kbd>H</kbd> to close</div>

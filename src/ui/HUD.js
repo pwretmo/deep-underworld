@@ -59,6 +59,10 @@ export class HUD {
     this.creatureTypes = [];
     this.selectedCreatureType = null;
     this.selectedCreatureIndex = -1;
+    this.diagnosticsPanel = document.getElementById('diagnostics-panel');
+    this.diagnosticsContent = document.getElementById('diagnostics-content');
+    this.diagnosticsVisible = false;
+    this._diagLastUpdate = 0;
 
     this.creatureList.addEventListener('click', (e) => {
       const entry = e.target.closest('.creature-entry');
@@ -211,6 +215,59 @@ export class HUD {
   closeLocator() {
     this.locatorVisible = false;
     this.locatorPanel.classList.remove('visible');
+  }
+
+  toggleDiagnostics() {
+    this.diagnosticsVisible = !this.diagnosticsVisible;
+    this.diagnosticsPanel.classList.toggle('visible', this.diagnosticsVisible);
+    if (!this.diagnosticsVisible) {
+      this._diagLastUpdate = 0;
+    }
+  }
+
+  closeDiagnostics() {
+    this.diagnosticsVisible = false;
+    this.diagnosticsPanel.classList.remove('visible');
+    this._diagLastUpdate = 0;
+  }
+
+  updateDiagnostics(snapshot) {
+    if (!this.diagnosticsVisible || !snapshot) return;
+
+    const now = performance.now();
+    if (now - this._diagLastUpdate < 200) return;
+    this._diagLastUpdate = now;
+
+    const lines = [
+      `FPS          ${this._fmtNumber(snapshot.fps, 0)} | Depth ${this._fmtNumber(snapshot.depth, 0)}m | Max ${this._fmtNumber(snapshot.maxDepth, 0)}m`,
+      `Creatures     ${this._fmtNumber(snapshot.creaturesActive, 0)} active | ${this._fmtNumber(snapshot.queuedSpawns, 0)} queued`,
+      `Quality       ${snapshot.qualityTier ?? 'unknown'} | ${snapshot.graphics?.context ?? 'webgl'}`,
+      `Renderer      ${snapshot.graphics?.hardwareAcceleratedLabel ?? 'Unknown'}`,
+      this._truncateLine(`GPU           ${snapshot.graphics?.renderer ?? 'Unavailable'}`),
+      `Vendor        ${snapshot.graphics?.vendor ?? 'Unknown'}`,
+      `Post FX       scale ${this._fmtFixed(snapshot.postProcess?.composerScale, 2)} | EMA ${this._fmtFixed(snapshot.postProcess?.renderEmaMs, 1)}ms`,
+      `Render        last ${this._fmtFixed(snapshot.postProcess?.lastRenderMs, 1)}ms | bloom ${snapshot.postProcess?.bloomSuspended ? 'suspended' : 'active'}`,
+      `Exposure      ${this._fmtFixed(snapshot.exposure, 2)} | Flashlight ${snapshot.flashlightOn ? 'on' : 'off'}`,
+      `Player        x ${this._fmtFixed(snapshot.playerPosition?.x, 1)}  y ${this._fmtFixed(snapshot.playerPosition?.y, 1)}  z ${this._fmtFixed(snapshot.playerPosition?.z, 1)}`,
+      `State         ${snapshot.running ? 'running' : 'idle'}${snapshot.autoplay ? ' | autoplay' : ''}${snapshot.physicsReady ? ' | physics' : ''}`,
+    ];
+
+    this.diagnosticsContent.textContent = lines.join('\n');
+  }
+
+  _fmtNumber(value, digits = 0) {
+    if (!Number.isFinite(value)) return '--';
+    return Number(value).toFixed(digits);
+  }
+
+  _fmtFixed(value, digits = 1) {
+    if (!Number.isFinite(value)) return '--';
+    return Number(value).toFixed(digits);
+  }
+
+  _truncateLine(text) {
+    if (!text) return '--';
+    return text.length > 42 ? `${text.slice(0, 39)}...` : text;
   }
 
   handleLocatorNavigation(code) {

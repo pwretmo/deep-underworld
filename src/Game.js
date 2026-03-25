@@ -62,6 +62,7 @@ export class Game {
       this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       this.renderer.setPixelRatio(window.devicePixelRatio);
     }
+    this.graphicsDiagnostics = this._detectGraphicsDiagnostics();
 
     this.renderTuning = {
       depthThresholds: {
@@ -168,6 +169,10 @@ export class Game {
         if (this.running || pauseVisible) {
           this._toggleAutoplayPause();
         }
+        return;
+      }
+      if (e.code === 'KeyV' && (this.running || this.pauseOverlay.classList.contains('visible'))) {
+        this.hud.toggleDiagnostics();
         return;
       }
       if (!this.running) return;
@@ -441,6 +446,7 @@ export class Game {
     const creaturesByType = this.creatures.getCreaturesByType(this.player.position);
     this.hud.update(depth, this.flashlightOn);
     this.hud.updateLocator(creaturesByType, this.player.position, this.camera);
+    this.hud.updateDiagnostics(this._getDiagnosticsSnapshot());
 
     // Update underwater fog based on depth, then let encounter override if active
     this._updateEnvironmentForDepth(depth);
@@ -488,6 +494,80 @@ export class Game {
     this._envColorD = new THREE.Color();
     this._fog = new THREE.Fog(0x006994, 5, 300);
     this.scene.fog = this._fog;
+  }
+
+  _detectGraphicsDiagnostics() {
+    try {
+      const gl = this.renderer.getContext();
+      if (!gl) {
+        return {
+          context: 'webgl',
+          vendor: 'Unknown',
+          renderer: 'Unavailable',
+          hardwareAccelerated: null,
+          hardwareAcceleratedLabel: 'Unknown',
+        };
+      }
+
+      const context = typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext
+        ? 'webgl2'
+        : 'webgl1';
+      const ext = gl.getExtension?.('WEBGL_debug_renderer_info');
+      const vendor = ext
+        ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL)
+        : gl.getParameter(gl.VENDOR);
+      const renderer = ext
+        ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)
+        : gl.getParameter(gl.RENDERER);
+      const normalized = `${vendor ?? ''} ${renderer ?? ''}`.toLowerCase();
+      const softwareRenderer = [
+        'swiftshader',
+        'llvmpipe',
+        'software',
+        'softpipe',
+        'mesa offscreen',
+      ].some((token) => normalized.includes(token));
+      const hardwareAccelerated = !softwareRenderer;
+
+      return {
+        context,
+        vendor: vendor || 'Unknown',
+        renderer: renderer || 'Unavailable',
+        hardwareAccelerated,
+        hardwareAcceleratedLabel: hardwareAccelerated ? 'Hardware accelerated' : 'Software / fallback',
+      };
+    } catch {
+      return {
+        context: 'webgl',
+        vendor: 'Unknown',
+        renderer: 'Unavailable',
+        hardwareAccelerated: null,
+        hardwareAcceleratedLabel: 'Unknown',
+      };
+    }
+  }
+
+  _getDiagnosticsSnapshot() {
+    return {
+      fps: this.fps,
+      depth: this.depth,
+      maxDepth: this.maxDepth,
+      qualityTier: qualityManager.tier,
+      autoplay: this.autoplay,
+      running: this.running,
+      physicsReady: !!this.physicsWorld,
+      creaturesActive: this.creatures.creatures.length,
+      queuedSpawns: this.creatures.getSpawnQueueLength(),
+      flashlightOn: this.flashlightOn,
+      exposure: this.renderer.toneMappingExposure,
+      playerPosition: {
+        x: this.player.position.x,
+        y: this.player.position.y,
+        z: this.player.position.z,
+      },
+      graphics: this.graphicsDiagnostics,
+      postProcess: this.underwaterEffect.getDiagnostics(),
+    };
   }
 
   _updateEnvironmentForDepth(depth) {

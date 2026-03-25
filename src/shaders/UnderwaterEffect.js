@@ -185,6 +185,7 @@ export class UnderwaterEffect {
     this._stableRecoveryFrames = 0;
     this._bloomSuspended = false;
     this._bloomSuspendedUntil = 0;
+    this._lastRenderMs = 0;
 
     // Render pass
     const renderPass = new RenderPass(scene, camera);
@@ -458,6 +459,7 @@ export class UnderwaterEffect {
 
     const now = performance.now();
     const renderMs = now - frameStart;
+    this._lastRenderMs = renderMs;
     this._renderEmaMs = this._renderEmaMs * 0.92 + renderMs * 0.08;
 
     if (this._bloomSuspended &&
@@ -500,5 +502,14 @@ export class UnderwaterEffect {
     } else {
       this._stableRecoveryFrames = 0;
     }
+  }
+
+  getDiagnostics() {
+    return {
+      composerScale: this._composerScale,
+      renderEmaMs: this._renderEmaMs,
+      lastRenderMs: this._lastRenderMs,
+      bloomSuspended: this._bloomSuspended,
+    };
   }
 }
