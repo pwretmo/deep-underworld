@@ -117,8 +117,11 @@ const UnderwaterShader = {
       float abyssBlend = smoothstep(depthThresholds.z, depthThresholds.z + 280.0, depth);
       float depthBlend = clamp(midBlend * 0.45 + deepBlend * 0.7 + abyssBlend * 0.35, 0.0, 1.0);
 
-      // Chromatic aberration — scaled back in reduced mode (items 6/7)
-      float caStr = (0.0015 + depth * 0.000005) * (1.0 - reducedMode * 0.85);
+      // Keep aberration subtle: depth-aware, edge-weighted, and hard-capped.
+      float edgeDist = distance(uv, vec2(0.5));
+      float edgeMask = smoothstep(0.2, 0.74, edgeDist);
+      float caStr = (0.00012 + depthBlend * 0.00058 + abyssBlend * 0.0002) * edgeMask * (1.0 - reducedMode * 0.9);
+      caStr = min(caStr, 0.00095);
       float r = texture2D(tDiffuse, uv + vec2(caStr, caStr * 0.3)).r;
       float b = texture2D(tDiffuse, uv - vec2(caStr, caStr * 0.2)).b;
       color.r = r;
