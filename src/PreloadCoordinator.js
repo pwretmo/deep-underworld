@@ -43,6 +43,7 @@ export class PreloadCoordinator {
     this._descentAssist = {
       active: false,
       prepared: false,
+      cursor: 0,
       targetCreaturePreload: 0,
       targetTerrainChunks: 0,
       targetFloraChunks: 0,
@@ -84,6 +85,7 @@ export class PreloadCoordinator {
 
     this._descentAssist.active = true;
     this._descentAssist.prepared = false;
+    this._descentAssist.cursor = 0;
     this._descentAssist.targetCreaturePreload = this._advisorySnapshot.creaturePreloaded;
     this._descentAssist.targetTerrainChunks = this._advisorySnapshot.terrainChunks;
     this._descentAssist.targetFloraChunks = this._advisorySnapshot.floraChunks;
@@ -100,20 +102,38 @@ export class PreloadCoordinator {
       this._descentAssist.prepared = true;
     }
 
-    const start = performance.now();
-    while (performance.now() - start < DESCENT_ASSIST_FRAME_BUDGET_MS) {
-      let didWork = false;
+    // Run at most one assist action per frame in round-robin order.
+    // This avoids compounding creature+terrain+flora initialization in the
+    // same frame, which can otherwise produce long stalls.
+    const actions = [
+      (budgetMs) => this._pumpDescentCreatureAssist(budgetMs),
+      () => this._pumpDescentTerrainAssist(),
+      () => this._pumpDescentFloraAssist(),
+    ];
 
-      didWork = this._pumpDescentCreatureAssist() || didWork;
-      didWork = this._pumpDescentTerrainAssist() || didWork;
-      didWork = this._pumpDescentFloraAssist() || didWork;
+    let remainingBudgetMs = DESCENT_ASSIST_FRAME_BUDGET_MS;
+    for (let attempt = 0; attempt < actions.length && remainingBudgetMs > 0.25; attempt++) {
+      const actionIndex = (this._descentAssist.cursor + attempt) % actions.length;
+      const actionStart = performance.now();
+      const didWork = actions[actionIndex](remainingBudgetMs);
+      const elapsed = performance.now() - actionStart;
+      remainingBudgetMs = Math.max(0, remainingBudgetMs - elapsed);
 
-      if (!didWork) break;
+      if (didWork) {
+        this._descentAssist.cursor = (actionIndex + 1) % actions.length;
+        break;
+      }
+
+      this._descentAssist.cursor = (actionIndex + 1) % actions.length;
     }
 
     if (this._isDescentAssistComplete()) {
       this._descentAssist.active = false;
     }
+  }
+
+  isDescentAssistActive() {
+    return this._descentAssist.active;
   }
 
   async primeStartBaseline({ onProgress } = {}) {
@@ -403,7 +423,7 @@ export class PreloadCoordinator {
     return plan;
   }
 
-  _pumpDescentCreatureAssist() {
+  _pumpDescentCreatureAssist(maxBudgetMs = Infinity) {
     const target = this._descentAssist.targetCreaturePreload;
     if (target <= 0) return false;
 
@@ -411,8 +431,7 @@ export class PreloadCoordinator {
     if (progress.loaded >= target) return false;
     if (this.creatures.getSpawnQueueLength() === 0) return false;
 
-    this.creatures.preloadDrain(1);
-    return true;
+    return this.creatures.preloadDrain(1, undefined, Infinity, maxBudgetMs) > 0;
   }
 
   _pumpDescentTerrainAssist() {

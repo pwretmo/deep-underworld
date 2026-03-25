@@ -85,14 +85,20 @@ export class Game {
       shallowMax: qSettings.maxPointLights,
       deepMax: Math.max(3, Math.round(qSettings.maxPointLights * 0.6)),
       transitionBand: 3,
-      scanInterval: 0.35,
+      scanInterval: 1.1,
+      minScanInterval: 0.9,
+      maxScanInterval: 3.2,
       scanElapsed: 1,
-      retargetInterval: 0.22,
+      retargetInterval: 0.35,
       retargetElapsed: 1,
       fadeInRate: 8,
       fadeOutRate: 6,
       managedLights: [],
+      activeLights: [],
       tempWorldPos: new THREE.Vector3(),
+      heavyFrameThreshold: 0.08,
+      scanCostAdjustThreshold: 1.5,
+      scanCostRecoverThreshold: 0.8,
     };
 
     // Alias so automated tests can use game.creatureManager or game.creatures
@@ -448,7 +454,9 @@ export class Game {
     this.flora.update(dt, this.player.position);
     const _initElapsed = performance.now() - _initStart;
     const _spawnBudget = Math.max(0, 12 - _initElapsed);
-    this.creatures.update(dt, this.player.position, depth, _spawnBudget);
+    const _descentAssistActive = this.preload.isDescentAssistActive();
+    const _effectiveSpawnBudget = _descentAssistActive ? 0 : _spawnBudget;
+    this.creatures.update(dt, this.player.position, depth, _effectiveSpawnBudget);
 
     const nearestCreatureDist = this.creatures.getNearestCreatureDistance(this.player.position);
 
@@ -860,6 +868,15 @@ export class Game {
 
   _updatePointLightBudget(dt, depth, playerPos) {
     const budget = this._pointLightBudget;
+
+    // If the current frame is already heavy, defer point-light management work
+    // so we don't compound stalls with extra traversal/sorting cost.
+    if (dt > budget.heavyFrameThreshold) {
+      budget.scanElapsed = Math.min(budget.scanElapsed + dt * 0.5, budget.scanInterval);
+      budget.retargetElapsed = Math.min(budget.retargetElapsed + dt * 0.5, budget.retargetInterval);
+      return;
+    }
+
     budget.scanElapsed += dt;
     budget.retargetElapsed += dt;
 
@@ -897,7 +914,11 @@ export class Game {
   }
 
   _refreshManagedPointLights() {
-    const managedLights = [];
+    const budget = this._pointLightBudget;
+    const managedLights = budget.managedLights;
+    managedLights.length = 0;
+    const refreshStart = performance.now();
+
     this.scene.traverse((obj) => {
       if (!obj.isPointLight) return;
       if (obj === this.player.subLight) return;
@@ -911,7 +932,13 @@ export class Game {
 
       managedLights.push(obj);
     });
-    this._pointLightBudget.managedLights = managedLights;
+
+    const refreshCost = performance.now() - refreshStart;
+    if (refreshCost > budget.scanCostAdjustThreshold) {
+      budget.scanInterval = Math.min(budget.maxScanInterval, budget.scanInterval + 0.25);
+    } else if (refreshCost < budget.scanCostRecoverThreshold) {
+      budget.scanInterval = Math.max(budget.minScanInterval, budget.scanInterval - 0.05);
+    }
   }
 
   _retargetPointLights(depth, playerPos) {
@@ -923,7 +950,6 @@ export class Game {
       depthBlend
     ));
 
-    const candidates = [];
     for (const light of budget.managedLights) {
       if (!light.parent) continue;
 
@@ -933,24 +959,31 @@ export class Game {
       // Hysteresis: boost score for currently-active lights to prevent flip-flopping
       const isActive = (light.userData.duwTargetIntensity ?? 0) > 0.01;
       const hysteresis = isActive ? 1.2 : 1.0;
-      const score = ((baseIntensity + 0.001) / (distanceSq + 1)) * hysteresis;
-      candidates.push({ light, score });
+      light.userData.duwScore = ((baseIntensity + 0.001) / (distanceSq + 1)) * hysteresis;
       light.userData.duwTargetIntensity = 0;
     }
 
-    candidates.sort((a, b) => b.score - a.score);
+    const candidates = budget.activeLights;
+    candidates.length = 0;
+    for (const light of budget.managedLights) {
+      if (light.parent) {
+        candidates.push(light);
+      }
+    }
+    candidates.sort((a, b) => (b.userData.duwScore ?? 0) - (a.userData.duwScore ?? 0));
 
     const fullyLitCount = Math.min(maxLights, candidates.length);
     const fadeStartIndex = Math.max(fullyLitCount - 1, 0);
     const fadeEndIndex = fullyLitCount + budget.transitionBand;
     const cutoffIndex = Math.max(fullyLitCount - 1, 0);
     const softCutoffIndex = Math.min(candidates.length - 1, cutoffIndex + budget.transitionBand);
-    const cutoffScore = candidates[cutoffIndex]?.score ?? 0;
-    const softCutoffScore = candidates[softCutoffIndex]?.score ?? cutoffScore;
+    const cutoffScore = candidates[cutoffIndex]?.userData.duwScore ?? 0;
+    const softCutoffScore = candidates[softCutoffIndex]?.userData.duwScore ?? cutoffScore;
 
     for (let i = 0; i < candidates.length; i++) {
-      const entry = candidates[i];
-      const baseIntensity = entry.light.userData.duwBaseIntensity ?? 0;
+      const light = candidates[i];
+      const baseIntensity = light.userData.duwBaseIntensity ?? 0;
+      const score = light.userData.duwScore ?? 0;
       let weight = 0;
 
       if (i < fullyLitCount) {
@@ -958,14 +991,14 @@ export class Game {
       } else if (i < fadeEndIndex) {
         const rankWeight = 1 - THREE.MathUtils.smoothstep(fadeStartIndex, fadeEndIndex, i);
         if (cutoffScore > 0) {
-          const scoreWeight = THREE.MathUtils.smoothstep(softCutoffScore * 0.9, cutoffScore * 1.05, entry.score);
+          const scoreWeight = THREE.MathUtils.smoothstep(softCutoffScore * 0.9, cutoffScore * 1.05, score);
           weight = rankWeight * scoreWeight;
         } else {
           weight = rankWeight;
         }
       }
 
-      entry.light.userData.duwTargetIntensity = baseIntensity * weight;
+      light.userData.duwTargetIntensity = baseIntensity * weight;
     }
   }
 }

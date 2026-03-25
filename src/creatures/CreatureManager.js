@@ -46,6 +46,10 @@ window.addEventListener('qualitychange', (e) => {
 });
 const DYNAMIC_SPAWNS_PER_CYCLE = 2;
 const SPAWN_LOOKAHEAD_DEPTH = 45;
+const HEAVY_FRAME_DT = 1 / 20;
+const MAX_SPAWN_BUDGET_MS = 10;
+const SPAWN_EMA_ALPHA = 0.2;
+const HEAVY_SPAWN_WARN_MS = 50;
 
 export class CreatureManager {
   constructor(scene) {
@@ -57,6 +61,9 @@ export class CreatureManager {
     this._spawnQueue = [];
     this._spawnTotal = 0;
     this._spawnedCount = 0;
+    this._spawnCooldown = 0;
+    this._spawnCostEmaMs = 0;
+    this._lastSpawnCostMs = 0;
   }
 
   prepareInitialQueue(playerPos) {
@@ -65,10 +72,12 @@ export class CreatureManager {
     }
   }
 
-  preloadDrain(maxCount, cancelToken, depth = Infinity) {
+  preloadDrain(maxCount, cancelToken, depth = Infinity, maxCostMs = Infinity) {
     if (maxCount <= 0) return 0;
     let drained = 0;
+    const batchStart = performance.now();
     while (this._spawnQueue.length > 0 && drained < maxCount) {
+      if ((performance.now() - batchStart) >= maxCostMs) break;
       if (cancelToken?.cancelled) break;
       const entryIndex = Number.isFinite(depth)
         ? this._spawnQueue.findIndex((entry) => entry.depthMin <= depth + SPAWN_LOOKAHEAD_DEPTH)
@@ -78,7 +87,12 @@ export class CreatureManager {
       const _t0 = performance.now();
       const instance = entry.createFn();
       const _spawnMs = performance.now() - _t0;
-      if (_spawnMs > 50) {
+      this._lastSpawnCostMs = _spawnMs;
+      this._spawnCostEmaMs = this._spawnCostEmaMs === 0
+        ? _spawnMs
+        : THREE.MathUtils.lerp(this._spawnCostEmaMs, _spawnMs, SPAWN_EMA_ALPHA);
+
+      if (_spawnMs > HEAVY_SPAWN_WARN_MS) {
         console.warn(`[CreatureManager] Slow spawn: ${entry.type} took ${_spawnMs.toFixed(1)}ms`);
       }
       this._add(entry.type, instance, entry.depthMin, entry.depthMax);
@@ -341,12 +355,26 @@ export class CreatureManager {
   update(dt, playerPos, depth, spawnBudgetMs = 8) {
     this.prepareInitialQueue(playerPos);
 
+    if (this._spawnCooldown > 0) {
+      this._spawnCooldown = Math.max(0, this._spawnCooldown - dt);
+    }
+
     // Drain queued spawns only when the frame has budget remaining.
     // Terrain/flora chunk building in the same frame may have consumed the
     // budget already — deferring one creature spawn to the next frame
     // prevents compounding expensive initialization operations.
-    if (this._spawnQueue.length > 0 && spawnBudgetMs > 1) {
-      this.preloadDrain(QUEUE_DRAIN_PER_FRAME, undefined, depth);
+    const frameIsHeavy = dt >= HEAVY_FRAME_DT;
+    const cappedSpawnBudget = Math.min(MAX_SPAWN_BUDGET_MS, Math.max(0, spawnBudgetMs));
+    if (this._spawnQueue.length > 0 && cappedSpawnBudget > 1 && !frameIsHeavy && this._spawnCooldown <= 0) {
+      const drained = this.preloadDrain(QUEUE_DRAIN_PER_FRAME, undefined, depth, cappedSpawnBudget);
+      if (drained > 0) {
+        // Back off after heavy constructors so expensive spawns don't chain
+        // into repeated long-frame stalls.
+        if (this._lastSpawnCostMs > cappedSpawnBudget || this._spawnCostEmaMs > cappedSpawnBudget * 1.5) {
+          const cooldown = Math.min(2.5, Math.max(0.2, this._lastSpawnCostMs / 220));
+          this._spawnCooldown = Math.max(this._spawnCooldown, cooldown);
+        }
+      }
     }
 
     this.lastDepth = depth;
