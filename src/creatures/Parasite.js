@@ -505,7 +505,7 @@ export class Parasite {
       }
       const veinCurve = new THREE.CatmullRomCurve3(veinPoints);
       const veinGeo = new THREE.TubeGeometry(veinCurve, profile.veinSegs, 0.005, 6, false);
-      const vein = new THREE.Mesh(veinGeo, veinMat);
+      const vein = new THREE.Mesh(veinGeo, veinMat.clone());
       veins.push(vein);
       tierGroup.add(vein);
 
@@ -656,9 +656,10 @@ export class Parasite {
   }
 
   _animateProboscisIK(probGroup, playerPos, t) {
-    _tmpVec3B.copy(playerPos).sub(this.group.position);
-    const localDir = this.group.worldToLocal(_tmpVec3B.add(this.group.position));
-    this._proboscisTarget.lerp(localDir.normalize(), 0.03);
+    this.group.updateMatrixWorld(true);
+    _tmpVec3B.copy(playerPos);
+    this.group.worldToLocal(_tmpVec3B);
+    this._proboscisTarget.lerp(_tmpVec3B.normalize(), 0.03);
     const target = this._proboscisTarget;
 
     const searchPhase = Math.sin(t * 1.2) * 0.3;
