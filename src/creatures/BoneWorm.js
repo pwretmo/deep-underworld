@@ -117,14 +117,14 @@ function _createFleshNormalTexture() {
 }
 
 // ── Vertex shader undulation (injected via onBeforeCompile) ─────────────────
-function _applyBodyWaveShader(material, uniformsRef) {
+function _applyBodyWaveShader(material, uniformsRef, tierName) {
   const uniforms = {
     uTime: { value: 0 },
     uWavePhase: { value: 0 },
     uAmplitude: { value: 0.12 },
     uFrequency: { value: 2.5 },
   };
-  uniformsRef.push(uniforms);
+  uniformsRef.push({ uniforms, tierName });
 
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = uniforms.uTime;
@@ -304,7 +304,23 @@ export class BoneWorm {
 
     // Apply vertex shader body wave to flesh materials on near tier
     if (tierName === 'near') {
-      _applyBodyWaveShader(fleshMat, this._shaderUniforms);
+      _applyBodyWaveShader(fleshMat, this._shaderUniforms, 'near');
+    }
+
+    // Far tier is a single ultra-light mesh (<100 triangles) with shader-only animation.
+    if (isFar) {
+      const farBodyGeo = new THREE.CylinderGeometry(0.48, 0.12, 4.8, 8, 1, true);
+      farBodyGeo.rotateZ(Math.PI / 2);
+      const farBody = new THREE.Mesh(farBodyGeo, boneMat);
+      _applyBodyWaveShader(farBody.material, this._shaderUniforms, 'far');
+      tierGroup.add(farBody);
+
+      const farGlowGeo = new THREE.SphereGeometry(0.18, 6, 4);
+      const farGlow = new THREE.Mesh(farGlowGeo, glowMat);
+      farGlow.position.set(1.6, 0, 0);
+      tierGroup.add(farGlow);
+
+      return { group: tierGroup, segments: [], jaw: null, fleshMat, glowMat };
     }
 
     // ── Head ──────────────────────────────────────────────────────────────
@@ -400,6 +416,7 @@ export class BoneWorm {
 
       // Flesh between segments
       let flesh = null;
+      let fleshBaseY = null;
       if (i < profile.segmentCount - 1) {
         const fleshGeo = new THREE.SphereGeometry(r * 0.85, profile.fleshDetail[0], profile.fleshDetail[1]);
         fleshGeo.scale(1.2, 1, 1);
@@ -414,6 +431,9 @@ export class BoneWorm {
         }
         flesh = new THREE.Mesh(fleshGeo, fleshMat);
         flesh.position.set(-SEGMENT_SPACING * 0.5, 0, 0);
+        const basePos = fleshGeo.attributes.position;
+        fleshBaseY = new Float32Array(basePos.count);
+        for (let v = 0; v < basePos.count; v++) fleshBaseY[v] = basePos.getY(v);
         segGroup.add(flesh);
       }
 
@@ -469,6 +489,7 @@ export class BoneWorm {
         baseX,
         baseY: 0,
         baseZ: 0,
+        fleshBaseY,
       });
     }
 
@@ -535,16 +556,23 @@ export class BoneWorm {
 
     // ── Animate active tier ───────────────────────────────────────────────
     const activeTier = this.tiers[this._lodTier];
-    this._animateSegments(activeTier, dt, this._lodTier);
-    this._animateJaw(activeTier, dt, distToPlayer);
+    if (this._lodTier !== 'far') {
+      this._animateSegments(activeTier, dt, this._lodTier);
+      this._animateJaw(activeTier, dt, distToPlayer);
+    }
     this._animateEmissive(activeTier);
 
     // Update vertex shader uniforms
-    if (this._lodTier === 'near') {
-      for (const u of this._shaderUniforms) {
-        u.uTime.value = this.time;
-        u.uAmplitude.value = POS_AMPLITUDE_SCALE * this._ampVariation * (1 + this._agitation * 0.5);
-        u.uFrequency.value = this._undulationSpeed;
+    for (const shaderRef of this._shaderUniforms) {
+      if (shaderRef.tierName !== this._lodTier) continue;
+      const uniforms = shaderRef.uniforms;
+      uniforms.uTime.value = this.time;
+      if (this._lodTier === 'near') {
+        uniforms.uAmplitude.value = POS_AMPLITUDE_SCALE * this._ampVariation * (1 + this._agitation * 0.5);
+        uniforms.uFrequency.value = this._undulationSpeed;
+      } else {
+        uniforms.uAmplitude.value = 0.06;
+        uniforms.uFrequency.value = 1.7;
       }
     }
 
@@ -610,8 +638,9 @@ export class BoneWorm {
           const posAttr = seg.flesh.geometry.attributes.position;
           const bulgePhase = Math.sin(time * 2.5 - i * 0.6);
           const bulgeAmt = 0.008 * (1 + agitation);
+          const baseY = seg.fleshBaseY;
           for (let v = 0; v < posAttr.count; v++) {
-            const oy = posAttr.getY(v);
+            const oy = baseY ? baseY[v] : posAttr.getY(v);
             const wobble = Math.sin(v * 1.7 + time * 3) * bulgeAmt * bulgePhase;
             posAttr.setY(v, oy + wobble);
           }
