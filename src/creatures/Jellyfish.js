@@ -279,11 +279,13 @@ uniform float uDamageSide;
 uniform float uBellSize;
 varying float vBellEdge;
 varying float vBellHeight;
-varying float vBellTravel;`
+varying float vBellTravel;
+varying vec2 vJellyUv;`
         )
         .replace(
           '#include <begin_vertex>',
           `#include <begin_vertex>
+vJellyUv = uv;
 float radial = length(position.xz) / max(uBellSize, 0.001);
 float edge = smoothstep(0.33, 1.0, radial);
 float crown = 1.0 - smoothstep(0.0, 0.45, radial);
@@ -313,13 +315,14 @@ uniform float uPulseTravel;
 uniform sampler2D uVeinMap;
 varying float vBellEdge;
 varying float vBellHeight;
-varying float vBellTravel;`
+varying float vBellTravel;
+varying vec2 vJellyUv;`
         )
         .replace(
           '#include <emissivemap_fragment>',
           `#include <emissivemap_fragment>
 float pulseHead = smoothstep(uPulseTravel - 0.2, uPulseTravel + 0.08, vBellTravel) * (1.0 - smoothstep(uPulseTravel + 0.08, uPulseTravel + 0.24, vBellTravel));
-float veins = texture2D(uVeinMap, vec2(vUv.x, vUv.y * 1.25)).r;
+float veins = texture2D(uVeinMap, vec2(vJellyUv.x, vJellyUv.y * 1.25)).r;
 float fresnel = pow(1.0 - abs(dot(normalize(vViewPosition), normal)), 2.6);
 float contractionGlow = max(uContractionPhase, 0.0) * 0.55;
 totalEmissiveRadiance += diffuseColor.rgb * (pulseHead * 1.25 + veins * 0.2 + fresnel * 0.32 + contractionGlow * vBellEdge * 0.34);`
