@@ -603,7 +603,7 @@ totalEmissiveRadiance += diffuseColor.rgb * (vPulse - 0.76) * 0.42;`
         positions[baseIndex + 1] + ref.liftBias,
         positions[baseIndex + 2]
       );
-      _tmpScale.setScalar(ref.baseScale * (0.86 + Math.sin(t * 2.7 + ref.pulseOffset) * 0.17));
+      _tmpScale.setScalar(ref.baseScale * (0.86 + Math.sin(t * 2.7 + ref.pulseOffset) * 0.17 * system.tierMotionScale));
       _tmpMatrix.compose(_tmpPos, _tmpQuat.identity(), _tmpScale);
       system.mesh.setMatrixAt(i, _tmpMatrix);
     }
