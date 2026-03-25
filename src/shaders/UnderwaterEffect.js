@@ -106,7 +106,7 @@ const UnderwaterShader = {
       vec2 uv = vUv;
 
       // Underwater distortion - subtle wavy effect
-      float distortStr = 0.0015 + depth * 0.000008;
+      float distortStr = 0.0011 + depth * 0.0000055;
       uv.x += sin(uv.y * 15.0 + time * 1.0) * distortStr;
       uv.y += cos(uv.x * 12.0 + time * 0.8) * distortStr * 0.6;
 
@@ -192,8 +192,18 @@ const UnderwaterShader = {
       // A single-sample highlight spill is much cheaper than sampling neighboring
       // texels for bloom, while still keeping bright bioluminescent accents lively.
       float highlight = max(max(color.r, color.g), color.b);
-      float bloomMask = smoothstep(bloomParams.y, 1.0, highlight);
-      float bloomLift = bloomParams.x * (0.18 + depthBlend * 0.22);
+      vec2 bloomProbe = max(vec2(1.0) / resolution, vec2(0.0006));
+      float neighborPeak = 0.25 * (
+        max(max(texture2D(tDiffuse, uv + vec2(bloomProbe.x, 0.0)).r, texture2D(tDiffuse, uv + vec2(bloomProbe.x, 0.0)).g), texture2D(tDiffuse, uv + vec2(bloomProbe.x, 0.0)).b) +
+        max(max(texture2D(tDiffuse, uv - vec2(bloomProbe.x, 0.0)).r, texture2D(tDiffuse, uv - vec2(bloomProbe.x, 0.0)).g), texture2D(tDiffuse, uv - vec2(bloomProbe.x, 0.0)).b) +
+        max(max(texture2D(tDiffuse, uv + vec2(0.0, bloomProbe.y)).r, texture2D(tDiffuse, uv + vec2(0.0, bloomProbe.y)).g), texture2D(tDiffuse, uv + vec2(0.0, bloomProbe.y)).b) +
+        max(max(texture2D(tDiffuse, uv - vec2(0.0, bloomProbe.y)).r, texture2D(tDiffuse, uv - vec2(0.0, bloomProbe.y)).g), texture2D(tDiffuse, uv - vec2(0.0, bloomProbe.y)).b)
+      );
+      float sparkleIsolated =
+        smoothstep(0.04, 0.2, highlight - neighborPeak) *
+        (1.0 - smoothstep(0.08, 0.3, neighborPeak));
+      float bloomMask = smoothstep(bloomParams.y, 1.0, highlight) * (1.0 - sparkleIsolated * 0.85);
+      float bloomLift = bloomParams.x * (0.18 + depthBlend * 0.22) * (1.0 - sparkleIsolated * 0.65);
       color.rgb += color.rgb * bloomMask * bloomLift;
 
       // Slight scanline effect for deep water dread
