@@ -120,8 +120,8 @@ const UnderwaterShader = {
       // Keep aberration subtle: depth-aware, edge-weighted, and hard-capped.
       float edgeDist = distance(uv, vec2(0.5));
       float edgeMask = smoothstep(0.2, 0.74, edgeDist);
-      float caStr = (0.00012 + depthBlend * 0.00058 + abyssBlend * 0.0002) * edgeMask * (1.0 - reducedMode * 0.9);
-      caStr = min(caStr, 0.00095);
+      float caStr = (depthBlend * 0.00014 + abyssBlend * 0.00005) * edgeMask * (1.0 - reducedMode * 0.95);
+      caStr = min(caStr, 0.00022);
       float r = texture2D(tDiffuse, uv + vec2(caStr, caStr * 0.3)).r;
       float b = texture2D(tDiffuse, uv - vec2(caStr, caStr * 0.2)).b;
       color.r = r;
