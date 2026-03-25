@@ -457,7 +457,7 @@ export class Game {
 
     // Update HUD
     const creaturesByType = this.creatures.getCreaturesByType(this.player.position);
-    this.hud.update(depth, this.flashlightOn);
+    this.hud.update(depth, this.flashlightOn, this.camera);
     this.hud.updateLocator(creaturesByType, this.player.position, this.camera);
     this.hud.updateDiagnostics(this._getDiagnosticsSnapshot());
 
