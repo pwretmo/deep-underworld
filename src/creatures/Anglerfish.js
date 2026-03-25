@@ -730,7 +730,7 @@ transformed.y += sin(position.x * 6.0 + uFinTime * 5.3) * 0.02 * uFinWave;`
       if (uniforms) {
         uniforms.uFinTime.value = this.time;
         uniforms.uFinWave.value = 0.5 + THREE.MathUtils.clamp(this._velocity.length() * 0.1, 0.15, 0.8);
-      } else {
+      } else if (!tier.isMedium) {
         fin.rotation.z = Math.sin(this.time * 2.6 + i * Math.PI) * 0.14;
       }
     }
