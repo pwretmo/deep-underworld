@@ -72,6 +72,9 @@ const LIP_DILATION_AMPLITUDE = 0.06;
 const TENDRIL_SWEEP_SPEED = 0.8;
 const TENDRIL_AMPLITUDE = 0.15;
 const LURE_PULSE_SPEED_BASE = 1.4;
+const LURE_FILAMENT_SWING_SPEED = 1.6;
+const LURE_FILAMENT_SWING_AMPLITUDE = 0.25;
+const GULLET_DEEPEN_AMPLITUDE = 0.3;
 const PERISTALTIC_SPEED = 2.5;
 const PERISTALTIC_WAVE_NUMBER = 4.0;
 const PERISTALTIC_AMPLITUDE = 0.08;
@@ -233,7 +236,6 @@ export class AbyssalMaw {
     // LOD state
     this._lodTier = 'near';
     this._lastLodTier = 'near';
-    this._frameCounter = 0;
 
     // Animation state (pre-allocated, zero GC)
     this._breathPhase = Math.random() * Math.PI * 2;
@@ -383,7 +385,10 @@ export class AbyssalMaw {
       const gullet = new THREE.Mesh(gulletGeo, gulletMat);
       gullet.rotation.x = Math.PI / 2;
       gullet.position.z = -(2 + profile.gulletDepth * 0.5);
+      gullet.userData.baseZ = gullet.position.z;
+      gullet.userData.baseScaleY = 1;
       tierGroup.add(gullet);
+      tierGroup.userData.gullet = gullet;
     }
 
     // ── Concentric tooth rings (InstancedMesh on near LOD) ──────────────
@@ -509,6 +514,9 @@ export class AbyssalMaw {
           0.8 + 0.08 + filLen * 0.5
         );
         filament.rotation.x = Math.PI * 0.5 + (Math.random() - 0.5) * 0.2;
+        filament.userData.baseRotX = filament.rotation.x;
+        filament.userData.baseRotZ = filament.rotation.z || 0;
+        filament.userData.swingPhase = Math.random() * Math.PI * 2;
         lure.userData.filament = filament;
         tierGroup.add(filament);
       }
@@ -529,6 +537,7 @@ export class AbyssalMaw {
       tendrilMeshes,
       lureMeshes,
       glow,
+      gullet: tierGroup.userData.gullet || null,
     };
   }
 
@@ -544,7 +553,6 @@ export class AbyssalMaw {
 
   update(dt, playerPos) {
     this.time += dt;
-    this._frameCounter++;
     this.turnTimer += dt;
 
     // ── Movement ────────────────────────────────────────────────────────
@@ -581,11 +589,14 @@ export class AbyssalMaw {
     const pulse = 1 + Math.sin(this._breathPhase) * BREATHING_AMPLITUDE;
     this.group.scale.setScalar(this._baseScale * pulse);
 
-    // ── Tooth ring counter-rotation (all tiers) ─────────────────────────
-    for (const tier of Object.values(this.tiers)) {
-      for (let i = 0; i < tier.rings.length; i++) {
-        const dir = (i % 2 === 0 ? 1 : -1);
-        tier.rings[i].rotation.z += dir * dt * TOOTH_RING_SPEED * (1 + i * 0.15);
+    // ── Tooth ring counter-rotation (near + medium only) ────────────────
+    if (currentTier !== 'far') {
+      const activeTierRings = this.tiers[currentTier];
+      if (activeTierRings) {
+        for (let i = 0; i < activeTierRings.rings.length; i++) {
+          const dir = (i % 2 === 0 ? 1 : -1);
+          activeTierRings.rings[i].rotation.z += dir * dt * TOOTH_RING_SPEED * (1 + i * 0.15);
+        }
       }
     }
 
@@ -628,6 +639,18 @@ export class AbyssalMaw {
       }
     }
 
+    // ── Gullet depth animation (throat visibly deepens during suction) ──
+    if (currentTier !== 'far') {
+      const activeTierGullet = this.tiers[currentTier];
+      if (activeTierGullet && activeTierGullet.gullet) {
+        const g = activeTierGullet.gullet;
+        const deepenFactor = Math.sin(this._breathPhase * 0.8) * GULLET_DEEPEN_AMPLITUDE
+          + this._playerProximity * GULLET_DEEPEN_AMPLITUDE * 0.5;
+        g.position.z = g.userData.baseZ - deepenFactor;
+        g.scale.y = g.userData.baseScaleY + deepenFactor * 0.15;
+      }
+    }
+
     // ── Lure bioluminescence pulse (independent rhythm per lure) ────────
     if (currentTier !== 'far') {
       const activeTier = this.tiers[currentTier];
@@ -639,8 +662,17 @@ export class AbyssalMaw {
           if (lure.material.emissiveIntensity !== undefined) {
             lure.material.emissiveIntensity = intensity;
           }
-          if (lure.userData.filament && lure.userData.filament.material) {
-            lure.userData.filament.material.emissiveIntensity = intensity * 0.5;
+          if (lure.userData.filament) {
+            const fil = lure.userData.filament;
+            if (fil.material) {
+              fil.material.emissiveIntensity = intensity * 0.5;
+            }
+            // Secondary motion: filament swings with delayed momentum
+            const filPhase = (fil.userData.swingPhase || 0) + this.time * LURE_FILAMENT_SWING_SPEED;
+            fil.rotation.x = (fil.userData.baseRotX || 0)
+              + Math.sin(filPhase) * LURE_FILAMENT_SWING_AMPLITUDE;
+            fil.rotation.z = (fil.userData.baseRotZ || 0)
+              + Math.sin(filPhase * 0.7 + i * 1.3) * LURE_FILAMENT_SWING_AMPLITUDE * 0.6;
           }
         }
       }
