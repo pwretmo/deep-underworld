@@ -932,21 +932,60 @@ totalEmissiveRadiance += diffuseColor.rgb * (vPulse - 0.76) * 0.42;`
     group.add(silhouette);
 
     const trailGroup = new THREE.Group();
-    for (let i = 0; i < 3; i++) {
-      const plane = new THREE.Mesh(
-        new THREE.PlaneGeometry(size * 0.09, size * 1.8),
-        new THREE.MeshBasicMaterial({
-          color,
-          transparent: true,
-          opacity: 0.24,
-          depthWrite: false,
-          side: THREE.DoubleSide,
-        })
+    trailGroup.userData.baseRotX = (Math.random() - 0.5) * 0.12;
+    trailGroup.userData.baseRotZ = (Math.random() - 0.5) * 0.12;
+
+    const oralArms = [];
+    const tentacles = [];
+    const farCountScale = LOD_PROFILE.far.appendageCountScale;
+    const reducedOralCount = Math.max(1, Math.round(LOD_PROFILE.near.oralArmCount * farCountScale));
+    const reducedTentacleCount = Math.max(1, Math.round(LOD_PROFILE.near.tentacleMin * farCountScale));
+
+    const oralMat = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.22,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const tentacleMat = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.2,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+
+    for (let i = 0; i < reducedOralCount; i++) {
+      const angle = (i / reducedOralCount) * TWO_PI;
+      const oralPlane = new THREE.Mesh(
+        new THREE.PlaneGeometry(size * 0.12, size * 1.35),
+        oralMat
       );
-      plane.position.y = -size * 0.95;
-      plane.rotation.y = (i / 3) * TWO_PI;
-      trailGroup.add(plane);
+      oralPlane.position.set(Math.cos(angle) * size * 0.1, -size * 0.8, Math.sin(angle) * size * 0.1);
+      oralPlane.rotation.y = angle;
+      trailGroup.add(oralPlane);
+      oralArms.push(this._createAppendageDescriptor(oralPlane, {
+        type: 'oral',
+        angle,
+      }));
     }
+
+    for (let i = 0; i < reducedTentacleCount; i++) {
+      const angle = (i / reducedTentacleCount) * TWO_PI + (Math.random() - 0.5) * 0.22;
+      const tentaclePlane = new THREE.Mesh(
+        new THREE.PlaneGeometry(size * 0.06, size * 1.8),
+        tentacleMat
+      );
+      tentaclePlane.position.set(Math.cos(angle) * size * 0.22, -size * 1.05, Math.sin(angle) * size * 0.22);
+      tentaclePlane.rotation.y = angle;
+      trailGroup.add(tentaclePlane);
+      tentacles.push(this._createAppendageDescriptor(tentaclePlane, {
+        type: 'tentacle',
+        angle,
+      }));
+    }
+
     group.add(trailGroup);
 
     const jet = this._createJetMesh(color, size);
@@ -957,8 +996,8 @@ totalEmissiveRadiance += diffuseColor.rgb * (vPulse - 0.76) * 0.42;`
       bell: farBell,
       inner: silhouette,
       rim: silhouette,
-      oralArms: [],
-      tentacles: [],
+      oralArms,
+      tentacles,
       nematocysts: null,
       animationInterval: 4,
       profile: LOD_PROFILE.far,
@@ -1137,7 +1176,9 @@ totalEmissiveRadiance += diffuseColor.rgb * (vPulse - 0.76) * 0.42;`
 
   _animateTierAppendages(jelly, tier, pulse, t) {
     if (tier.farTrailGroup) {
-      tier.farTrailGroup.rotation.y += 0.03 + Math.max(0, pulse) * 0.06;
+      tier.farTrailGroup.rotation.y += 0.025 + Math.max(0, pulse) * 0.05;
+      tier.farTrailGroup.rotation.x = tier.farTrailGroup.userData.baseRotX + Math.sin(t * 0.45 + jelly.phase) * 0.08;
+      tier.farTrailGroup.rotation.z = tier.farTrailGroup.userData.baseRotZ + Math.cos(t * 0.38 + jelly.rollPhase) * 0.07;
       return;
     }
 
