@@ -1203,11 +1203,11 @@ totalEmissiveRadiance += diffuseColor.rgb * (vPulse - 0.76) * 0.42;`
       const dx = playerPos.x - jelly.group.position.x;
       const dy = playerPos.y - jelly.group.position.y;
       const dz = playerPos.z - jelly.group.position.z;
-      const distToPlayer = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      const preMoveDistToPlayer = Math.sqrt(dx * dx + dy * dy + dz * dz);
       const planarLength = Math.max(0.0001, Math.sqrt(dx * dx + dz * dz));
       jelly.playerDirX = dx / planarLength;
       jelly.playerDirZ = dz / planarLength;
-      jelly.proximityInfluence = THREE.MathUtils.clamp(1 - distToPlayer / 22, 0, 1);
+      jelly.proximityInfluence = THREE.MathUtils.clamp(1 - preMoveDistToPlayer / 22, 0, 1);
 
       const phaseSpeedScale = 1 + jelly.proximityInfluence * 0.7;
       const contractionSpeed = jelly.pulseSpeed * 1.45 * phaseSpeedScale;
@@ -1225,7 +1225,7 @@ totalEmissiveRadiance += diffuseColor.rgb * (vPulse - 0.76) * 0.42;`
 
       if (jelly.damageCooldown > 0) {
         jelly.damageCooldown -= dt;
-      } else if (distToPlayer < 2.3) {
+      } else if (preMoveDistToPlayer < 2.3) {
         jelly.damageAmount = 1;
         jelly.damageCooldown = 2.2;
         jelly.damageSide = Math.atan2(dz, dx);
@@ -1247,6 +1247,11 @@ totalEmissiveRadiance += diffuseColor.rgb * (vPulse - 0.76) * 0.42;`
       jelly.group.position.x += jelly.velocityX * dt;
       jelly.group.position.y += jelly.velocityY * dt;
       jelly.group.position.z += jelly.velocityZ * dt;
+
+      const postMoveDx = playerPos.x - jelly.group.position.x;
+      const postMoveDy = playerPos.y - jelly.group.position.y;
+      const postMoveDz = playerPos.z - jelly.group.position.z;
+      const distToPlayer = Math.sqrt(postMoveDx * postMoveDx + postMoveDy * postMoveDy + postMoveDz * postMoveDz);
 
       const activeTierName = this._getLodTierName(distToPlayer, jelly.lastActiveTierName);
       const activeTier = jelly.tiers[activeTierName];
