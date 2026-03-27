@@ -1,16 +1,16 @@
-import * as THREE from 'three';
-import { Player } from './player/Player.js';
-import { Ocean } from './environment/Ocean.js';
-import { Terrain } from './environment/Terrain.js';
-import { Flora } from './environment/Flora.js';
-import { CreatureManager } from './creatures/CreatureManager.js';
-import { HUD } from './ui/HUD.js';
-import { AudioManager } from './audio/AudioManager.js';
-import { UnderwaterEffect } from './shaders/UnderwaterEffect.js';
-import { PreloadCoordinator } from './PreloadCoordinator.js';
-import { AbyssEncounter } from './encounters/AbyssEncounter.js';
-import { qualityManager } from './QualityManager.js';
-import { PhysicsWorld } from './physics/PhysicsWorld.js';
+import * as THREE from "three";
+import { Player } from "./player/Player.js";
+import { Ocean } from "./environment/Ocean.js";
+import { Terrain } from "./environment/Terrain.js";
+import { Flora } from "./environment/Flora.js";
+import { CreatureManager } from "./creatures/CreatureManager.js";
+import { HUD } from "./ui/HUD.js";
+import { AudioManager } from "./audio/AudioManager.js";
+import { UnderwaterEffect } from "./shaders/UnderwaterEffect.js";
+import { PreloadCoordinator } from "./PreloadCoordinator.js";
+import { AbyssEncounter } from "./encounters/AbyssEncounter.js";
+import { qualityManager } from "./QualityManager.js";
+import { PhysicsWorld } from "./physics/PhysicsWorld.js";
 
 export class Game {
   constructor() {
@@ -21,44 +21,62 @@ export class Game {
     this.startPreparing = false;
 
     // Renderer
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      powerPreference: "high-performance",
+    });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     const qSettings = qualityManager.getSettings();
     this.renderer.shadowMap.enabled = qSettings.shadowMapEnabled;
-    this.renderer.shadowMap.type = qualityManager.tier === 'ultra'
-      ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
-    if (qualityManager.tier === 'ultra') {
+    this.renderer.shadowMap.type =
+      qualityManager.tier === "ultra"
+        ? THREE.PCFSoftShadowMap
+        : THREE.PCFShadowMap;
+    if (qualityManager.tier === "ultra") {
       this.renderer.setPixelRatio(window.devicePixelRatio);
     }
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.76;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.domElement.id = 'game-canvas';
-    this.renderer.domElement.dataset.testid = 'game-canvas';
+    this.renderer.domElement.id = "game-canvas";
+    this.renderer.domElement.dataset.testid = "game-canvas";
     document.body.appendChild(this.renderer.domElement);
 
     // Camera
-    this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    this.camera = new THREE.PerspectiveCamera(
+      75,
+      window.innerWidth / window.innerHeight,
+      0.1,
+      1000,
+    );
     this.camera.position.set(0, -5, 0);
     this.scene.add(this.camera);
 
     // Systems
-    this.player = new Player(this.camera, this.renderer.domElement, this.renderer);
+    this.player = new Player(
+      this.camera,
+      this.renderer.domElement,
+      this.renderer,
+    );
     this.ocean = new Ocean(this.scene);
     this.terrain = new Terrain(this.scene);
     this.flora = new Flora(this.scene);
     this.creatures = new CreatureManager(this.scene);
     this.hud = new HUD();
     this.audio = new AudioManager();
-    this.underwaterEffect = new UnderwaterEffect(this.renderer, this.scene, this.camera);
+    this.underwaterEffect = new UnderwaterEffect(
+      this.renderer,
+      this.scene,
+      this.camera,
+    );
     this.abyssEncounter = new AbyssEncounter();
     this.physicsWorld = null; // initialized async in _primeAndEnterGameplay
 
     // Detect high-end GPU for potential ultra tier auto-select
     qualityManager.detectGPU(this.renderer);
     // If GPU detection switched to ultra, apply renderer settings now
-    if (qualityManager.tier === 'ultra') {
+    if (qualityManager.tier === "ultra") {
       this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       this.renderer.setPixelRatio(window.devicePixelRatio);
     }
@@ -74,7 +92,7 @@ export class Game {
       exposure: {
         surface: 0.76,
         mid: 0.68,
-        deep: 0.60,
+        deep: 0.6,
         abyss: 0.56,
         flashlightBoost: 0.16,
         easing: 0.08,
@@ -105,14 +123,17 @@ export class Game {
     this.creatureManager = this.creatures;
 
     // Quality tier change listener
-    window.addEventListener('qualitychange', (e) => {
+    window.addEventListener("qualitychange", (e) => {
       const s = e.detail.settings;
       const tier = e.detail.tier;
       this.renderer.shadowMap.enabled = s.shadowMapEnabled;
       this._pointLightBudget.shallowMax = s.maxPointLights;
-      this._pointLightBudget.deepMax = Math.max(3, Math.round(s.maxPointLights * 0.6));
+      this._pointLightBudget.deepMax = Math.max(
+        3,
+        Math.round(s.maxPointLights * 0.6),
+      );
       // Ultra tier: soft shadows + uncapped pixel ratio
-      if (tier === 'ultra') {
+      if (tier === "ultra") {
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         this.renderer.setPixelRatio(window.devicePixelRatio);
       } else {
@@ -133,20 +154,24 @@ export class Game {
     this.depth = 0;
     this.autoplay = false;
     this._autoplayState = this._createAutoplayState();
-    this.menuOverlay = document.getElementById('menu');
-    this.pauseOverlay = document.getElementById('paused');
-    this.gameOverOverlay = document.getElementById('game-over');
-    this.controlsHelpOverlay = document.getElementById('controls-help');
+    this.menuOverlay = document.getElementById("menu");
+    this.pauseOverlay = document.getElementById("paused");
+    this.gameOverOverlay = document.getElementById("game-over");
+    this.controlsHelpOverlay = document.getElementById("controls-help");
     this.controlsHelpVisible = false;
-    this.descentOverlay = document.getElementById('descent-transition');
-    this.descentProgressBar = document.getElementById('descent-progress-bar');
-    this._descentItems = document.getElementById('descent-items');
-    this._descentTease = document.getElementById('descent-tease');
+    this.descentOverlay = document.getElementById("descent-transition");
+    this.descentProgressBar = document.getElementById("descent-progress-bar");
+    this._descentItems = document.getElementById("descent-items");
+    this._descentTease = document.getElementById("descent-tease");
     this._descentActive = false;
-    this._descentPhase = 'idle';
+    this._descentPhase = "idle";
     this._descentLastCreatureCount = 0;
     this._descentLastTeaseTime = 0;
-    this._startTransition = { owner: 'game', startRequested: false, started: false };
+    this._startTransition = {
+      owner: "game",
+      startRequested: false,
+      started: false,
+    };
 
     this.preload = new PreloadCoordinator({
       renderer: this.renderer,
@@ -168,35 +193,47 @@ export class Game {
   }
 
   _setupEvents() {
-    window.addEventListener('resize', () => {
+    window.addEventListener("resize", () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(window.innerWidth, window.innerHeight);
       this.underwaterEffect.resize();
     });
 
-    document.addEventListener('keydown', (e) => {
+    document.addEventListener("keydown", (e) => {
       // Autoplay mode: ESC toggles pause, but only after priming is complete
-      if (e.code === 'Escape' && this.autoplay && !this.gameOver && !this.startPreparing) {
-        const pauseVisible = this.pauseOverlay.classList.contains('visible');
+      if (
+        e.code === "Escape" &&
+        this.autoplay &&
+        !this.gameOver &&
+        !this.startPreparing
+      ) {
+        const pauseVisible = this.pauseOverlay.classList.contains("visible");
         if (this.running || pauseVisible) {
           this._toggleAutoplayPause();
         }
         return;
       }
-      if (e.code === 'KeyV' && (this.running || this.pauseOverlay.classList.contains('visible'))) {
+      if (
+        e.code === "KeyV" &&
+        (this.running || this.pauseOverlay.classList.contains("visible"))
+      ) {
         this.hud.toggleDiagnostics();
         return;
       }
       if (!this.running) return;
-      if (e.code === 'KeyH') this._toggleControlsHelp();
-      if (e.code === 'KeyF') this._toggleFlashlight();
-      if (e.code === 'KeyE') this._sonarPing();
-      if (e.code === 'KeyC') this.hud.toggleLocator();
-      if (e.code === 'Digit0') this.hud.stopTracking();
+      if (e.code === "KeyH") this._toggleControlsHelp();
+      if (e.code === "KeyF") this._toggleFlashlight();
+      if (e.code === "KeyE") this._sonarPing();
+      if (e.code === "KeyC") this.hud.toggleLocator();
+      if (e.code === "Digit0") this.hud.stopTracking();
       if (this.hud.locatorVisible) {
         if (this.hud.handleLocatorNavigation(e.code)) {
-          if (e.code === 'ArrowUp' || e.code === 'ArrowDown' || e.code === 'Enter') {
+          if (
+            e.code === "ArrowUp" ||
+            e.code === "ArrowDown" ||
+            e.code === "Enter"
+          ) {
             e.preventDefault();
           }
           return;
@@ -211,23 +248,26 @@ export class Game {
         if (this.pendingStart && !this.gameOver) {
           this._beginGameplay();
         } else if (this.running && !this.gameOver) {
-          this.pauseOverlay.classList.remove('visible');
+          this.pauseOverlay.classList.remove("visible");
           this._resumeAudio();
         }
       } else if (this.pendingStart) {
         this.pendingStart = false;
         this._startTransition.startRequested = false;
         this._pauseAudio();
+      } else if (this.startPreparing && !this.gameOver) {
+        this._lockLostDuringDescent = true;
+        this._pauseAudio();
       } else if (this.running && !this.gameOver) {
-        this.pauseOverlay.classList.add('visible');
+        this.pauseOverlay.classList.add("visible");
         this._pauseAudio();
       }
     };
-    document.addEventListener('pointerlockerror', () => {
+    document.addEventListener("pointerlockerror", () => {
       if (!this.pendingStart) return;
       this._beginGameplayWithoutPointerLock();
     });
-    this.pauseOverlay.addEventListener('click', () => {
+    this.pauseOverlay.addEventListener("click", () => {
       if (this.autoplay) {
         if (!this.startPreparing) this._toggleAutoplayPause();
       } else {
@@ -237,13 +277,20 @@ export class Game {
   }
 
   start() {
-    if (this.gameOver || this.running || this.pendingStart || this.startPreparing || this._startTransition.startRequested) return;
+    if (
+      this.gameOver ||
+      this.running ||
+      this.pendingStart ||
+      this.startPreparing ||
+      this._startTransition.startRequested
+    )
+      return;
     this.autoplay = false;
     this.player.clearAutoplayInput();
     this._startTransition.startRequested = true;
-    this.preload.cancel('user-start');
+    this.preload.cancel("user-start");
     this.pendingStart = true;
-    this.pauseOverlay.classList.remove('visible');
+    this.pauseOverlay.classList.remove("visible");
     this.audio.start();
 
     const lockRequested = this.player.lock();
@@ -258,7 +305,7 @@ export class Game {
       this._beginGameplayWithoutPointerLock();
     }, 250);
 
-    console.log('[deep-underworld] Game starting...');
+    console.log("[deep-underworld] Game starting...");
   }
 
   _beginGameplayWithoutPointerLock() {
@@ -273,14 +320,14 @@ export class Game {
    */
   startAutoplay() {
     if (this.running || this.startPreparing) return;
-    this.preload.cancel('autoplay-start');
+    this.preload.cancel("autoplay-start");
     this.autoplay = true;
     this.player.locked = true; // simulate lock without real pointer lock
-    this.player.euler.set(0, 0, 0, 'YXZ');
+    this.player.euler.set(0, 0, 0, "YXZ");
     this.player.camera.quaternion.setFromEuler(this.player.euler);
     this._updateAutoplayDrive(Math.max(0, -this.player.position.y), 0);
     this.audio.start();
-    void this._primeAndEnterGameplay('Autoplay mode active');
+    void this._primeAndEnterGameplay("Autoplay mode active");
   }
 
   restart() {
@@ -290,13 +337,13 @@ export class Game {
     this.pendingStart = false;
     this.running = false;
     this.startPreparing = false;
-    this.gameOverOverlay.classList.add('visible');
+    this.gameOverOverlay.classList.add("visible");
     this.player.reset();
     this.creatures.reset();
     this.player.flashlight.visible = false;
-    this.pauseOverlay.classList.remove('visible');
+    this.pauseOverlay.classList.remove("visible");
     this._descentActive = false;
-    this.descentOverlay.classList.remove('visible', 'fade-out');
+    this.descentOverlay.classList.remove("visible", "fade-out");
     if (this.autoplay) {
       this._autoplayState = this._createAutoplayState();
       this.startAutoplay();
@@ -307,17 +354,20 @@ export class Game {
 
   _toggleControlsHelp() {
     this.controlsHelpVisible = !this.controlsHelpVisible;
-    this.controlsHelpOverlay.classList.toggle('visible', this.controlsHelpVisible);
+    this.controlsHelpOverlay.classList.toggle(
+      "visible",
+      this.controlsHelpVisible,
+    );
   }
 
   _toggleAutoplayPause() {
     if (this.running) {
       this.running = false;
-      this.pauseOverlay.classList.add('visible');
+      this.pauseOverlay.classList.add("visible");
       this._pauseAudio();
     } else {
       this.running = true;
-      this.pauseOverlay.classList.remove('visible');
+      this.pauseOverlay.classList.remove("visible");
       this._resumeAudio();
     }
   }
@@ -328,12 +378,15 @@ export class Game {
   }
 
   _sonarPing() {
-    this.hud.sonarPing(this.player.position, this.creatures.getCreaturePositions());
+    this.hud.sonarPing(
+      this.player.position,
+      this.creatures.getCreaturePositions(),
+    );
     this.audio.playSonar();
   }
 
   _beginGameplay() {
-    void this._primeAndEnterGameplay('Gameplay started');
+    void this._primeAndEnterGameplay("Gameplay started");
   }
 
   async _primeAndEnterGameplay(logMessage) {
@@ -343,13 +396,13 @@ export class Game {
     this._startTransition.startRequested = false;
     this._startTransition.started = true;
     this.pendingStart = false;
-    this.menuOverlay.classList.add('hidden');
-    this.gameOverOverlay.classList.remove('visible');
-    this.pauseOverlay.classList.remove('visible');
+    this.menuOverlay.classList.add("hidden");
+    this.gameOverOverlay.classList.remove("visible");
+    this.pauseOverlay.classList.remove("visible");
 
-    this.descentOverlay.classList.add('visible');
-    this.descentOverlay.classList.remove('fade-out');
-    this.descentProgressBar.style.width = '0%';
+    this.descentOverlay.classList.add("visible");
+    this.descentOverlay.classList.remove("fade-out");
+    this.descentProgressBar.style.width = "0%";
     this._descentActive = true;
     this._descentPhase = 'physics';
     this._descentLastCreatureCount = 0;
@@ -382,10 +435,10 @@ export class Game {
     // The depth-gated spawn queue may never fully drain at shallow depth,
     // so we dismiss here rather than waiting for isFullyLoaded().
     this._descentActive = false;
-    this.descentOverlay.classList.add('fade-out');
+    this.descentOverlay.classList.add("fade-out");
     setTimeout(() => {
-      this.descentOverlay.classList.remove('visible');
-      this.descentOverlay.classList.remove('fade-out');
+      this.descentOverlay.classList.remove("visible");
+      this.descentOverlay.classList.remove("fade-out");
     }, 800);
 
     // Warm-up render to force shader compilation before gameplay.
@@ -393,7 +446,13 @@ export class Game {
 
     this.running = true;
     this.startPreparing = false;
-    this._resumeAudio();
+
+    if (this._lockLostDuringDescent) {
+      this._lockLostDuringDescent = false;
+      this.pauseOverlay.classList.add("visible");
+    } else {
+      this._resumeAudio();
+    }
     this.clock.start();
 
     console.log(`[deep-underworld] ${logMessage}`, primeSummary);
@@ -416,54 +475,90 @@ export class Game {
     const floraTotal = floraLoaded + floraPending;
 
     const phase = this._descentPhase;
-    const physicsDone = phase !== 'physics';
-    const shadersDone = phase !== 'physics' && phase !== 'shaders';
+    const physicsDone = phase !== "physics";
+    const shadersDone = phase !== "physics" && phase !== "shaders";
 
-    const creaturePct = creatures.total > 0 ? creatures.loaded / creatures.total : 1;
+    const creaturePct =
+      creatures.total > 0 ? creatures.loaded / creatures.total : 1;
     const terrainPct = terrainTotal > 0 ? terrainLoaded / terrainTotal : 1;
     const floraPct = floraTotal > 0 ? floraLoaded / floraTotal : 1;
 
     const physicsPct = physicsDone ? 1 : 0;
-    const shaderPct = shadersDone ? 1 : (phase === 'shaders' ? 0.5 : 0);
+    const shaderPct = shadersDone ? 1 : phase === "shaders" ? 0.5 : 0;
 
-    const pct = Math.min(100, (
-      physicsPct * 0.05 +
-      shaderPct * 0.10 +
-      creaturePct * 0.45 +
-      terrainPct * 0.20 +
-      floraPct * 0.20
-    ) * 100);
-    this.descentProgressBar.style.width = pct + '%';
+    const pct = Math.min(
+      100,
+      (physicsPct * 0.05 +
+        shaderPct * 0.1 +
+        creaturePct * 0.45 +
+        terrainPct * 0.2 +
+        floraPct * 0.2) *
+        100,
+    );
+    this.descentProgressBar.style.width = pct + "%";
 
     // Update itemized status lines
-    const allDone = phase === 'finalizing' || !this._descentActive;
+    const allDone = phase === "finalizing" || !this._descentActive;
     const items = [
-      { id: 'physics', label: 'Initializing physics...', done: physicsDone, active: phase === 'physics' },
-      { id: 'shaders', label: 'Compiling shaders...', done: shadersDone, active: phase === 'shaders' },
       {
-        id: 'creatures', done: allDone && creaturePct >= 1, active: !allDone && shadersDone,
-        label: creatures.total > 0 ? `Spawning creatures... ${creatures.loaded}/${creatures.total}` : 'Spawning creatures...',
+        id: "physics",
+        label: "Initializing physics...",
+        done: physicsDone,
+        active: phase === "physics",
       },
       {
-        id: 'terrain', done: allDone && terrainPct >= 1, active: !allDone && shadersDone,
-        label: terrainTotal > 0 ? `Generating terrain... ${terrainLoaded}/${terrainTotal} chunks` : 'Generating terrain...',
+        id: "shaders",
+        label: "Compiling shaders...",
+        done: shadersDone,
+        active: phase === "shaders",
       },
       {
-        id: 'flora', done: allDone && floraPct >= 1, active: !allDone && shadersDone,
-        label: floraTotal > 0 ? `Growing flora... ${floraLoaded}/${floraTotal} chunks` : 'Growing flora...',
+        id: "creatures",
+        done: allDone && creaturePct >= 1,
+        active: !allDone && shadersDone,
+        label:
+          creatures.total > 0
+            ? `Spawning creatures... ${creatures.loaded}/${creatures.total}`
+            : "Spawning creatures...",
+      },
+      {
+        id: "terrain",
+        done: allDone && terrainPct >= 1,
+        active: !allDone && shadersDone,
+        label:
+          terrainTotal > 0
+            ? `Generating terrain... ${terrainLoaded}/${terrainTotal} chunks`
+            : "Generating terrain...",
+      },
+      {
+        id: "flora",
+        done: allDone && floraPct >= 1,
+        active: !allDone && shadersDone,
+        label:
+          floraTotal > 0
+            ? `Growing flora... ${floraLoaded}/${floraTotal} chunks`
+            : "Growing flora...",
       },
     ];
 
-    let html = '';
+    let html = "";
     for (const item of items) {
-      const cls = item.done ? 'descent-item done' : item.active ? 'descent-item active' : 'descent-item';
-      const check = item.done ? '✓' : item.active ? '◦' : ' ';
+      const cls = item.done
+        ? "descent-item done"
+        : item.active
+          ? "descent-item active"
+          : "descent-item";
+      const check = item.done ? "✓" : item.active ? "◦" : " ";
       html += `<div class="${cls}"><span class="descent-item-check">${check}</span><span class="descent-item-text">${item.label}</span></div>`;
     }
     this._descentItems.innerHTML = html;
 
     // Creature tease
-    if (data && data.creatures && data.creatures.loaded > this._descentLastCreatureCount) {
+    if (
+      data &&
+      data.creatures &&
+      data.creatures.loaded > this._descentLastCreatureCount
+    ) {
       const now = performance.now();
       if (now - this._descentLastTeaseTime > 2000) {
         this._descentLastTeaseTime = now;
@@ -475,43 +570,46 @@ export class Game {
 
   _showCreatureTease(creaturesProgress) {
     const teaseMap = {
-      jellyfish: 'Bioluminescent pulses detected...',
-      anglerfish: 'Something lurks in the dark...',
-      ghostshark: 'Spectral signatures nearby...',
-      leviathan: 'Massive sonar returns detected...',
-      deepone: 'Unknown life forms below...',
-      boneworm: 'Biomechanical signatures emerging...',
-      spinaleel: 'Writhing movement in the deep...',
-      sirenSkull: 'Haunting frequencies detected...',
-      lamprey: 'Parasitic organisms detected...',
-      abyssalmaw: 'The abyss stares back...',
-      biomechcrab: 'Metallic scuttling detected...',
-      needlefish: 'Swift shadows in the current...',
-      parasite: 'Symbiotic life forms nearby...',
-      sporecloud: 'Spore density increasing...',
-      tendrilhunter: 'Tendrils probing the darkness...',
-      harvester: 'Industrial sounds echoing...',
-      birthsac: 'Organic growths pulsing...',
-      voidjelly: 'Void signatures detected...',
-      chaindragger: 'Metal scraping in the deep...',
-      mechoctopus: 'Mechanical appendages detected...',
-      facelessone: 'Something without a face watches...',
-      amalgam: 'Merged forms stirring...',
-      sentinel: 'Guardian presence detected...',
-      abysswraith: 'Wraith-like movement detected...',
-      ironwhale: 'Massive metallic echoes...',
-      husk: 'Empty shells drifting...',
-      pipeorgan: 'Deep resonance detected...',
-      tubecluster: 'Tube formations growing...',
-      ribcage: 'Skeletal structures detected...',
+      jellyfish: "Bioluminescent pulses detected...",
+      anglerfish: "Something lurks in the dark...",
+      ghostshark: "Spectral signatures nearby...",
+      leviathan: "Massive sonar returns detected...",
+      deepone: "Unknown life forms below...",
+      boneworm: "Biomechanical signatures emerging...",
+      spinaleel: "Writhing movement in the deep...",
+      sirenSkull: "Haunting frequencies detected...",
+      lamprey: "Parasitic organisms detected...",
+      abyssalmaw: "The abyss stares back...",
+      biomechcrab: "Metallic scuttling detected...",
+      needlefish: "Swift shadows in the current...",
+      parasite: "Symbiotic life forms nearby...",
+      sporecloud: "Spore density increasing...",
+      tendrilhunter: "Tendrils probing the darkness...",
+      harvester: "Industrial sounds echoing...",
+      birthsac: "Organic growths pulsing...",
+      voidjelly: "Void signatures detected...",
+      chaindragger: "Metal scraping in the deep...",
+      mechoctopus: "Mechanical appendages detected...",
+      facelessone: "Something without a face watches...",
+      amalgam: "Merged forms stirring...",
+      sentinel: "Guardian presence detected...",
+      abysswraith: "Wraith-like movement detected...",
+      ironwhale: "Massive metallic echoes...",
+      husk: "Empty shells drifting...",
+      pipeorgan: "Deep resonance detected...",
+      tubecluster: "Tube formations growing...",
+      ribcage: "Skeletal structures detected...",
     };
 
     // Try to find what creature type was last spawned
     const spawned = this.creatures.creatures || [];
-    let msg = 'Scanning the deep...';
+    let msg = "Scanning the deep...";
     for (let i = spawned.length - 1; i >= 0; i--) {
       const key = spawned[i].type;
-      if (teaseMap[key]) { msg = teaseMap[key]; break; }
+      if (teaseMap[key]) {
+        msg = teaseMap[key];
+        break;
+      }
     }
 
     this._descentTease.innerHTML = `<span>${msg}</span>`;
@@ -532,97 +630,124 @@ export class Game {
 
     const dt = Math.min(this.clock.getDelta(), 0.05);
     qualityManager.updateFrameTime(dt);
-    if (!this.running || this.gameOver || (!this.player.locked && !this.autoplay)) return;
+    if (
+      !this.running ||
+      this.gameOver ||
+      (!this.player.locked && !this.autoplay)
+    )
+      return;
 
     try {
-    // FPS counter
-    this._fpsFrames++;
-    this._fpsTime += dt;
-    if (this._fpsTime >= 1) {
-      this.fps = Math.round(this._fpsFrames / this._fpsTime);
-      this._fpsFrames = 0;
-      this._fpsTime = 0;
-    }
+      // FPS counter
+      this._fpsFrames++;
+      this._fpsTime += dt;
+      if (this._fpsTime >= 1) {
+        this.fps = Math.round(this._fpsFrames / this._fpsTime);
+        this._fpsFrames = 0;
+        this._fpsTime = 0;
+      }
 
-    const depth = Math.max(0, -this.player.position.y);
-    this.depth = depth;
-    this.player.depth = depth;
-    this._updateAutoplayDrive(depth, dt);
+      const depth = Math.max(0, -this.player.position.y);
+      this.depth = depth;
+      this.player.depth = depth;
+      this._updateAutoplayDrive(depth, dt);
 
-    // Step physics before player update so collisions are current
-    if (this.physicsWorld) {
-      this.physicsWorld.step(dt);
-    }
+      // Step physics before player update so collisions are current
+      if (this.physicsWorld) {
+        this.physicsWorld.step(dt);
+      }
 
-    // Update systems
-    this.player.update(dt);
-    // Sync fog into volumetric beam shaders so they fade with scene fog
-    if (this.flashlightOn) {
-      this.player.updateFogUniforms(this._fog);
-    }
-    this.ocean.update(dt, depth, this.player.position);
+      // Update systems
+      this.player.update(dt);
+      // Sync fog into volumetric beam shaders so they fade with scene fog
+      if (this.flashlightOn) {
+        this.player.updateFogUniforms(this._fog);
+      }
+      this.ocean.update(dt, depth, this.player.position);
 
-    // Time terrain + flora chunk work so creature spawning can be deferred
-    // when the frame is already heavy (prevents compounding expensive operations).
-    const _initStart = performance.now();
-    this.terrain.update(this.player.position);
-    this.flora.update(dt, this.player.position);
-    const _initElapsed = performance.now() - _initStart;
-    const _spawnBudget = Math.max(0, 12 - _initElapsed);
-    const _descentAssistActive = this.preload.isDescentAssistActive();
-    const _effectiveSpawnBudget = _descentAssistActive ? 0 : _spawnBudget;
-    this.creatures.update(dt, this.player.position, depth, _effectiveSpawnBudget);
+      // Time terrain + flora chunk work so creature spawning can be deferred
+      // when the frame is already heavy (prevents compounding expensive operations).
+      const _initStart = performance.now();
+      this.terrain.update(this.player.position);
+      this.flora.update(dt, this.player.position);
+      const _initElapsed = performance.now() - _initStart;
+      const _spawnBudget = Math.max(0, 12 - _initElapsed);
+      const _descentAssistActive = this.preload.isDescentAssistActive();
+      const _effectiveSpawnBudget = _descentAssistActive ? 0 : _spawnBudget;
+      this.creatures.update(
+        dt,
+        this.player.position,
+        depth,
+        _effectiveSpawnBudget,
+      );
 
-    const nearestCreatureDist = this.creatures.getNearestCreatureDistance(this.player.position);
+      const nearestCreatureDist = this.creatures.getNearestCreatureDistance(
+        this.player.position,
+      );
 
-    // Depth tracking
-    if (depth > this.maxDepth) this.maxDepth = depth;
+      // Depth tracking
+      if (depth > this.maxDepth) this.maxDepth = depth;
 
-    // Update HUD
-    const creaturesByType = this.creatures.getCreaturesByType(this.player.position);
-    this.hud.update(depth, this.flashlightOn, this.camera);
-    this.hud.updateLocator(creaturesByType, this.player.position, this.camera);
-    this.hud.updateDiagnostics(this._getDiagnosticsSnapshot());
-    this.hud.updateBackgroundLoading(this.preload.isDescentAssistActive());
+      // Update HUD
+      const creaturesByType = this.creatures.getCreaturesByType(
+        this.player.position,
+      );
+      this.hud.update(depth, this.flashlightOn, this.camera);
+      this.hud.updateLocator(
+        creaturesByType,
+        this.player.position,
+        this.camera,
+      );
+      this.hud.updateDiagnostics(this._getDiagnosticsSnapshot());
+      this.hud.updateBackgroundLoading(this.preload.isDescentAssistActive());
 
-    // Update underwater fog based on depth, then let encounter override if active
-    this._updateEnvironmentForDepth(depth);
-    this._updateRenderPipelineForDepth(depth);
-    this.abyssEncounter.update(dt, depth, this.player, this.scene, this._fog, this.ocean.ambientLight, this.hud, this.audio);
+      // Update underwater fog based on depth, then let encounter override if active
+      this._updateEnvironmentForDepth(depth);
+      this._updateRenderPipelineForDepth(depth);
+      this.abyssEncounter.update(
+        dt,
+        depth,
+        this.player,
+        this.scene,
+        this._fog,
+        this.ocean.ambientLight,
+        this.hud,
+        this.audio,
+      );
 
-    this.audio.update(dt, {
-      depth,
-      nearestCreatureDist,
-      encounterState: this.abyssEncounter.getAudioState(),
-    });
+      this.audio.update(dt, {
+        depth,
+        nearestCreatureDist,
+        encounterState: this.abyssEncounter.getAudioState(),
+      });
 
-    this._updatePointLightBudget(dt, depth, this.player.position);
+      this._updatePointLightBudget(dt, depth, this.player.position);
 
-    // Keep descent assist pumping in both regular and autoplay starts,
-    // but only when the frame hasn't already spent its initialization budget
-    // on terrain/flora/creature work.
-    if ((performance.now() - _initStart) < 14) {
-      this.preload.pumpDescentAssist();
-    }
+      // Keep descent assist pumping in both regular and autoplay starts,
+      // but only when the frame hasn't already spent its initialization budget
+      // on terrain/flora/creature work.
+      if (performance.now() - _initStart < 14) {
+        this.preload.pumpDescentAssist();
+      }
 
-    // Safety-net: dismiss descent overlay if still active (normally handled in _primeAndEnterGameplay)
-    if (this._descentActive) {
-      this._updateDescentProgress();
-      this._descentActive = false;
-      this.descentOverlay.classList.add('fade-out');
-      setTimeout(() => {
-        this.descentOverlay.classList.remove('visible');
-        this.descentOverlay.classList.remove('fade-out');
-      }, 800);
-    }
+      // Safety-net: dismiss descent overlay if still active (normally handled in _primeAndEnterGameplay)
+      if (this._descentActive) {
+        this._updateDescentProgress();
+        this._descentActive = false;
+        this.descentOverlay.classList.add("fade-out");
+        setTimeout(() => {
+          this.descentOverlay.classList.remove("visible");
+          this.descentOverlay.classList.remove("fade-out");
+        }, 800);
+      }
 
-    // Render with post-processing
-    this.underwaterEffect.render(depth, {
-      flashlightOn: this.flashlightOn,
-      exposure: this.renderer.toneMappingExposure,
-    });
+      // Render with post-processing
+      this.underwaterEffect.render(depth, {
+        flashlightOn: this.flashlightOn,
+        exposure: this.renderer.toneMappingExposure,
+      });
     } catch (err) {
-      console.error('[deep-underworld] Animation frame error:', err);
+      console.error("[deep-underworld] Animation frame error:", err);
     }
   }
 
@@ -652,48 +777,52 @@ export class Game {
       const gl = this.renderer.getContext();
       if (!gl) {
         return {
-          context: 'webgl',
-          vendor: 'Unknown',
-          renderer: 'Unavailable',
+          context: "webgl",
+          vendor: "Unknown",
+          renderer: "Unavailable",
           hardwareAccelerated: null,
-          hardwareAcceleratedLabel: 'Unknown',
+          hardwareAcceleratedLabel: "Unknown",
         };
       }
 
-      const context = typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext
-        ? 'webgl2'
-        : 'webgl1';
-      const ext = gl.getExtension?.('WEBGL_debug_renderer_info');
+      const context =
+        typeof WebGL2RenderingContext !== "undefined" &&
+        gl instanceof WebGL2RenderingContext
+          ? "webgl2"
+          : "webgl1";
+      const ext = gl.getExtension?.("WEBGL_debug_renderer_info");
       const vendor = ext
         ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL)
         : gl.getParameter(gl.VENDOR);
       const renderer = ext
         ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)
         : gl.getParameter(gl.RENDERER);
-      const normalized = `${vendor ?? ''} ${renderer ?? ''}`.toLowerCase();
+      const normalized = `${vendor ?? ""} ${renderer ?? ""}`.toLowerCase();
       const softwareRenderer = [
-        'swiftshader',
-        'llvmpipe',
-        'software',
-        'softpipe',
-        'mesa offscreen',
+        "swiftshader",
+        "llvmpipe",
+        "software",
+        "softpipe",
+        "mesa offscreen",
       ].some((token) => normalized.includes(token));
       const hardwareAccelerated = !softwareRenderer;
 
       return {
         context,
-        vendor: vendor || 'Unknown',
-        renderer: renderer || 'Unavailable',
+        vendor: vendor || "Unknown",
+        renderer: renderer || "Unavailable",
         hardwareAccelerated,
-        hardwareAcceleratedLabel: hardwareAccelerated ? 'Hardware accelerated' : 'Software / fallback',
+        hardwareAcceleratedLabel: hardwareAccelerated
+          ? "Hardware accelerated"
+          : "Software / fallback",
       };
     } catch {
       return {
-        context: 'webgl',
-        vendor: 'Unknown',
-        renderer: 'Unavailable',
+        context: "webgl",
+        vendor: "Unknown",
+        renderer: "Unavailable",
         hardwareAccelerated: null,
-        hardwareAcceleratedLabel: 'Unknown',
+        hardwareAcceleratedLabel: "Unknown",
       };
     }
   }
@@ -768,13 +897,25 @@ export class Game {
     const thresholds = this.renderTuning.depthThresholds;
     const exposure = this.renderTuning.exposure;
 
-    const midBlend = THREE.MathUtils.smoothstep(depth, thresholds.mid, thresholds.deep);
-    const deepBlend = THREE.MathUtils.smoothstep(depth, thresholds.deep, thresholds.abyss);
+    const midBlend = THREE.MathUtils.smoothstep(
+      depth,
+      thresholds.mid,
+      thresholds.deep,
+    );
+    const deepBlend = THREE.MathUtils.smoothstep(
+      depth,
+      thresholds.deep,
+      thresholds.abyss,
+    );
 
     let target = THREE.MathUtils.lerp(exposure.surface, exposure.mid, midBlend);
     target = THREE.MathUtils.lerp(target, exposure.deep, deepBlend);
 
-    const abyssBlend = THREE.MathUtils.smoothstep(depth, thresholds.abyss, thresholds.abyss + 280);
+    const abyssBlend = THREE.MathUtils.smoothstep(
+      depth,
+      thresholds.abyss,
+      thresholds.abyss + 280,
+    );
     target = THREE.MathUtils.lerp(target, exposure.abyss, abyssBlend);
 
     if (this.flashlightOn) {
@@ -783,16 +924,20 @@ export class Game {
       const flashlightComp = THREE.MathUtils.lerp(
         exposure.flashlightBoost,
         exposure.flashlightBoost * 1.3,
-        THREE.MathUtils.smoothstep(depth, thresholds.mid, thresholds.abyss + 180)
+        THREE.MathUtils.smoothstep(
+          depth,
+          thresholds.mid,
+          thresholds.abyss + 180,
+        ),
       );
       target += flashlightComp;
     }
 
-    this._targetExposure = THREE.MathUtils.clamp(target, 0.50, 0.9);
+    this._targetExposure = THREE.MathUtils.clamp(target, 0.5, 0.9);
     this.renderer.toneMappingExposure = THREE.MathUtils.lerp(
       this.renderer.toneMappingExposure,
       this._targetExposure,
-      exposure.easing
+      exposure.easing,
     );
     // Item 2: cap composer scale by depth band (deep zones tolerate cheaper FX).
     this.underwaterEffect.applyDepthScaleCap(depth);
@@ -801,7 +946,7 @@ export class Game {
   _createAutoplayState() {
     return {
       // State machine — current behavior mode
-      mode: 'descend', // 'descend' | 'recover' | 'sonar' | 'showcase'
+      mode: "descend", // 'descend' | 'recover' | 'sonar' | 'showcase'
 
       // Descent drive parameters
       minForward: 0.12,
@@ -809,8 +954,8 @@ export class Game {
 
       // Heading drift: periodic gentle yaw so descent isn't perfectly straight
       headingTimer: 0,
-      headingInterval: 7,      // seconds between heading drift changes
-      headingDrift: 0,         // current right input for drift (-1..1)
+      headingInterval: 7, // seconds between heading drift changes
+      headingDrift: 0, // current right input for drift (-1..1)
       headingDriftDuration: 0, // how long to hold current drift
       headingDriftElapsed: 0,
       look: {
@@ -831,19 +976,19 @@ export class Game {
         lastZ: 0,
         stallTime: 0,
         depthStallTime: 0,
-        stallThreshold: 4,      // seconds stalled before recovery
+        stallThreshold: 4, // seconds stalled before recovery
         depthStallThreshold: 6, // seconds skimming sideways without descending
-        depthClearMargin: 1.5,  // must beat the prior local max by this much to clear a stall
-        depthGainMin: 0.15,     // metres gained to count as progress
-        posGainMin: 0.25,       // world-unit change to count as progress
+        depthClearMargin: 1.5, // must beat the prior local max by this much to clear a stall
+        depthGainMin: 0.15, // metres gained to count as progress
+        posGainMin: 0.25, // world-unit change to count as progress
       },
 
       // Recovery state
       recover: {
         active: false,
         timer: 0,
-        duration: 3.5,         // seconds of recovery steering
-        rightInput: 1,         // direction to steer out
+        duration: 3.5, // seconds of recovery steering
+        rightInput: 1, // direction to steer out
         turnDirection: 1,
         attempts: 0,
         lastTriggerDepth: 0,
@@ -856,15 +1001,15 @@ export class Game {
       // Sonar showcase
       sonar: {
         timer: 0,
-        interval: 22,          // seconds between autoplay sonar pings
-        minDepth: 40,          // don't ping in the very shallow zone
+        interval: 22, // seconds between autoplay sonar pings
+        minDepth: 40, // don't ping in the very shallow zone
       },
 
       // Flashlight showcase
       flashlight: {
         timer: 0,
-        interval: 35,          // seconds between autoplay flashlight toggles
-        minDepth: 120,         // only below twilight zone
+        interval: 35, // seconds between autoplay flashlight toggles
+        minDepth: 120, // only below twilight zone
       },
 
       // Creature framing (brief turn toward nearby creature)
@@ -880,7 +1025,11 @@ export class Game {
   _updateAutoplayDrive(depth, dt) {
     if (!this.autoplay) {
       const autoplayInput = this.player.autoplayInput;
-      if (autoplayInput.forward !== 0 || autoplayInput.right !== 0 || autoplayInput.vertical !== 0) {
+      if (
+        autoplayInput.forward !== 0 ||
+        autoplayInput.right !== 0 ||
+        autoplayInput.vertical !== 0
+      ) {
         this.player.clearAutoplayInput();
       }
       return;
@@ -916,14 +1065,23 @@ export class Game {
       wd.lastZ = pz;
 
       // Trigger recovery when stalled long enough and not already recovering
-      if ((wd.stallTime >= wd.stallThreshold || wd.depthStallTime >= wd.depthStallThreshold) && !rec.active) {
+      if (
+        (wd.stallTime >= wd.stallThreshold ||
+          wd.depthStallTime >= wd.depthStallThreshold) &&
+        !rec.active
+      ) {
         const samePocket =
           Math.abs(depth - rec.lastTriggerDepth) <= rec.samePocketDepth &&
-          Math.hypot(px - rec.lastTriggerX, pz - rec.lastTriggerZ) <= rec.samePocketDistance;
+          Math.hypot(px - rec.lastTriggerX, pz - rec.lastTriggerZ) <=
+            rec.samePocketDistance;
         rec.active = true;
         rec.timer = 0;
         rec.attempts = samePocket ? Math.min(rec.attempts + 1, 4) : 1;
-        rec.duration = THREE.MathUtils.lerp(4.2, 6.4, Math.min(1, (rec.attempts - 1) / 3));
+        rec.duration = THREE.MathUtils.lerp(
+          4.2,
+          6.4,
+          Math.min(1, (rec.attempts - 1) / 3),
+        );
         // Randomise recovery direction each stall to reduce chance of re-hitting the same wall
         rec.rightInput = Math.random() < 0.5 ? 1 : -1;
         rec.turnDirection = rec.rightInput;
@@ -933,19 +1091,22 @@ export class Game {
         wd.stallTime = 0;
         wd.depthStallTime = 0;
         this.player.velocity.set(0, 0, 0);
-        let nudgeMode = 'none';
+        let nudgeMode = "none";
         if (samePocket && rec.attempts >= 2) {
           this.player.autoplayCollisionBypassTimer = Math.max(
             this.player.autoplayCollisionBypassTimer || 0,
-            rec.duration + 1
+            rec.duration + 1,
           );
-          nudgeMode = this._applyAutoplayRecoveryNudge(rec.turnDirection, rec.attempts);
+          nudgeMode = this._applyAutoplayRecoveryNudge(
+            rec.turnDirection,
+            rec.attempts,
+          );
         }
         wd.lastDepth = Math.max(0, -this.player.position.y);
         wd.lastClearDepth = wd.lastDepth;
         wd.lastX = this.player.position.x;
         wd.lastZ = this.player.position.z;
-        console.log('[autoplay] Stall detected — entering recovery', {
+        console.log("[autoplay] Stall detected — entering recovery", {
           depth,
           attempts: rec.attempts,
           nudgeMode,
@@ -958,7 +1119,7 @@ export class Game {
       rec.timer += dt;
       if (rec.timer >= rec.duration) {
         rec.active = false;
-        console.log('[autoplay] Recovery complete — resuming descent');
+        console.log("[autoplay] Recovery complete — resuming descent");
       }
     }
 
@@ -982,7 +1143,9 @@ export class Game {
 
     // ─── Creature showcase framing (issue #103) ───────────────────────────
     if (!s.showcase.active && !rec.active) {
-      const nearDist = this.creatures.getNearestCreatureDistance(this.player.position);
+      const nearDist = this.creatures.getNearestCreatureDistance(
+        this.player.position,
+      );
       if (nearDist < 18 && nearDist > 2) {
         s.showcase.active = true;
         s.showcase.timer = 0;
@@ -1014,7 +1177,7 @@ export class Game {
     const forward = THREE.MathUtils.lerp(
       s.minForward,
       s.maxForward,
-      THREE.MathUtils.smoothstep(depth, 8, 80)
+      THREE.MathUtils.smoothstep(depth, 8, 80),
     );
 
     let forwardInput = forward;
@@ -1025,20 +1188,27 @@ export class Game {
 
     if (rec.active) {
       // Recovery: back out, ascend briefly, then sweep into a new heading.
-      const recoverProgress = THREE.MathUtils.clamp(rec.timer / rec.duration, 0, 1);
+      const recoverProgress = THREE.MathUtils.clamp(
+        rec.timer / rec.duration,
+        0,
+        1,
+      );
       const attemptBlend = Math.min(1, Math.max(0, (rec.attempts - 1) / 3));
       const backoffPhase = recoverProgress < 0.42;
 
-      rightInput = rec.rightInput * THREE.MathUtils.lerp(0.85, 1.0, attemptBlend);
-      turnRate = rec.turnDirection * THREE.MathUtils.lerp(
-        s.look.recoveryTurnRate,
-        s.look.recoveryTurnRate * 1.55,
-        attemptBlend
-      );
+      rightInput =
+        rec.rightInput * THREE.MathUtils.lerp(0.85, 1.0, attemptBlend);
+      turnRate =
+        rec.turnDirection *
+        THREE.MathUtils.lerp(
+          s.look.recoveryTurnRate,
+          s.look.recoveryTurnRate * 1.55,
+          attemptBlend,
+        );
       pitchTarget = THREE.MathUtils.lerp(
         s.look.recoveryPitch,
         s.look.basePitch,
-        THREE.MathUtils.smoothstep(recoverProgress, 0.35, 1)
+        THREE.MathUtils.smoothstep(recoverProgress, 0.35, 1),
       );
 
       if (backoffPhase) {
@@ -1051,16 +1221,30 @@ export class Game {
     } else if (s.showcase.active) {
       // Creature framing: blend in a gentle turn
       rightInput = THREE.MathUtils.lerp(driftInput, s.showcase.rightInput, 0.6);
-      turnRate = THREE.MathUtils.lerp(driftInput, s.showcase.rightInput, 0.6) * s.look.turnRate;
+      turnRate =
+        THREE.MathUtils.lerp(driftInput, s.showcase.rightInput, 0.6) *
+        s.look.turnRate;
     }
 
     const lookAlpha = Math.min(1, dt * s.look.response);
-    this.player.euler.x = THREE.MathUtils.lerp(this.player.euler.x, pitchTarget, lookAlpha);
+    this.player.euler.x = THREE.MathUtils.lerp(
+      this.player.euler.x,
+      pitchTarget,
+      lookAlpha,
+    );
     this.player.euler.y -= turnRate * dt;
-    this.player.euler.z = THREE.MathUtils.lerp(this.player.euler.z, 0, lookAlpha);
+    this.player.euler.z = THREE.MathUtils.lerp(
+      this.player.euler.z,
+      0,
+      lookAlpha,
+    );
     this.player.camera.quaternion.setFromEuler(this.player.euler);
 
-    this.player.setAutoplayInput({ forward: forwardInput, right: rightInput, vertical: verticalInput });
+    this.player.setAutoplayInput({
+      forward: forwardInput,
+      right: rightInput,
+      vertical: verticalInput,
+    });
   }
 
   _applyAutoplayRecoveryNudge(turnDirection, attempts) {
@@ -1077,28 +1261,40 @@ export class Game {
     right.crossVectors(forward, this.camera.up).normalize();
 
     const strength = Math.min(1, Math.max(0, (attempts - 2) / 2));
-    const desired = forward.multiplyScalar(THREE.MathUtils.lerp(-10, -16, strength));
-    desired.addScaledVector(right, turnDirection * THREE.MathUtils.lerp(12, 18, strength));
+    const desired = forward.multiplyScalar(
+      THREE.MathUtils.lerp(-10, -16, strength),
+    );
+    desired.addScaledVector(
+      right,
+      turnDirection * THREE.MathUtils.lerp(12, 18, strength),
+    );
     desired.y = THREE.MathUtils.lerp(8, 12, strength);
 
     let corrected = desired;
-    let nudgeMode = 'direct';
+    let nudgeMode = "direct";
     if (this.physicsWorld && this.player._physicsCollider) {
-      corrected = this.physicsWorld.computeMovement(this.player._physicsCollider, {
-        x: desired.x,
-        y: desired.y,
-        z: desired.z,
-      });
-      nudgeMode = 'corrected';
+      corrected = this.physicsWorld.computeMovement(
+        this.player._physicsCollider,
+        {
+          x: desired.x,
+          y: desired.y,
+          z: desired.z,
+        },
+      );
+      nudgeMode = "corrected";
     }
 
-    const movedSq = corrected.x * corrected.x + corrected.y * corrected.y + corrected.z * corrected.z;
-    const desiredSq = desired.x * desired.x + desired.y * desired.y + desired.z * desired.z;
+    const movedSq =
+      corrected.x * corrected.x +
+      corrected.y * corrected.y +
+      corrected.z * corrected.z;
+    const desiredSq =
+      desired.x * desired.x + desired.y * desired.y + desired.z * desired.z;
     if (attempts >= 2 && movedSq < desiredSq * 0.2) {
       corrected = desired;
-      nudgeMode = 'direct';
+      nudgeMode = "direct";
     } else if (movedSq < 0.25) {
-      return 'blocked';
+      return "blocked";
     }
 
     this.player.position.x += corrected.x;
@@ -1122,15 +1318,24 @@ export class Game {
     // If the current frame is already heavy, defer point-light management work
     // so we don't compound stalls with extra traversal/sorting cost.
     if (dt > budget.heavyFrameThreshold) {
-      budget.scanElapsed = Math.min(budget.scanElapsed + dt * 0.5, budget.scanInterval);
-      budget.retargetElapsed = Math.min(budget.retargetElapsed + dt * 0.5, budget.retargetInterval);
+      budget.scanElapsed = Math.min(
+        budget.scanElapsed + dt * 0.5,
+        budget.scanInterval,
+      );
+      budget.retargetElapsed = Math.min(
+        budget.retargetElapsed + dt * 0.5,
+        budget.retargetInterval,
+      );
       return;
     }
 
     budget.scanElapsed += dt;
     budget.retargetElapsed += dt;
 
-    if (budget.scanElapsed >= budget.scanInterval || budget.managedLights.length === 0) {
+    if (
+      budget.scanElapsed >= budget.scanInterval ||
+      budget.managedLights.length === 0
+    ) {
       budget.scanElapsed = 0;
       this._refreshManagedPointLights();
     }
@@ -1147,16 +1352,25 @@ export class Game {
       if (!light.parent) continue;
 
       const baseIntensity = light.userData.duwBaseIntensity ?? light.intensity;
-      const targetIntensity = light.userData.duwTargetIntensity ?? baseIntensity;
+      const targetIntensity =
+        light.userData.duwTargetIntensity ?? baseIntensity;
 
       if (targetIntensity > 0.001 && !light.visible) {
         light.visible = true;
       }
 
-      const alpha = targetIntensity >= light.intensity ? fadeInAlpha : fadeOutAlpha;
-      light.intensity = THREE.MathUtils.lerp(light.intensity, targetIntensity, alpha);
+      const alpha =
+        targetIntensity >= light.intensity ? fadeInAlpha : fadeOutAlpha;
+      light.intensity = THREE.MathUtils.lerp(
+        light.intensity,
+        targetIntensity,
+        alpha,
+      );
 
-      if (targetIntensity <= 0.001 && light.intensity < Math.max(baseIntensity * 0.18, 0.05)) {
+      if (
+        targetIntensity <= 0.001 &&
+        light.intensity < Math.max(baseIntensity * 0.18, 0.05)
+      ) {
         light.intensity = 0;
         light.visible = false;
       }
@@ -1185,20 +1399,24 @@ export class Game {
 
     const refreshCost = performance.now() - refreshStart;
     if (refreshCost > budget.scanCostAdjustThreshold) {
-      budget.scanInterval = Math.min(budget.maxScanInterval, budget.scanInterval + 0.25);
+      budget.scanInterval = Math.min(
+        budget.maxScanInterval,
+        budget.scanInterval + 0.25,
+      );
     } else if (refreshCost < budget.scanCostRecoverThreshold) {
-      budget.scanInterval = Math.max(budget.minScanInterval, budget.scanInterval - 0.05);
+      budget.scanInterval = Math.max(
+        budget.minScanInterval,
+        budget.scanInterval - 0.05,
+      );
     }
   }
 
   _retargetPointLights(depth, playerPos) {
     const budget = this._pointLightBudget;
     const depthBlend = THREE.MathUtils.smoothstep(depth, 35, 220);
-    const maxLights = Math.round(THREE.MathUtils.lerp(
-      budget.shallowMax,
-      budget.deepMax,
-      depthBlend
-    ));
+    const maxLights = Math.round(
+      THREE.MathUtils.lerp(budget.shallowMax, budget.deepMax, depthBlend),
+    );
 
     for (const light of budget.managedLights) {
       if (!light.parent) continue;
@@ -1209,7 +1427,8 @@ export class Game {
       // Hysteresis: boost score for currently-active lights to prevent flip-flopping
       const isActive = (light.userData.duwTargetIntensity ?? 0) > 0.01;
       const hysteresis = isActive ? 1.2 : 1.0;
-      light.userData.duwScore = ((baseIntensity + 0.001) / (distanceSq + 1)) * hysteresis;
+      light.userData.duwScore =
+        ((baseIntensity + 0.001) / (distanceSq + 1)) * hysteresis;
       light.userData.duwTargetIntensity = 0;
     }
 
@@ -1220,15 +1439,21 @@ export class Game {
         candidates.push(light);
       }
     }
-    candidates.sort((a, b) => (b.userData.duwScore ?? 0) - (a.userData.duwScore ?? 0));
+    candidates.sort(
+      (a, b) => (b.userData.duwScore ?? 0) - (a.userData.duwScore ?? 0),
+    );
 
     const fullyLitCount = Math.min(maxLights, candidates.length);
     const fadeStartIndex = Math.max(fullyLitCount - 1, 0);
     const fadeEndIndex = fullyLitCount + budget.transitionBand;
     const cutoffIndex = Math.max(fullyLitCount - 1, 0);
-    const softCutoffIndex = Math.min(candidates.length - 1, cutoffIndex + budget.transitionBand);
+    const softCutoffIndex = Math.min(
+      candidates.length - 1,
+      cutoffIndex + budget.transitionBand,
+    );
     const cutoffScore = candidates[cutoffIndex]?.userData.duwScore ?? 0;
-    const softCutoffScore = candidates[softCutoffIndex]?.userData.duwScore ?? cutoffScore;
+    const softCutoffScore =
+      candidates[softCutoffIndex]?.userData.duwScore ?? cutoffScore;
 
     for (let i = 0; i < candidates.length; i++) {
       const light = candidates[i];
@@ -1239,9 +1464,14 @@ export class Game {
       if (i < fullyLitCount) {
         weight = 1;
       } else if (i < fadeEndIndex) {
-        const rankWeight = 1 - THREE.MathUtils.smoothstep(fadeStartIndex, fadeEndIndex, i);
+        const rankWeight =
+          1 - THREE.MathUtils.smoothstep(fadeStartIndex, fadeEndIndex, i);
         if (cutoffScore > 0) {
-          const scoreWeight = THREE.MathUtils.smoothstep(softCutoffScore * 0.9, cutoffScore * 1.05, score);
+          const scoreWeight = THREE.MathUtils.smoothstep(
+            softCutoffScore * 0.9,
+            cutoffScore * 1.05,
+            score,
+          );
           weight = rankWeight * scoreWeight;
         } else {
           weight = rankWeight;
