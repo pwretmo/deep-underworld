@@ -90,6 +90,7 @@ class QualityManager {
     this._downgradeDuration = 0;
     this._upgradeDuration = 0;
     this._ultraUpgradeDuration = 0;
+    this._highEndGpuDetected = false;
   }
 
   /** Current tier name. */
@@ -116,10 +117,7 @@ class QualityManager {
       const ext = gl.getExtension('WEBGL_debug_renderer_info');
       if (!ext) return;
       const gpuRenderer = gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) || '';
-      const isHighEnd = HIGH_END_GPU_PATTERNS.some((p) => p.test(gpuRenderer));
-      if (isHighEnd) {
-        this._applyAutoTier('ultra');
-      }
+      this._highEndGpuDetected = HIGH_END_GPU_PATTERNS.some((p) => p.test(gpuRenderer));
     } catch (_) { /* GPU detection not available */ }
   }
 
@@ -194,3 +192,4 @@ class QualityManager {
 
 /** Singleton instance. */
 export const qualityManager = new QualityManager();
+

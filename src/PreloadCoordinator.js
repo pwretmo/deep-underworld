@@ -14,7 +14,9 @@ const FRAME_BUDGET_MS = 6;
 const DESCENT_ASSIST_FRAME_BUDGET_MS = 5;
 const START_PRIME_FRAME_BUDGET_MS = 4;
 const START_PRIME_TIMEOUT_MS = 1000 * 6;
-const START_PRIME_DEPTH = 320;
+// Keep startup priming focused on the opening band so the first playable
+// frames stay responsive instead of front-loading deep-scene work.
+const START_PRIME_DEPTH = 120;
 const WRITE_THROTTLE_MS = 5000;
 const ENTRY_TTL_MS = 1000 * 60 * 60 * 24;
 const INDEXED_DB_SIZE_CEILING = 3 * 1024 * 1024;
@@ -198,8 +200,6 @@ export class PreloadCoordinator {
     reportProgress();
     await this.renderer.compileAsync(this.underwaterEffect.scene, this.underwaterEffect.camera);
     await new Promise(resolve => window.requestAnimationFrame(() => resolve()));
-
-    await this._warmDepthBandRenders();
 
     reportProgress();
 
@@ -594,7 +594,6 @@ export class PreloadCoordinator {
     return 'high';
   }
 }
-
 class ProceduralStartupCache {
   constructor({ cacheKey, worldSeed, qualityTier, onDisablePersistence }) {
     this.cacheKey = cacheKey;
@@ -799,3 +798,4 @@ class ProceduralStartupCache {
     });
   }
 }
+

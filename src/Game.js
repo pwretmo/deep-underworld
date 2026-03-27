@@ -431,19 +431,6 @@ export class Game {
 
     this.preload.startDescentAssistFromSnapshot();
 
-    // Dismiss descent overlay now that priming is complete.
-    // The depth-gated spawn queue may never fully drain at shallow depth,
-    // so we dismiss here rather than waiting for isFullyLoaded().
-    this._descentActive = false;
-    this.descentOverlay.classList.add("fade-out");
-    setTimeout(() => {
-      this.descentOverlay.classList.remove("visible");
-      this.descentOverlay.classList.remove("fade-out");
-    }, 800);
-
-    // Warm-up render to force shader compilation before gameplay.
-    this.underwaterEffect.render(0);
-
     this.running = true;
     this.startPreparing = false;
 
@@ -454,8 +441,26 @@ export class Game {
       this._resumeAudio();
     }
     this.clock.start();
+    await this._warmOpeningFrames();
+
+    // Dismiss descent overlay only after the first live gameplay frames have
+    // rendered, so the player does not inherit opening-frame shader stalls.
+    this._descentActive = false;
+    this.descentOverlay.classList.add("fade-out");
+    setTimeout(() => {
+      this.descentOverlay.classList.remove("visible");
+      this.descentOverlay.classList.remove("fade-out");
+    }, 800);
 
     console.log(`[deep-underworld] ${logMessage}`, primeSummary);
+  }
+
+  async _warmOpeningFrames() {
+    for (let i = 0; i < 12; i++) {
+      await new Promise((resolve) =>
+        window.requestAnimationFrame(() => resolve()),
+      );
+    }
   }
 
   _updateDescentProgress(data) {
@@ -1482,3 +1487,4 @@ export class Game {
     }
   }
 }
+
