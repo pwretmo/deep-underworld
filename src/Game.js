@@ -140,7 +140,12 @@ export class Game {
     this.controlsHelpVisible = false;
     this.descentOverlay = document.getElementById('descent-transition');
     this.descentProgressBar = document.getElementById('descent-progress-bar');
+    this._descentItems = document.getElementById('descent-items');
+    this._descentTease = document.getElementById('descent-tease');
     this._descentActive = false;
+    this._descentPhase = 'idle';
+    this._descentLastCreatureCount = 0;
+    this._descentLastTeaseTime = 0;
     this._startTransition = { owner: 'game', startRequested: false, started: false };
 
     this.preload = new PreloadCoordinator({
@@ -346,6 +351,11 @@ export class Game {
     this.descentOverlay.classList.remove('fade-out');
     this.descentProgressBar.style.width = '0%';
     this._descentActive = true;
+    this._descentPhase = 'physics';
+    this._descentLastCreatureCount = 0;
+    this._descentLastTeaseTime = 0;
+    this._descentItems.innerHTML = '';
+    this._descentTease.innerHTML = '';
     this._updateDescentProgress();
 
     // Initialize Rapier WASM physics before terrain/player use it
@@ -354,8 +364,11 @@ export class Game {
     this.terrain.setPhysicsWorld(this.physicsWorld);
     this.player.setPhysicsWorld(this.physicsWorld);
 
+    this._descentPhase = 'shaders';
+    this._updateDescentProgress();
+
     const primeSummary = await this.preload.primeStartBaseline({
-      onProgress: () => this._updateDescentProgress(),
+      onProgress: (data) => this._updateDescentProgress(data),
     });
 
     if (this.gameOver) {
@@ -386,8 +399,14 @@ export class Game {
     console.log(`[deep-underworld] ${logMessage}`, primeSummary);
   }
 
-  _updateDescentProgress() {
-    // Composite progress: creatures 50%, terrain 25%, flora 25%
+  _updateDescentProgress(data) {
+    // Update phase from PreloadCoordinator progress data
+    if (data && data.phase) {
+      if (data.phase === 'loading') this._descentPhase = 'loading';
+      else if (data.phase === 'finalizing') this._descentPhase = 'finalizing';
+    }
+
+    // Composite progress: physics 5%, shaders 10%, creatures 45%, terrain 20%, flora 20%
     const creatures = this.creatures.getLoadProgress();
     const terrainPending = this.terrain.getPendingCount();
     const terrainLoaded = this.terrain.getChunkCount();
@@ -396,12 +415,106 @@ export class Game {
     const floraLoaded = this.flora.getChunkCount();
     const floraTotal = floraLoaded + floraPending;
 
+    const phase = this._descentPhase;
+    const physicsDone = phase !== 'physics';
+    const shadersDone = phase !== 'physics' && phase !== 'shaders';
+
     const creaturePct = creatures.total > 0 ? creatures.loaded / creatures.total : 1;
     const terrainPct = terrainTotal > 0 ? terrainLoaded / terrainTotal : 1;
     const floraPct = floraTotal > 0 ? floraLoaded / floraTotal : 1;
 
-    const pct = Math.min(100, (creaturePct * 0.5 + terrainPct * 0.25 + floraPct * 0.25) * 100);
+    const physicsPct = physicsDone ? 1 : 0;
+    const shaderPct = shadersDone ? 1 : (phase === 'shaders' ? 0.5 : 0);
+
+    const pct = Math.min(100, (
+      physicsPct * 0.05 +
+      shaderPct * 0.10 +
+      creaturePct * 0.45 +
+      terrainPct * 0.20 +
+      floraPct * 0.20
+    ) * 100);
     this.descentProgressBar.style.width = pct + '%';
+
+    // Update itemized status lines
+    const allDone = phase === 'finalizing' || !this._descentActive;
+    const items = [
+      { id: 'physics', label: 'Initializing physics...', done: physicsDone, active: phase === 'physics' },
+      { id: 'shaders', label: 'Compiling shaders...', done: shadersDone, active: phase === 'shaders' },
+      {
+        id: 'creatures', done: allDone && creaturePct >= 1, active: !allDone && shadersDone,
+        label: creatures.total > 0 ? `Spawning creatures... ${creatures.loaded}/${creatures.total}` : 'Spawning creatures...',
+      },
+      {
+        id: 'terrain', done: allDone && terrainPct >= 1, active: !allDone && shadersDone,
+        label: terrainTotal > 0 ? `Generating terrain... ${terrainLoaded}/${terrainTotal} chunks` : 'Generating terrain...',
+      },
+      {
+        id: 'flora', done: allDone && floraPct >= 1, active: !allDone && shadersDone,
+        label: floraTotal > 0 ? `Growing flora... ${floraLoaded}/${floraTotal} chunks` : 'Growing flora...',
+      },
+    ];
+
+    let html = '';
+    for (const item of items) {
+      const cls = item.done ? 'descent-item done' : item.active ? 'descent-item active' : 'descent-item';
+      const check = item.done ? '✓' : item.active ? '◦' : ' ';
+      html += `<div class="${cls}"><span class="descent-item-check">${check}</span><span class="descent-item-text">${item.label}</span></div>`;
+    }
+    this._descentItems.innerHTML = html;
+
+    // Creature tease
+    if (data && data.creatures && data.creatures.loaded > this._descentLastCreatureCount) {
+      const now = performance.now();
+      if (now - this._descentLastTeaseTime > 2000) {
+        this._descentLastTeaseTime = now;
+        this._showCreatureTease(data.creatures);
+      }
+      this._descentLastCreatureCount = data.creatures.loaded;
+    }
+  }
+
+  _showCreatureTease(creaturesProgress) {
+    const teaseMap = {
+      jellyfish: 'Bioluminescent pulses detected...',
+      anglerfish: 'Something lurks in the dark...',
+      ghostshark: 'Spectral signatures nearby...',
+      leviathan: 'Massive sonar returns detected...',
+      deepone: 'Unknown life forms below...',
+      boneworm: 'Biomechanical signatures emerging...',
+      spinaleel: 'Writhing movement in the deep...',
+      sirenSkull: 'Haunting frequencies detected...',
+      lamprey: 'Parasitic organisms detected...',
+      abyssalmaw: 'The abyss stares back...',
+      biomechcrab: 'Metallic scuttling detected...',
+      needlefish: 'Swift shadows in the current...',
+      parasite: 'Symbiotic life forms nearby...',
+      sporecloud: 'Spore density increasing...',
+      tendrilhunter: 'Tendrils probing the darkness...',
+      harvester: 'Industrial sounds echoing...',
+      birthsac: 'Organic growths pulsing...',
+      voidjelly: 'Void signatures detected...',
+      chaindragger: 'Metal scraping in the deep...',
+      mechoctopus: 'Mechanical appendages detected...',
+      facelessone: 'Something without a face watches...',
+      amalgam: 'Merged forms stirring...',
+      sentinel: 'Guardian presence detected...',
+      abysswraith: 'Wraith-like movement detected...',
+      ironwhale: 'Massive metallic echoes...',
+      husk: 'Empty shells drifting...',
+      pipeorgan: 'Deep resonance detected...',
+      tubecluster: 'Tube formations growing...',
+      ribcage: 'Skeletal structures detected...',
+    };
+
+    // Try to find what creature type was last spawned
+    const spawned = this.creatures.creatures || [];
+    let msg = 'Scanning the deep...';
+    for (let i = spawned.length - 1; i >= 0; i--) {
+      const key = spawned[i].type;
+      if (teaseMap[key]) { msg = teaseMap[key]; break; }
+    }
+
+    this._descentTease.innerHTML = `<span>${msg}</span>`;
   }
 
   _pauseAudio() {
@@ -470,6 +583,7 @@ export class Game {
     this.hud.update(depth, this.flashlightOn, this.camera);
     this.hud.updateLocator(creaturesByType, this.player.position, this.camera);
     this.hud.updateDiagnostics(this._getDiagnosticsSnapshot());
+    this.hud.updateBackgroundLoading(this.preload.isDescentAssistActive());
 
     // Update underwater fog based on depth, then let encounter override if active
     this._updateEnvironmentForDepth(depth);
