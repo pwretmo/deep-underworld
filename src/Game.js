@@ -271,6 +271,8 @@ export class Game {
     this.preload.cancel('autoplay-start');
     this.autoplay = true;
     this.player.locked = true; // simulate lock without real pointer lock
+    this.player.euler.set(0, 0, 0, 'YXZ');
+    this.player.camera.quaternion.setFromEuler(this.player.euler);
     this._updateAutoplayDrive(Math.max(0, -this.player.position.y), 0);
     this.audio.start();
     void this._primeAndEnterGameplay('Autoplay mode active');
@@ -697,16 +699,27 @@ export class Game {
       headingDrift: 0,         // current right input for drift (-1..1)
       headingDriftDuration: 0, // how long to hold current drift
       headingDriftElapsed: 0,
+      look: {
+        basePitch: 0.02,
+        recoveryPitch: 0.18,
+        turnRate: 0.55,
+        recoveryTurnRate: 1.1,
+        response: 4,
+      },
 
       // Progress watchdog (issue #102)
       watchdog: {
         checkInterval: 2.5,
         checkElapsed: 0,
         lastDepth: 0,
+        lastClearDepth: 0,
         lastX: 0,
         lastZ: 0,
         stallTime: 0,
+        depthStallTime: 0,
         stallThreshold: 4,      // seconds stalled before recovery
+        depthStallThreshold: 6, // seconds skimming sideways without descending
+        depthClearMargin: 1.5,  // must beat the prior local max by this much to clear a stall
         depthGainMin: 0.15,     // metres gained to count as progress
         posGainMin: 0.25,       // world-unit change to count as progress
       },
@@ -717,7 +730,13 @@ export class Game {
         timer: 0,
         duration: 3.5,         // seconds of recovery steering
         rightInput: 1,         // direction to steer out
-        verticalDampen: 0.25,  // reduce descent during recovery
+        turnDirection: 1,
+        attempts: 0,
+        lastTriggerDepth: 0,
+        lastTriggerX: 0,
+        lastTriggerZ: 0,
+        samePocketDepth: 14,
+        samePocketDistance: 24,
       },
 
       // Sonar showcase
@@ -765,24 +784,58 @@ export class Game {
       const pz = this.player.position.z;
       const depthGain = depth - wd.lastDepth;
       const posChange = Math.sqrt((px - wd.lastX) ** 2 + (pz - wd.lastZ) ** 2);
-      const makingProgress = depthGain >= wd.depthGainMin || posChange >= wd.posGainMin;
-      if (makingProgress) {
+      const depthProgress = depthGain >= wd.depthGainMin;
+      const lateralProgress = posChange >= wd.posGainMin;
+      if (depthProgress || lateralProgress) {
         wd.stallTime = 0;
       } else {
         wd.stallTime += wd.checkInterval;
+      }
+      if (depth >= wd.lastClearDepth + wd.depthClearMargin) {
+        wd.lastClearDepth = depth;
+        wd.depthStallTime = 0;
+      } else {
+        wd.depthStallTime += wd.checkInterval;
       }
       wd.lastDepth = depth;
       wd.lastX = px;
       wd.lastZ = pz;
 
       // Trigger recovery when stalled long enough and not already recovering
-      if (wd.stallTime >= wd.stallThreshold && !rec.active) {
+      if ((wd.stallTime >= wd.stallThreshold || wd.depthStallTime >= wd.depthStallThreshold) && !rec.active) {
+        const samePocket =
+          Math.abs(depth - rec.lastTriggerDepth) <= rec.samePocketDepth &&
+          Math.hypot(px - rec.lastTriggerX, pz - rec.lastTriggerZ) <= rec.samePocketDistance;
         rec.active = true;
         rec.timer = 0;
+        rec.attempts = samePocket ? Math.min(rec.attempts + 1, 4) : 1;
+        rec.duration = THREE.MathUtils.lerp(4.2, 6.4, Math.min(1, (rec.attempts - 1) / 3));
         // Randomise recovery direction each stall to reduce chance of re-hitting the same wall
         rec.rightInput = Math.random() < 0.5 ? 1 : -1;
+        rec.turnDirection = rec.rightInput;
+        rec.lastTriggerDepth = depth;
+        rec.lastTriggerX = px;
+        rec.lastTriggerZ = pz;
         wd.stallTime = 0;
-        console.log('[autoplay] Stall detected — entering recovery', { depth });
+        wd.depthStallTime = 0;
+        this.player.velocity.set(0, 0, 0);
+        let nudgeMode = 'none';
+        if (samePocket && rec.attempts >= 2) {
+          this.player.autoplayCollisionBypassTimer = Math.max(
+            this.player.autoplayCollisionBypassTimer || 0,
+            rec.duration + 1
+          );
+          nudgeMode = this._applyAutoplayRecoveryNudge(rec.turnDirection, rec.attempts);
+        }
+        wd.lastDepth = Math.max(0, -this.player.position.y);
+        wd.lastClearDepth = wd.lastDepth;
+        wd.lastX = this.player.position.x;
+        wd.lastZ = this.player.position.z;
+        console.log('[autoplay] Stall detected — entering recovery', {
+          depth,
+          attempts: rec.attempts,
+          nudgeMode,
+        });
       }
     }
 
@@ -850,20 +903,103 @@ export class Game {
       THREE.MathUtils.smoothstep(depth, 8, 80)
     );
 
+    let forwardInput = forward;
     let rightInput = driftInput;
     let verticalInput = -1; // default: descend
+    let turnRate = driftInput * s.look.turnRate;
+    let pitchTarget = s.look.basePitch;
 
     if (rec.active) {
-      // Recovery: steer away from obstacle, reduce descent
-      const recoverStrength = THREE.MathUtils.smoothstep(rec.timer, 0, rec.duration * 0.3);
-      rightInput = rec.rightInput * THREE.MathUtils.lerp(0.8, 0.4, recoverStrength);
-      verticalInput = -rec.verticalDampen;
+      // Recovery: back out, ascend briefly, then sweep into a new heading.
+      const recoverProgress = THREE.MathUtils.clamp(rec.timer / rec.duration, 0, 1);
+      const attemptBlend = Math.min(1, Math.max(0, (rec.attempts - 1) / 3));
+      const backoffPhase = recoverProgress < 0.42;
+
+      rightInput = rec.rightInput * THREE.MathUtils.lerp(0.85, 1.0, attemptBlend);
+      turnRate = rec.turnDirection * THREE.MathUtils.lerp(
+        s.look.recoveryTurnRate,
+        s.look.recoveryTurnRate * 1.55,
+        attemptBlend
+      );
+      pitchTarget = THREE.MathUtils.lerp(
+        s.look.recoveryPitch,
+        s.look.basePitch,
+        THREE.MathUtils.smoothstep(recoverProgress, 0.35, 1)
+      );
+
+      if (backoffPhase) {
+        forwardInput = THREE.MathUtils.lerp(-0.55, -0.8, attemptBlend);
+        verticalInput = THREE.MathUtils.lerp(0.45, 0.8, attemptBlend);
+      } else {
+        forwardInput = THREE.MathUtils.lerp(0.18, 0.38, attemptBlend);
+        verticalInput = THREE.MathUtils.lerp(-0.12, -0.42, attemptBlend);
+      }
     } else if (s.showcase.active) {
       // Creature framing: blend in a gentle turn
       rightInput = THREE.MathUtils.lerp(driftInput, s.showcase.rightInput, 0.6);
+      turnRate = THREE.MathUtils.lerp(driftInput, s.showcase.rightInput, 0.6) * s.look.turnRate;
     }
 
-    this.player.setAutoplayInput({ forward, right: rightInput, vertical: verticalInput });
+    const lookAlpha = Math.min(1, dt * s.look.response);
+    this.player.euler.x = THREE.MathUtils.lerp(this.player.euler.x, pitchTarget, lookAlpha);
+    this.player.euler.y -= turnRate * dt;
+    this.player.euler.z = THREE.MathUtils.lerp(this.player.euler.z, 0, lookAlpha);
+    this.player.camera.quaternion.setFromEuler(this.player.euler);
+
+    this.player.setAutoplayInput({ forward: forwardInput, right: rightInput, vertical: verticalInput });
+  }
+
+  _applyAutoplayRecoveryNudge(turnDirection, attempts) {
+    const forward = this.player.position.clone().set(0, 0, 0);
+    this.camera.getWorldDirection(forward);
+    forward.y = 0;
+    if (forward.lengthSq() < 0.0001) {
+      forward.set(0, 0, -1);
+    } else {
+      forward.normalize();
+    }
+
+    const right = this.player.position.clone().set(0, 0, 0);
+    right.crossVectors(forward, this.camera.up).normalize();
+
+    const strength = Math.min(1, Math.max(0, (attempts - 2) / 2));
+    const desired = forward.multiplyScalar(THREE.MathUtils.lerp(-10, -16, strength));
+    desired.addScaledVector(right, turnDirection * THREE.MathUtils.lerp(12, 18, strength));
+    desired.y = THREE.MathUtils.lerp(8, 12, strength);
+
+    let corrected = desired;
+    let nudgeMode = 'direct';
+    if (this.physicsWorld && this.player._physicsCollider) {
+      corrected = this.physicsWorld.computeMovement(this.player._physicsCollider, {
+        x: desired.x,
+        y: desired.y,
+        z: desired.z,
+      });
+      nudgeMode = 'corrected';
+    }
+
+    const movedSq = corrected.x * corrected.x + corrected.y * corrected.y + corrected.z * corrected.z;
+    const desiredSq = desired.x * desired.x + desired.y * desired.y + desired.z * desired.z;
+    if (attempts >= 2 && movedSq < desiredSq * 0.2) {
+      corrected = desired;
+      nudgeMode = 'direct';
+    } else if (movedSq < 0.25) {
+      return 'blocked';
+    }
+
+    this.player.position.x += corrected.x;
+    this.player.position.y += corrected.y;
+    this.player.position.z += corrected.z;
+
+    if (this.player._physicsBody) {
+      this.player._physicsBody.setNextKinematicTranslation({
+        x: this.player.position.x,
+        y: this.player.position.y,
+        z: this.player.position.z,
+      });
+    }
+
+    return nudgeMode;
   }
 
   _updatePointLightBudget(dt, depth, playerPos) {
