@@ -148,9 +148,11 @@ export class PreloadCoordinator {
     this.flora.preloadPrepareAround(this.player.position);
     await this._warmGpuOnceAsync(token);
 
+    let _phase = 'loading';
     const deadline = performance.now() + START_PRIME_TIMEOUT_MS;
     const reportProgress = () => {
       onProgress?.({
+        phase: _phase,
         creatures: this.creatures.getLoadProgress(),
         queuedThroughDepth: this.creatures.getSpawnQueueLengthUpToDepth(START_PRIME_DEPTH),
         terrainPending: this.terrain.getPendingCount(),
@@ -192,6 +194,8 @@ export class PreloadCoordinator {
 
     // Force-compile shader programs for all preloaded creature materials
     // so the first gameplay render doesn't trigger synchronous GPU compiles.
+    _phase = 'finalizing';
+    reportProgress();
     await this.renderer.compileAsync(this.underwaterEffect.scene, this.underwaterEffect.camera);
     await new Promise(resolve => window.requestAnimationFrame(() => resolve()));
 
