@@ -77,6 +77,60 @@
       transition: width 0.15s ease;
     }
 
+    /* Descent detail items */
+    #descent-detail {
+      margin-top: 1.5rem; width: 220px;
+      font-family: 'Courier New', monospace; font-size: 0.75rem;
+    }
+    .descent-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 3px 0; color: #4488aa;
+      transition: color 0.3s ease;
+    }
+    .descent-item.active { color: #88ccff; }
+    .descent-item.done { color: #44ff88; }
+    .descent-item-check {
+      width: 14px; text-align: center; flex-shrink: 0;
+      font-size: 0.7rem;
+    }
+    .descent-item-text { flex: 1; }
+
+    /* Creature tease */
+    #descent-tease {
+      margin-top: 1.5rem; height: 1.2rem;
+      font-style: italic; font-size: 0.75rem;
+      color: #33557788; letter-spacing: 0.05em;
+      font-family: 'Segoe UI', sans-serif;
+    }
+    #descent-tease span {
+      display: inline-block;
+      animation: teaseFade 2s ease-in-out;
+    }
+    @keyframes teaseFade {
+      0% { opacity: 0; }
+      15% { opacity: 1; }
+      85% { opacity: 1; }
+      100% { opacity: 0; }
+    }
+
+    /* Background loading indicator */
+    #bg-loading {
+      position: absolute; top: 92px; left: 30px;
+      display: none; align-items: center; gap: 6px;
+      font-family: 'Courier New', monospace;
+      font-size: 0.7rem; color: #335577;
+    }
+    #bg-loading.visible { display: flex; }
+    #bg-loading-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: #335577;
+      animation: bgPulse 1.4s ease-in-out infinite;
+    }
+    @keyframes bgPulse {
+      0%, 100% { opacity: 0.3; }
+      50% { opacity: 1; }
+    }
+
     #hud {
       position: fixed; inset: 0; z-index: 50; pointer-events: none;
       font-family: 'Courier New', monospace; color: #88ccff;
@@ -370,6 +424,8 @@
   <div id="descent-transition">
     <h2>Descending...</h2>
     <div id="descent-progress-track"><div id="descent-progress-bar"></div></div>
+    <div id="descent-detail"><div id="descent-items"></div></div>
+    <div id="descent-tease"></div>
   </div>
 
   <div id="menu" role="dialog" aria-label="Main menu">
@@ -387,6 +443,7 @@
   <div id="hud" role="status" aria-label="HUD">
     <div id="depth-display" aria-label="Depth">0m</div>
     <div id="depth-zone" aria-label="Depth zone">SURFACE</div>
+    <div id="bg-loading"><div id="bg-loading-dot"></div><span>Loading...</span></div>
 
     <div id="warning-text"></div>
     <div id="crosshair"></div>

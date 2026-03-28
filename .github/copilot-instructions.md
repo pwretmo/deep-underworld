@@ -227,11 +227,21 @@ See Engineering Quality Standards in copilot-instructions.md.
 Follow the review-workflow skill in .github/skills/review-workflow/SKILL.md.
 If issues found: post REQUEST_CHANGES review, add "agent-reviewed" label, return the list of issues.
 If approved: post APPROVE review, add "agent-reviewed" and "agent-approved" labels.
+When adding labels, use read-merge-write reconciliation: read current labels first, merge, then write — never overwrite with a bare list (see review-workflow skill).
 
 If GitHub blocks formal review actions on self-authored PRs, still return REVIEW RESULT: REQUEST_CHANGES when blockers exist and do not allow `agent-approved` labeling until blockers are fixed.
 ```
 
 ### Re-dispatch Worker with Review Fixes
+
+Before dispatching, verify the worktree still exists and recreate if missing:
+
+```powershell
+git worktree list
+# If missing, recreate from the remote branch (NOT origin/main — that discards PR commits):
+git fetch origin agent/<slug>
+git worktree add F:\repos\deep-underworld-worktrees\<slug> agent/<slug>
+```
 
 ```
 You are a Local Worker agent for the deep-underworld repo (owner: pwretmo, repo: deep-underworld).

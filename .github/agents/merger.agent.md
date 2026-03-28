@@ -1,6 +1,6 @@
 ---
 name: Merger
-description: Squash-merges agent-approved PRs into main one at a time. Verifies builds after each merge and cleans up worktrees.
+description: "Use when merging agent-approved PRs sequentially with squash merges, running post-merge build verification, and cleaning up local worktrees."
 user-invocable: false
 ---
 
@@ -26,13 +26,13 @@ List open PRs and filter for the `agent-approved` label. See the merge-workflow 
 
 ### 2. Merge Each PR (One at a Time)
 
-For each approved PR, follow the merge-workflow skill's procedure:
+For each approved PR, follow the merge-workflow skill exactly, including all merge-readiness gates before merge:
 
-1. **Squash merge** via MCP (use PR title as commit title)
-2. **Pull locally**: `git pull origin main` (in `F:\repos\deep-underworld`)
-3. **Verify build**: `npm run build`
-4. **If build fails** — stop immediately and report. Do NOT proceed with more merges.
-5. **If build succeeds** — clean up worktree for local `agent/` branches (see skill), then continue to next PR.
+1. Poll reviews and review comments
+2. Confirm no outstanding `REQUEST_CHANGES` and no unresolved Copilot blockers
+3. Squash merge via MCP
+4. Pull `main` locally and run `npm run build`
+5. Stop immediately on the first failure; otherwise continue with cleanup and next PR
 
 ### 3. Report Results
 
@@ -47,6 +47,8 @@ MERGE RESULTS:
 Total: <n> merged, <n> failed
 ```
 
+Then call `task_complete` immediately after the summary.
+
 ## Rules
 
 - **Only** merge PRs with the `agent-approved` label — never merge unapproved PRs
@@ -54,3 +56,12 @@ Total: <n> merged, <n> failed
 - **Always** verify the build after each merge before proceeding
 - **Stop** on the first build failure — do not continue merging
 - Clean up worktrees only for local `agent/` branches, not cloud `copilot/` branches
+
+## Completion Contract
+
+Every successful run must end with:
+
+1. A short, plain-language merge summary
+2. An immediate `task_complete` call in the same turn
+
+Do not end with only normal chat text.
