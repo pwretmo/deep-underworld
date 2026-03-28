@@ -34,6 +34,7 @@ export class Player {
     this.dampening = 3;
     this.keys = {};
     this.autoplayInput = { forward: 0, right: 0, vertical: 0 };
+    this.autoplayCollisionBypassTimer = 0;
 
     // Mouse look
     this.euler = new THREE.Euler(0, 0, 0, 'YXZ');
@@ -124,6 +125,7 @@ export class Player {
     this.position.set(0, -5, 0);
     this.velocity.set(0, 0, 0);
     this.clearAutoplayInput();
+    this.autoplayCollisionBypassTimer = 0;
     this.euler.set(0, 0, 0);
     this.camera.quaternion.setFromEuler(this.euler);
     // Sync physics body to reset position
@@ -190,9 +192,13 @@ export class Player {
     const dx = this.velocity.x * dt;
     const dy = this.velocity.y * dt;
     const dz = this.velocity.z * dt;
+    if (this.autoplayCollisionBypassTimer > 0) {
+      this.autoplayCollisionBypassTimer = Math.max(0, this.autoplayCollisionBypassTimer - dt);
+    }
+    const bypassCollisions = this.autoplayCollisionBypassTimer > 0;
 
     // Use physics character controller if available
-    if (this._physicsWorld && this._physicsCollider && this._physicsBody) {
+    if (this._physicsWorld && this._physicsCollider && this._physicsBody && !bypassCollisions) {
       const corrected = this._physicsWorld.computeMovement(
         this._physicsCollider,
         { x: dx, y: dy, z: dz }

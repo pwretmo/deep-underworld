@@ -105,8 +105,8 @@ if (Test-Path F:\repos\deep-underworld-worktrees\<slug>) { Remove-Item F:\repos\
 # Prune stale references
 git worktree prune
 
-# Delete the local branch tracking reference
-git branch -d agent/<slug>
+# Delete the local branch (force required — squash merge leaves tip off main)
+git branch -D agent/<slug>
 ```
 
 If the worktree directory doesn't exist (already cleaned), just prune and move on.
