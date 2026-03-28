@@ -254,6 +254,10 @@ export class HUD {
     this._diagFlashUntil.clear();
   }
 
+  isDiagnosticsVisible() {
+    return this.diagnosticsVisible;
+  }
+
   resetRuntimeState() {
     this.closeLocator();
     this.stopTracking();
@@ -289,6 +293,14 @@ export class HUD {
     const rows = [
       this._diagRow('Stall risk', snapshot.postProcess?.stallRiskLabel ?? 'Unknown', stallRiskClass),
       this._diagRow('FPS / depth', `${this._fmtNumber(snapshot.fps, 0)} FPS | ${this._fmtNumber(snapshot.depth, 0)}m | max ${this._fmtNumber(snapshot.maxDepth, 0)}m`),
+      this._diagRow('Light zone', `${this._formatZone(snapshot.lighting?.zone)} | tw ${this._fmtFixed(snapshot.lighting?.blends?.twilight, 2)} | dark ${this._fmtFixed(snapshot.lighting?.blends?.darkZone, 2)} | abyss ${this._fmtFixed(snapshot.lighting?.blends?.abyss, 2)}`),
+      this._diagRow('Fog', `${snapshot.lighting?.fogColor ?? '--'} | near ${this._fmtFixed(snapshot.lighting?.fogNear, 2)} | far ${this._fmtFixed(snapshot.lighting?.fogFar, 1)}`),
+      this._diagRow('Ambient', `${this._fmtFixed(snapshot.lighting?.ambientIntensity, 3)} | target exp ${this._fmtFixed(snapshot.lighting?.targetExposure, 2)}`),
+      this._diagRow('Underwater FX', `trans ${this._formatRgb(snapshot.postProcess?.transmittance, 2)} | scatter ${this._fmtFixed(snapshot.postProcess?.scatter?.mix, 2)} @ ${this._fmtFixed(snapshot.postProcess?.scatter?.density, 4)}`),
+      this._diagRow('Bloom mode', `${snapshot.postProcess?.bloom?.mode === 'unreal' ? 'Unreal' : 'Shader'} | ${snapshot.postProcess?.bloomSuspended ? 'suspended' : snapshot.postProcess?.bloom?.passEnabled ? 'active' : 'shader-only'}`, bloomClass),
+      this._diagRow('Light budget', `${this._fmtNumber(snapshot.pointLights?.activeCount, 0)} active / ${this._fmtNumber(snapshot.pointLights?.maxLights, 0)} budget | ${this._fmtNumber(snapshot.pointLights?.managedCount, 0)} managed`),
+      this._diagRow('Light cats', `active ${this._formatCategorySummary(snapshot.pointLights?.activeCategories)} | managed ${this._formatCategorySummary(snapshot.pointLights?.managedCategories)}`),
+      this._diagRow('Modifiers', this._formatModifierSummary(snapshot.lighting?.modifiers)),
       this._diagRow('Creatures', `${this._fmtNumber(snapshot.creaturesActive, 0)} active | ${this._fmtNumber(snapshot.queuedSpawns, 0)} queued`),
       this._diagRow('Quality', `${snapshot.qualityTier ?? 'unknown'} | ${snapshot.graphics?.context ?? 'webgl'}`),
       this._diagRow('Renderer', snapshot.graphics?.hardwareAcceleratedLabel ?? 'Unknown', rendererClass),
@@ -349,6 +361,34 @@ export class HUD {
   _fmtFixed(value, digits = 1) {
     if (!Number.isFinite(value)) return '--';
     return Number(value).toFixed(digits);
+  }
+
+  _formatZone(value) {
+    if (!value) return 'Unknown';
+    if (value === 'darkZone') return 'Dark Zone';
+    return value
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .replace(/^./, (ch) => ch.toUpperCase());
+  }
+
+  _formatRgb(value, digits = 2) {
+    if (!value) return '--/--/--';
+    return `${this._fmtFixed(value.r, digits)}/${this._fmtFixed(value.g, digits)}/${this._fmtFixed(value.b, digits)}`;
+  }
+
+  _formatCategorySummary(categories) {
+    if (!categories || Object.keys(categories).length === 0) return 'none';
+    return Object.entries(categories)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([key, count]) => `${key}:${count}`)
+      .join(', ');
+  }
+
+  _formatModifierSummary(modifiers) {
+    if (!Array.isArray(modifiers) || modifiers.length === 0) return 'none';
+    return modifiers
+      .map((modifier) => `${modifier.id} ${this._fmtFixed(modifier.weight, 2)}`)
+      .join(', ');
   }
 
   _truncateLine(text) {

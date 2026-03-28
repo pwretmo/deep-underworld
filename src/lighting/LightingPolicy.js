@@ -81,9 +81,26 @@ export class LightingPolicy {
     this._baseFogNear = 5;
     this._baseFogFar = 300;
     this._baseAmbient = 0.24;
+    this._effectiveFogNear = 5;
+    this._effectiveFogFar = 300;
+    this._effectiveAmbient = 0.24;
 
     // Exposure state
     this._targetExposure = DEPTH_ZONE_PROFILES.exposure.surface;
+    this._lastDepth = 0;
+    this._lastFlashlightOn = false;
+    this._lastZoneName = 'surface';
+    this._lastBlends = {
+      twilight: 0,
+      darkZone: 0,
+      abyss: 0,
+    };
+    this._lastZoneWeights = {
+      surface: 1,
+      twilight: 0,
+      darkZone: 0,
+      abyss: 0,
+    };
   }
 
   /**
@@ -115,6 +132,37 @@ export class LightingPolicy {
 
   get targetExposure() {
     return this._targetExposure;
+  }
+
+  getDiagnostics() {
+    return {
+      depth: this._lastDepth,
+      flashlightOn: this._lastFlashlightOn,
+      zone: this._lastZoneName,
+      blends: {
+        ...this._lastBlends,
+      },
+      zoneWeights: {
+        ...this._lastZoneWeights,
+      },
+      fogColor: `#${this._fogColor.getHexString()}`,
+      fogNear: this._effectiveFogNear,
+      fogFar: this._effectiveFogFar,
+      ambientIntensity: this._effectiveAmbient,
+      baseProfile: {
+        fogNear: this._baseFogNear,
+        fogFar: this._baseFogFar,
+        ambient: this._baseAmbient,
+      },
+      targetExposure: this._targetExposure,
+      modifiers: Array.from(this._modifiers.entries()).map(([id, modifier]) => ({
+        id,
+        weight: THREE.MathUtils.clamp(modifier.weight ?? 0, 0, 1),
+        fogNear: modifier.fogNear,
+        fogFar: modifier.fogFar,
+        ambientIntensity: modifier.ambientIntensity,
+      })),
+    };
   }
 
   /**
@@ -162,6 +210,9 @@ export class LightingPolicy {
     fog.far = fogFar;
     sceneBackground.copy(this._fogColor);
     ambientLight.intensity = ambient;
+    this._effectiveFogNear = fogNear;
+    this._effectiveFogFar = fogFar;
+    this._effectiveAmbient = ambient;
 
     // 5. Update exposure
     this._updateExposure(depth, flashlightOn, renderer);
@@ -175,10 +226,36 @@ export class LightingPolicy {
   _evaluateBaseProfile(depth, flashlightOn) {
     const p = this.profiles;
     const bands = p.fog.bands;
+    this._lastDepth = depth;
+    this._lastFlashlightOn = flashlightOn;
 
     const twilight = THREE.MathUtils.smoothstep(depth, bands.twilight.start, bands.twilight.end);
     const darkZone = THREE.MathUtils.smoothstep(depth, bands.darkZone.start, bands.darkZone.end);
     const abyss = THREE.MathUtils.smoothstep(depth, bands.abyss.start, bands.abyss.end);
+    const zoneWeights = {
+      surface: THREE.MathUtils.clamp(1 - twilight, 0, 1),
+      twilight: THREE.MathUtils.clamp(twilight - darkZone, 0, 1),
+      darkZone: THREE.MathUtils.clamp(darkZone - abyss, 0, 1),
+      abyss: THREE.MathUtils.clamp(abyss, 0, 1),
+    };
+
+    let zoneName = 'surface';
+    let zoneWeight = zoneWeights.surface;
+    for (const [candidate, weight] of Object.entries(zoneWeights)) {
+      if (weight > zoneWeight) {
+        zoneName = candidate;
+        zoneWeight = weight;
+      }
+    }
+
+    this._lastZoneName = zoneName;
+    this._lastBlends.twilight = twilight;
+    this._lastBlends.darkZone = darkZone;
+    this._lastBlends.abyss = abyss;
+    this._lastZoneWeights.surface = zoneWeights.surface;
+    this._lastZoneWeights.twilight = zoneWeights.twilight;
+    this._lastZoneWeights.darkZone = zoneWeights.darkZone;
+    this._lastZoneWeights.abyss = zoneWeights.abyss;
 
     // Fog color
     this._colorA.set(p.fog.colors.surface);
