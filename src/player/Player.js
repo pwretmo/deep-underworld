@@ -3,13 +3,16 @@ import { ExternalLightingSystem } from "./ExternalLightingSystem.js";
 
 /**
  * Detect if the GPU can handle volumetric shaders.
- * Only enable the shader path once a WebGL backend is initialized and has the
- * required capabilities. WebGPU and pre-init paths stay on the flat fallback.
+ * Stay conservative before backend init, but preserve the advanced beam path
+ * on native WebGPU once the renderer has completed initialization.
  */
 function canUseVolumetricBeam(renderer) {
   if (!renderer) return false;
   const backend = renderer.backend;
-  if (!backend || !backend.isWebGLBackend) return false;
+  if (!backend) return false;
+  if (!backend.isWebGLBackend) {
+    return !!backend.device;
+  }
   // WebGL fallback — check capabilities on the raw GL context
   const gl = backend.gl;
   if (!gl) return false;
@@ -29,7 +32,7 @@ export class Player {
   /**
    * @param {THREE.PerspectiveCamera} camera
    * @param {HTMLElement} domElement
-   * @param {THREE.WebGLRenderer} [renderer] - optional, used for GPU capability detection
+  * @param {object} [renderer] - optional, used for backend capability detection
    */
   constructor(camera, domElement, renderer) {
     this.camera = camera;

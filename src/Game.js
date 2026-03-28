@@ -57,11 +57,7 @@ export class Game {
     this.scene.add(this.camera);
 
     // Systems
-    this.player = new Player(
-      this.camera,
-      this.renderer.domElement,
-      this.renderer,
-    );
+    this.player = null;
     this.ocean = new Ocean(this.scene);
     this.terrain = new Terrain(this.scene);
     this.flora = new Flora(this.scene);
@@ -168,7 +164,11 @@ export class Game {
   async init() {
     await this.renderer.init();
 
-    this.player.configureRenderer(this.renderer);
+    this.player = new Player(
+      this.camera,
+      this.renderer.domElement,
+      this.renderer,
+    );
 
     // Detect high-end GPU for potential ultra tier auto-select
     await qualityManager.detectGPU(this.renderer);
