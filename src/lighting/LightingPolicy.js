@@ -19,24 +19,24 @@ export const DEPTH_THRESHOLDS = Object.freeze({
 export const DEPTH_ZONE_PROFILES = Object.freeze({
   fog: Object.freeze({
     colors: Object.freeze({
-      surface: 0x004b70,
-      twilight: 0x001b2b,
-      darkZone: 0x02060d,
-      abyss: 0x010408,
+      surface: 0x006b8f,
+      twilight: 0x003352,
+      darkZone: 0x081018,
+      abyss: 0x030608,
     }),
     bands: Object.freeze({
       twilight: Object.freeze({ start: 35, end: 210 }),
       darkZone: Object.freeze({ start: 170, end: 520 }),
       abyss: Object.freeze({ start: 430, end: 900 }),
     }),
-    near: Object.freeze({ surface: 5.0, twilight: 2.0, darkZone: 0.7, abyss: 0.3 }),
-    far: Object.freeze({ surface: 220, twilight: 110, darkZone: 58, abyss: 50 }),
+    near: Object.freeze({ surface: 5.0, twilight: 3.0, darkZone: 1.5, abyss: 0.5 }),
+    far: Object.freeze({ surface: 240, twilight: 160, darkZone: 85, abyss: 55 }),
   }),
   ambient: Object.freeze({
     surface: 0.24,
-    twilight: 0.12,
-    darkZone: 0.06,
-    abyss: 0.05,
+    twilight: 0.16,
+    darkZone: 0.09,
+    abyss: 0.055,
   }),
   exposure: Object.freeze({
     surface: 0.76,
