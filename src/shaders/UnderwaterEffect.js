@@ -193,9 +193,10 @@ const UnderwaterShader = {
         }
       }
 
-      // Apply extinction to ambient surfaces; flashlight-lit pixels keep natural color.
-      // Add forward scatter to simulate in-scattered ambient light.
-      color.rgb = color.rgb * mix(transmittance, vec3(1.0), litAmount)
+      // Apply extinction to ambient surfaces; flashlight-lit pixels retain partial
+      // extinction so water absorption preserves form-revealing depth contrast.
+      float clampedLit = litAmount * 0.6;
+      color.rgb = color.rgb * mix(transmittance, vec3(1.0), clampedLit)
                 + scatter * (1.0 - litAmount * 0.7);
 
       // Depth-aware contrast to strengthen separation in mid/deep zones.
@@ -252,6 +253,18 @@ const UnderwaterShader = {
 
       // Highlight roll-off reduces flashlight hotspot clipping while keeping punch.
       float peak = max(max(color.r, color.g), color.b);
+
+      // Local beam-center exposure roll-off: compress highlights near the beam
+      // axis (screen center) instead of lifting the entire frame when the
+      // flashlight is on. This prevents the double-lobe whiteout artifact.
+      if (flashlightActive > 0.5) {
+        float beamCenterDist = distance(uv, vec2(0.5));
+        float beamInfluence = 1.0 - smoothstep(0.0, 0.38, beamCenterDist);
+        float localCompress = beamInfluence * smoothstep(0.3, 0.75, peak) * 0.45;
+        color.rgb = mix(color.rgb, color.rgb / (1.0 + color.rgb * 0.7), localCompress);
+        peak = max(max(color.r, color.g), color.b);
+      }
+
       float rollStart = max(0.45, highlightRoll.x - exposure * 0.08);
       float rollBlend = smoothstep(rollStart, rollStart + highlightRoll.y, peak) * highlightRoll.z;
       vec3 rolled = color.rgb / (1.0 + color.rgb);
@@ -646,13 +659,13 @@ export class UnderwaterEffect {
         this.tuning.bloom.surfaceStrength,
         this.tuning.bloom.deepStrength,
         depthNorm
-      ) * (flashlightOn ? 0.88 : 1.0);
+      ) * (flashlightOn ? 0.35 : 1.0);
 
       this._bloomTargetThreshold = THREE.MathUtils.lerp(
         this.tuning.bloom.surfaceThreshold,
         this.tuning.bloom.deepThreshold,
         depthNorm
-      ) + (flashlightOn ? 0.08 : 0.0);
+      ) + (flashlightOn ? 0.30 : 0.0);
 
       this._bloomTargetRadius = THREE.MathUtils.lerp(
         this.tuning.bloom.radius * 2.0,

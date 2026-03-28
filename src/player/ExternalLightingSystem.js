@@ -5,14 +5,14 @@ import {
 } from '../shaders/VolumetricBeamMaterial.js';
 
 const DEFAULTS = {
-  headlightIntensity: 200,
+  headlightIntensity: 140,
   headlightRange: 120,
-  coneAngle: Math.PI / 7,
-  penumbra: 0.35,
-  decay: 1.4,
+  coneAngle: Math.PI / 9,
+  penumbra: 0.45,
+  decay: 1.8,
   headlightSpacing: 2.2,
-  beamLength: 54,
-  beamBaseOpacity: 0.042,
+  beamLength: 48,
+  beamBaseOpacity: 0.018,
   hullIntensity: 6,
   hullRange: 38,
   hullDecay: 2,
@@ -114,7 +114,7 @@ export class ExternalLightingSystem {
     this.group.visible = enabled;
   }
 
-  update(_dt, _depth, time) {
+  update(_dt, depth, time) {
     // Keep lamp output stable across depth; scene fog/scattering handles perceived attenuation.
     const intensityAttenuation = 1.0;
     const rangeAttenuation = 1.0;
@@ -142,6 +142,7 @@ export class ExternalLightingSystem {
         mat.uniforms.time.value = time;
         mat.uniforms.depthAttenuation.value = intensityAttenuation;
         mat.uniforms.depthOpacityScale.value = beamOpacityScale;
+        mat.uniforms.waterDepth.value = depth;
         continue;
       }
 
