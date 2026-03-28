@@ -1524,6 +1524,8 @@ export class Game {
     this.scene.traverse((obj) => {
       if (!obj.isPointLight) return;
       if (obj === this.player.subLight) return;
+      const cat = obj.userData.duwCategory;
+      if (cat === 'player_practical' || cat === 'player_headlight') return;
 
       if (obj.userData.duwBaseIntensity === undefined) {
         obj.userData.duwBaseIntensity = obj.intensity;
@@ -1565,8 +1567,13 @@ export class Game {
       // Hysteresis: boost score for currently-active lights to prevent flip-flopping
       const isActive = (light.userData.duwTargetIntensity ?? 0) > 0.01;
       const hysteresis = isActive ? 1.2 : 1.0;
+      // Category priority tiebreaker: encounter_hero > creature_bio > flora_decor
+      const catPriority = light.userData.duwCategory === 'encounter_hero' ? 1.15
+        : light.userData.duwCategory === 'creature_bio' ? 1.10
+        : light.userData.duwCategory === 'flora_decor' ? 1.05
+        : 1.0;
       light.userData.duwScore =
-        ((baseIntensity + 0.001) / (distanceSq + 1)) * hysteresis;
+        ((baseIntensity + 0.001) / (distanceSq + 1)) * hysteresis * catPriority;
       light.userData.duwTargetIntensity = 0;
     }
 

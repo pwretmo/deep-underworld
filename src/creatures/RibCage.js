@@ -100,6 +100,7 @@ export class RibCage {
 
     // Dim inner glow
     this.glow = new THREE.PointLight(0x440022, 1, 10);
+    this.glow.userData.duwCategory = 'creature_bio';
     this.group.add(this.glow);
 
     const s = 2.5 + Math.random() * 2;

@@ -231,6 +231,7 @@ export class DeepOne {
 
     // Single point light — near tier only; mid/far use emissive-only glow
     this._eyeLight = new THREE.PointLight(0x440000, 0.5, 4 * this.scale);
+    this._eyeLight.userData.duwCategory = 'creature_bio';
     this._eyeLight.position.set(0, 2.0, 0.8);
     nearTier.group.add(this._eyeLight);
 

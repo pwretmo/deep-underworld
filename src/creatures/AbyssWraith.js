@@ -132,6 +132,7 @@ export class AbyssWraith {
     this.group.add(blade);
 
     this.eyeLight = new THREE.PointLight(0xff2200, 1.5, 12);
+    this.eyeLight.userData.duwCategory = 'creature_bio';
     this.eyeLight.position.set(0.8, 0.15, 0);
     this.group.add(this.eyeLight);
 

@@ -355,6 +355,7 @@ export class AbyssEncounter {
           const eyeLight = new THREE.PointLight(0xff3300, 3, 40);
           eyeLight.position.copy(eye.position);
           eyeLight.userData.baseIntensity = 3;
+          eyeLight.userData.duwCategory = 'encounter_hero';
           this.entity.add(eyeLight);
           this.entityLights.push(eyeLight);
         }
@@ -371,6 +372,7 @@ export class AbyssEncounter {
         (Math.random() - 0.5) * 30
       );
       bioLight.userData.baseIntensity = 5;
+      bioLight.userData.duwCategory = 'encounter_hero';
       this.entity.add(bioLight);
       this.entityLights.push(bioLight);
     }

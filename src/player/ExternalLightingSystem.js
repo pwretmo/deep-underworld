@@ -71,6 +71,7 @@ export class ExternalLightingSystem {
       spot.target.position.set(x, 0, -1);
       spot.userData.baseIntensity = cfg.headlightIntensity;
       spot.userData.baseRange = cfg.headlightRange;
+      spot.userData.duwCategory = 'player_headlight';
       this.group.add(spot);
       this.group.add(spot.target);
       this.headlights.push(spot);
@@ -105,6 +106,7 @@ export class ExternalLightingSystem {
       light.position.set(item.position[0], item.position[1], item.position[2]);
       light.userData.baseIntensity = intensity;
       light.userData.baseRange = cfg.hullRange;
+      light.userData.duwCategory = 'player_practical';
       this.group.add(light);
       this.hullLights.push(light);
     }

@@ -115,6 +115,7 @@ export class MechOctopus {
 
     // Eye point-light lives on near tier only
     this.eyeLight = new THREE.PointLight(0xffaa00, 0.8, 10);
+    this.eyeLight.userData.duwCategory = 'creature_bio';
     this.eyeLight.position.set(0.5, 0, 0);
     this._tierGroups.near.add(this.eyeLight);
 

@@ -1325,6 +1325,7 @@ totalEmissiveRadiance += diffuseColor.rgb * (vPulse - 0.76) * 0.42;`,
     group.add(sprite);
 
     const light = new THREE.PointLight(color, 0.42, 8);
+    light.userData.duwCategory = 'creature_bio';
     light.position.y = -0.1;
     group.add(light);
 

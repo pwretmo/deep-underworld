@@ -260,6 +260,7 @@ export class AbyssalMaw {
 
     // PointLight only on near tier (budget single light for inner glow)
     this.innerLight = new THREE.PointLight(0xff0033, 2, 15);
+    this.innerLight.userData.duwCategory = 'creature_bio';
     this.innerLight.position.z = -2;
     this.tiers.near.group.add(this.innerLight);
 

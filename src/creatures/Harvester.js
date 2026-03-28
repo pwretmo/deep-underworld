@@ -105,6 +105,7 @@ export class Harvester {
     this.group.add(eye);
 
     this.eyeLight = new THREE.PointLight(0xffaa00, 1, 12);
+    this.eyeLight.userData.duwCategory = 'creature_bio';
     this.eyeLight.position.copy(eye.position);
     this.group.add(this.eyeLight);
 

@@ -39,6 +39,7 @@ export class FacelessOne {
 
     // Light only on near tier
     this.glow = new THREE.PointLight(0x1a0a2e, 1.2, 18);
+    this.glow.userData.duwCategory = 'creature_bio';
     this.glow.position.set(0, 1.5, 0);
     this.tiers.near.group.add(this.glow);
 
