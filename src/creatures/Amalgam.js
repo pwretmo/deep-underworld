@@ -1,7 +1,6 @@
 import * as THREE from "three";
 import {
   LOD_NEAR_DISTANCE,
-  LOD_MEDIUM_DISTANCE,
   toStandardMaterial,
 } from "./lodUtils.js";
 
@@ -9,12 +8,26 @@ import {
 const _v3A = new THREE.Vector3();
 const _v3B = new THREE.Vector3();
 const _v3C = new THREE.Vector3();
+const _webControl = new THREE.Vector3();
+const _webCenter = new THREE.Vector3();
+const _webTangent = new THREE.Vector3();
+const _webNormal = new THREE.Vector3();
+const _webBinormal = new THREE.Vector3();
+const _webRadial = new THREE.Vector3();
+const _webPoint = new THREE.Vector3();
+const _webTemp = new THREE.Vector3();
 
 const TWO_PI = Math.PI * 2;
 const RESPAWN_DISTANCE = 200;
+const WEB_TUBULAR_SEGMENTS = 8;
+const WEB_RADIAL_SEGMENTS = 4;
+const WEB_RADIUS = 0.016;
+const WEB_OUTWARD_OFFSET = 0.18;
+const WEB_UP = new THREE.Vector3(0, 1, 0);
+const WEB_ALT_UP = new THREE.Vector3(1, 0, 0);
 
 // -- Amalgam-specific LOD distances (abyss-zone fog far-plane ≈42m) -----------
-const AMALGAM_MEDIUM_DIST = Math.floor(LOD_NEAR_DISTANCE / 2); // ~21m
+const AMALGAM_MEDIUM_DIST = 30;
 const AMALGAM_FAR_DIST = LOD_NEAR_DISTANCE; // 42m — fog occludes beyond this
 
 // -- LOD tier profiles --------------------------------------------------------
@@ -141,6 +154,123 @@ function _createBoneNormalTexture() {
   _boneNormalTex.wrapS = _boneNormalTex.wrapT = THREE.RepeatWrapping;
   _boneNormalTex.needsUpdate = true;
   return _boneNormalTex;
+}
+
+function _computeWebArchMidpoint(target, start, end) {
+  target.addVectors(start, end).multiplyScalar(0.5);
+  const len = target.length();
+  if (len > 1e-5) {
+    target.multiplyScalar((len + WEB_OUTWARD_OFFSET) / len);
+  } else {
+    target.set(0, WEB_OUTWARD_OFFSET, 0);
+  }
+  return target;
+}
+
+function _computeQuadraticControlPoint(target, start, mid, end) {
+  return target
+    .copy(mid)
+    .multiplyScalar(2)
+    .sub(_webTemp.addVectors(start, end).multiplyScalar(0.5));
+}
+
+function _setQuadraticPoint(target, start, control, end, t) {
+  const oneMinusT = 1 - t;
+  return target
+    .copy(start)
+    .multiplyScalar(oneMinusT * oneMinusT)
+    .addScaledVector(control, 2 * oneMinusT * t)
+    .addScaledVector(end, t * t);
+}
+
+function _setQuadraticTangent(target, start, control, end, t) {
+  target.subVectors(control, start).multiplyScalar(2 * (1 - t));
+  target.addScaledVector(_webTemp.subVectors(end, control), 2 * t);
+  if (target.lengthSq() < 1e-6) {
+    target.set(0, 1, 0);
+  }
+  return target.normalize();
+}
+
+function _updateWebGeometry(
+  geometry,
+  start,
+  mid,
+  end,
+  radius,
+  tubularSegments,
+  radialSegments,
+) {
+  const positionAttr = geometry.attributes.position;
+  const normalAttr = geometry.attributes.normal;
+  const positions = positionAttr.array;
+  const normals = normalAttr.array;
+  let writeIndex = 0;
+
+  _computeQuadraticControlPoint(_webControl, start, mid, end);
+
+  for (let ring = 0; ring <= tubularSegments; ring++) {
+    const t = ring / tubularSegments;
+    _setQuadraticPoint(_webCenter, start, _webControl, end, t);
+    _setQuadraticTangent(_webTangent, start, _webControl, end, t);
+
+    const referenceAxis =
+      Math.abs(_webTangent.dot(WEB_UP)) > 0.98 ? WEB_ALT_UP : WEB_UP;
+    _webBinormal.crossVectors(_webTangent, referenceAxis);
+    if (_webBinormal.lengthSq() < 1e-6) {
+      _webBinormal.crossVectors(_webTangent, WEB_ALT_UP);
+    }
+    _webBinormal.normalize();
+    _webNormal.crossVectors(_webBinormal, _webTangent).normalize();
+
+    for (let side = 0; side <= radialSegments; side++) {
+      const angle = (side / radialSegments) * TWO_PI;
+      _webRadial
+        .copy(_webNormal)
+        .multiplyScalar(Math.cos(angle))
+        .addScaledVector(_webBinormal, Math.sin(angle));
+      _webPoint.copy(_webCenter).addScaledVector(_webRadial, radius);
+
+      positions[writeIndex] = _webPoint.x;
+      normals[writeIndex++] = _webRadial.x;
+      positions[writeIndex] = _webPoint.y;
+      normals[writeIndex++] = _webRadial.y;
+      positions[writeIndex] = _webPoint.z;
+      normals[writeIndex++] = _webRadial.z;
+    }
+  }
+
+  positionAttr.needsUpdate = true;
+  normalAttr.needsUpdate = true;
+}
+
+function _createWebGeometry(start, mid, end) {
+  const control = _computeQuadraticControlPoint(
+    new THREE.Vector3(),
+    start,
+    mid,
+    end,
+  );
+  const geometry = new THREE.TubeGeometry(
+    new THREE.QuadraticBezierCurve3(start.clone(), control, end.clone()),
+    WEB_TUBULAR_SEGMENTS,
+    WEB_RADIUS,
+    WEB_RADIAL_SEGMENTS,
+    false,
+  );
+  geometry.attributes.position.setUsage(THREE.DynamicDrawUsage);
+  geometry.attributes.normal.setUsage(THREE.DynamicDrawUsage);
+  _updateWebGeometry(
+    geometry,
+    start,
+    mid,
+    end,
+    WEB_RADIUS,
+    WEB_TUBULAR_SEGMENTS,
+    WEB_RADIAL_SEGMENTS,
+  );
+  geometry.computeBoundingSphere();
+  return geometry;
 }
 
 // -- Vertex shader: core organic pulsation (near LOD only) --------------------
@@ -312,7 +442,7 @@ export class Amalgam {
       clearcoat: isNear ? 0.9 : 0.5,
       clearcoatRoughness: 0.15,
       emissive: 0x502040,
-      emissiveIntensity: isFar ? 0.9 : 0.7,
+      emissiveIntensity: isFar ? 0 : 0.7,
       normalMap: fleshNormal,
       normalScale: isNear ? new THREE.Vector2(0.6, 0.6) : undefined,
       transmission: isNear ? 0.15 : 0,
@@ -325,7 +455,7 @@ export class Amalgam {
       metalness: 0.85,
       clearcoat: isNear ? 1.0 : 0.5,
       emissive: 0x203858,
-      emissiveIntensity: isFar ? 0.5 : 0.3,
+      emissiveIntensity: isFar ? 0 : 0.3,
     });
 
     let boneMat = new THREE.MeshPhysicalMaterial({
@@ -334,7 +464,7 @@ export class Amalgam {
       metalness: 0,
       clearcoat: isNear ? 0.8 : 0.4,
       emissive: 0x504030,
-      emissiveIntensity: isFar ? 0.7 : 0.5,
+      emissiveIntensity: isFar ? 0 : 0.5,
       normalMap: boneNormal,
       normalScale: isNear ? new THREE.Vector2(0.5, 0.5) : undefined,
     });
@@ -401,6 +531,14 @@ export class Amalgam {
     }
     coreGeo.computeVertexNormals();
     const coreMesh = new THREE.Mesh(coreGeo, fleshMat.clone());
+    coreMesh.userData.baseScale = 1;
+    if (coreMesh.material && coreMesh.material.emissiveIntensity !== undefined) {
+      if (isFar) {
+        coreMesh.material.emissiveIntensity = 0.9;
+      }
+      coreMesh.userData.baseEmissiveIntensity =
+        coreMesh.material.emissiveIntensity;
+    }
 
     if (isNear) {
       _applyCoreShader(coreMesh.material, this._shaderUniforms);
@@ -662,21 +800,14 @@ export class Amalgam {
         const limbB = limbs[limbBIdx];
         const pA = limbA.position;
         const pB = limbB.position;
-        const midPt = new THREE.Vector3().addVectors(pA, pB).multiplyScalar(0.5);
-        const outLen = midPt.length() + 0.18;
-        const outward = midPt.clone().normalize().multiplyScalar(outLen);
-        const curve = new THREE.CatmullRomCurve3([
-          pA.clone(),
-          outward,
-          pB.clone(),
-        ]);
-        const webGeo = new THREE.TubeGeometry(curve, 8, 0.016, 4, false);
+        const midPt = _computeWebArchMidpoint(new THREE.Vector3(), pA, pB);
+        const webGeo = _createWebGeometry(pA, midPt, pB);
         const web = new THREE.Mesh(webGeo, webMat);
         web.userData.limbA = limbA;
         web.userData.limbB = limbB;
-        web.userData.tubeSegs = 8;
-        web.userData.tubeRadius = 0.016;
-        web.userData.tubeSides = 4;
+        web.userData.tubeSegs = WEB_TUBULAR_SEGMENTS;
+        web.userData.tubeRadius = WEB_RADIUS;
+        web.userData.tubeSides = WEB_RADIAL_SEGMENTS;
         webs.push(web);
         tierGroup.add(web);
       }
@@ -767,11 +898,8 @@ export class Amalgam {
     this.group.rotation.x += dt * 0.02;
     this.group.rotation.z += dt * 0.015;
 
-    // Breathing scale pulse
+    // Breathing phase drives near-tier deformation and medium/far glow timing.
     this._breathPhase += dt * 1.2;
-    const breathScale =
-      this._baseScale * (1 + Math.sin(this._breathPhase) * 0.02);
-    this.group.scale.setScalar(breathScale);
 
     // Player proximity factor
     const distToPlayer = this.group.position.distanceTo(playerPos);
@@ -807,13 +935,37 @@ export class Amalgam {
       this._shaderUniforms.core.uProximity.value = this._proximityFactor;
     }
 
+    const breathWave = Math.sin(this._breathPhase);
+    if (tier === "near") {
+      this.group.scale.setScalar(this._baseScale * (1 + breathWave * 0.02));
+    } else {
+      this.group.scale.setScalar(this._baseScale);
+    }
+
+    if (medTier.coreMesh) {
+      const mediumPulse = tier === "medium" ? Math.sin(this.time * 1.4) : 0;
+      medTier.coreMesh.scale.setScalar(1 + mediumPulse * 0.035);
+      if (
+        medTier.coreMesh.material &&
+        medTier.coreMesh.material.emissiveIntensity !== undefined
+      ) {
+        medTier.coreMesh.material.emissiveIntensity =
+          medTier.coreMesh.userData.baseEmissiveIntensity +
+          (tier === "medium" ? 0.12 + mediumPulse * 0.08 : 0);
+      }
+    }
+    if (farTier.coreMesh?.material?.emissiveIntensity !== undefined) {
+      const farGlow = tier === "far" ? Math.sin(this.time * 1.8) * 0.18 : 0;
+      farTier.coreMesh.material.emissiveIntensity =
+        farTier.coreMesh.userData.baseEmissiveIntensity + farGlow;
+      farTier.coreMesh.scale.setScalar(1);
+    }
+
     // Limb animation — gate to visible tier only
     if (tier === "near") {
       this._animateLimbs(dt, nearTier, true);
     } else if (tier === "medium") {
       this._animateLimbsBasic(dt, medTier);
-    } else {
-      this._animateLimbsBasic(dt, farTier);
     }
 
     // Skull jaw articulation (near only)
@@ -873,10 +1025,11 @@ export class Amalgam {
     }
 
     // Spinal tail animation
-    this._animateSpine(
-      dt,
-      tier === "near" ? nearTier : tier === "medium" ? medTier : farTier,
-    );
+    if (tier === "near") {
+      this._animateSpine(dt, nearTier);
+    } else if (tier === "medium") {
+      this._animateSpine(dt, medTier);
+    }
 
     // Organ bioluminescence pulse + radial shift with core pulsation (near only)
     if (tier === "near") {
@@ -897,7 +1050,11 @@ export class Amalgam {
 
     // Secondary motion: connective web stretch with limb movement (near only, every 3rd frame)
     this._frameCount++;
-    if (tier === "near" && nearTier.webs.length > 0 && this._frameCount % 3 === 0) {
+    if (
+      tier === "near" &&
+      nearTier.webs.length > 0 &&
+      this._frameCount % 3 === 0
+    ) {
       for (let wi = 0; wi < nearTier.webs.length; wi++) {
         const web = nearTier.webs[wi];
         const limbA = web.userData.limbA;
@@ -911,21 +1068,15 @@ export class Amalgam {
         _v3C.x += Math.sin(limbB.rotation.x) * 0.35;
         _v3C.z += Math.sin(limbB.rotation.z) * 0.35;
         // Midpoint pushed outward — web bows taut as limbs extend
-        _v3A.addVectors(_v3B, _v3C).multiplyScalar(0.5);
-        const outLen = _v3A.length() + 0.18;
-        _v3A.normalize().multiplyScalar(outLen);
-        const curve = new THREE.CatmullRomCurve3([
-          _v3B.clone(),
-          _v3A.clone(),
-          _v3C.clone(),
-        ]);
-        web.geometry.dispose();
-        web.geometry = new THREE.TubeGeometry(
+        _computeWebArchMidpoint(_v3A, _v3B, _v3C);
+        _updateWebGeometry(
+          web.geometry,
+          _v3B,
           curve,
-          web.userData.tubeSegs,
+          _v3C,
           web.userData.tubeRadius,
+          web.userData.tubeSegs,
           web.userData.tubeSides,
-          false,
         );
       }
     }
