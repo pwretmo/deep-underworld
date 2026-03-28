@@ -94,6 +94,9 @@ function _applyResonanceShaderInstanced(mat, uTime, uResA, uRetractT) {
       '#include <common>',
       [
         '#include <common>',
+        'uniform float uTime;',
+        'uniform float uResA;',
+        'uniform float uRetractT;',
         'attribute float aResFreq;',
         'attribute float aPhase;',
         'attribute float aRadius;',
