@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { LOD_NEAR_DISTANCE, LOD_MEDIUM_DISTANCE, toStandardMaterial } from './lodUtils.js';
+import { toStandardMaterial } from './lodUtils.js';
 import { qualityManager } from '../QualityManager.js';
 
 // ── Pre-allocated temps — zero per-frame allocations ─────────────────────────
@@ -29,10 +29,15 @@ const S_STALK   = 1;
 const S_STRIKE  = 2;
 const S_RETRACT = 3;
 
-// ── LOD profiles ──────────────────────────────────────────────────────────────
+// ── Creature-specific LOD thresholds ────────────────────────────────────────
+// TendrilHunter's depth zone (Dark/Abyss, 250m+) has a fog far-plane of ~55m.
+// Using the shared lodUtils constants (42/86) would keep the medium tier alive
+// up to 86m — entirely fog-occluded — wasting GPU. Use tighter distances.
+const TH_LOD_NEAR_DIST   = 30; // near  ↔ medium transition
+const TH_LOD_MEDIUM_DIST = 55; // medium ↔ far transition (equals fog far-plane)
 const LOD_PROFILE = {
   near: {
-    headSegs:     [28, 20],
+    headSegs:     [48, 32],
     mandibleSegs:  12,
     eyeSegs:      [16, 12],
     eyeCount:      4,
@@ -232,7 +237,6 @@ export class TendrilHunter {
     this._strikePhase = 0; // 0→1 during STRIKE, 1→0 during RETRACT
 
     // Procedural variation
-    this._phaseOffset  = Math.random() * TWO_PI;
     this._abdomenPhase = Math.random() * TWO_PI;
     this._scanAngle    = Math.random() * TWO_PI;
     this._scanTimer    = 0;
@@ -247,7 +251,7 @@ export class TendrilHunter {
     this._leftMandible      = null;
     this._rightMandible     = null;
     this._abdomenMesh       = null;
-    this._sensorLight       = null;
+    this._nearEyeMat        = null; // shared eyeMat ref for animated emissive flicker
 
     // Medium-tier tendril refs for sinusoidal sway
     this._mediumTendrilData = []; // [{group, phase}]
@@ -276,8 +280,8 @@ export class TendrilHunter {
       const tierGroup = this._buildTier(profile, tierName);
       this.tiers[tierName] = tierGroup;
       const dist = tierName === 'near'   ? 0
-                 : tierName === 'medium' ? LOD_NEAR_DISTANCE
-                 : LOD_MEDIUM_DISTANCE;
+                 : tierName === 'medium' ? TH_LOD_NEAR_DIST
+                 : TH_LOD_MEDIUM_DIST;
       lod.addLevel(tierGroup, dist);
     }
 
@@ -401,6 +405,13 @@ export class TendrilHunter {
     }
 
     // ── Compound eyes — multi-lens cluster ────────────────────────────────────
+    // Hoist lensMat outside loop so all 4 eyes share one material instance.
+    const lensMat = profile.hasCompoundEyes ? new THREE.MeshPhysicalMaterial({
+      color: 0x88ff88, roughness: 0, metalness: 0, clearcoat: 1.0,
+      transparent: true, opacity: 0.35, depthWrite: false,
+      emissive: 0x22aa00, emissiveIntensity: 1.0,
+    }) : null;
+
     const eyePos = [
       [1.28,  0.22,  0.22],
       [1.28,  0.22, -0.22],
@@ -414,18 +425,15 @@ export class TendrilHunter {
         new THREE.SphereGeometry(0.08, profile.eyeSegs[0], profile.eyeSegs[1]),
         eyeMat
       ));
-      if (profile.hasCompoundEyes) {
-        // Transparent compound-lens shell
-        const lensMat = new THREE.MeshPhysicalMaterial({
-          color: 0x88ff88, roughness: 0, metalness: 0, clearcoat: 1.0,
-          transparent: true, opacity: 0.35, depthWrite: false,
-          emissive: 0x22aa00, emissiveIntensity: 1.0,
-        });
+      if (lensMat) {
         eg.add(new THREE.Mesh(new THREE.SphereGeometry(0.086, 12, 10), lensMat));
       }
       g.add(eg);
       if (isNear) this._eyeGroups.push(eg);
     }
+
+    // Save eyeMat ref for near tier so update() can animate its emissiveIntensity.
+    if (isNear) this._nearEyeMat = eyeMat;
 
     // ── Central body — mechanical ridged hull ─────────────────────────────────
     const bodyGeo = new THREE.SphereGeometry(1, 18, 14);
@@ -555,13 +563,6 @@ export class TendrilHunter {
       }
     }
 
-    // ── Sensor light (near only — emissive for other tiers) ───────────────────
-    if (isNear) {
-      this._sensorLight = new THREE.PointLight(0x88ff00, 0.7, 12);
-      this._sensorLight.position.set(1.3, 0.1, 0);
-      g.add(this._sensorLight);
-    }
-
     // ── Fresnel rim-light silhouette shell (near only) ────────────────────────
     if (profile.hasRimLight) {
       const rimGeo = new THREE.SphereGeometry(1.05, 14, 10);
@@ -603,8 +604,9 @@ export class TendrilHunter {
     const yaw = Math.atan2(this.direction.x, this.direction.z);
     this.group.rotation.y = THREE.MathUtils.lerp(this.group.rotation.y, yaw, dt * 3);
 
-    // Respawn when too far from player
-    const distToPlayer = this.group.position.distanceTo(playerPos);
+    // Respawn when too far from player; recompute distance after reposition
+    // so the rest of this frame's state/animation reflects actual position.
+    let distToPlayer = this.group.position.distanceTo(playerPos);
     if (distToPlayer > RESPAWN_DISTANCE) {
       const a = Math.random() * TWO_PI;
       this.group.position.set(
@@ -612,6 +614,7 @@ export class TendrilHunter {
         playerPos.y - Math.random() * 10,
         playerPos.z + Math.sin(a) * 70
       );
+      distToPlayer = this.group.position.distanceTo(playerPos);
     }
 
     // ── Resolve active LOD tier ───────────────────────────────────────────────
@@ -636,9 +639,9 @@ export class TendrilHunter {
     // ── Strike state machine ──────────────────────────────────────────────────
     this._updateStrikeState(adt, distToPlayer);
 
-    // ── Sensor light flicker ──────────────────────────────────────────────────
-    if (this._sensorLight) {
-      this._sensorLight.intensity = 0.5 + Math.sin(this.time * 8) * 0.2;
+    // ── Animated emissive eye glow (replaces removed PointLight) ─────────────
+    if (this._nearEyeMat) {
+      this._nearEyeMat.emissiveIntensity = 1.8 + Math.sin(this.time * 8) * 0.2;
     }
 
     // ── Tier animation ────────────────────────────────────────────────────────
@@ -697,6 +700,9 @@ export class TendrilHunter {
 
     // Player position in this.group's local space
     // (tierGroup / LOD have no transform, so group-local == tier-local)
+    // updateMatrixWorld ensures this frame's position/rotation changes are
+    // reflected before converting coordinates (avoids one-frame-stale IK targets).
+    this.group.updateMatrixWorld(true);
     _v3B.copy(playerPos);
     this.group.worldToLocal(_v3B);
 
