@@ -48,9 +48,11 @@ export class Player {
       volumetricEnabled: this._volumetricEnabled,
     });
     this.flashlight = this.externalLighting.group;
+    this.hullLights = this.externalLighting.hullLightsGroup;
 
     this.flashlight.visible = false;
     camera.add(this.flashlight);
+    camera.add(this.hullLights);
 
     // Submarine ambient glow — visible cockpit illumination
     this.subLight = new THREE.PointLight(0x445577, 8, 65);

@@ -43,6 +43,9 @@ export class ExternalLightingSystem {
     this.group = new THREE.Group();
     this.group.visible = false;
 
+    this.hullLightsGroup = new THREE.Group();
+    this.hullLightsGroup.visible = true;
+
     this._beamMaterials = [];
     this.headlights = [];
     this.hullLights = [];
@@ -107,7 +110,7 @@ export class ExternalLightingSystem {
       light.userData.baseIntensity = intensity;
       light.userData.baseRange = cfg.hullRange;
       light.userData.duwCategory = 'player_practical';
-      this.group.add(light);
+      this.hullLightsGroup.add(light);
       this.hullLights.push(light);
     }
   }
