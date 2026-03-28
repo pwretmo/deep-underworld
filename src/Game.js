@@ -15,7 +15,8 @@ import { LightingPolicy } from "./lighting/LightingPolicy.js";
 
 export class Game {
   constructor() {
-    this.clock = new THREE.Clock();
+    this.clock = new THREE.Timer();
+    this.clock.connect(document);
     this.scene = new THREE.Scene();
     this.running = false;
     this.pendingStart = false;
@@ -481,7 +482,6 @@ export class Game {
     } else {
       this._resumeAudio();
     }
-    this.clock.start();
     await this._warmOpeningFrames({
       onProgress: (data) => {
         if (startupToken === this._startupToken) {
@@ -845,6 +845,7 @@ export class Game {
   _animate() {
     requestAnimationFrame(() => this._animate());
 
+    this.clock.update();
     const rawDt = this.clock.getDelta();
     const dt = Math.min(rawDt, 0.05);
     qualityManager.updateFrameTime(rawDt);
