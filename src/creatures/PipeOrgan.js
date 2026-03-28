@@ -1,8 +1,13 @@
 import * as THREE from 'three';
 import { LOD_NEAR_DISTANCE, LOD_MEDIUM_DISTANCE } from './lodUtils.js';
 
-// Pre-allocated temp — zero per-frame allocations
+// Pre-allocated temps — zero per-frame allocations
 const _tmpVec3 = new THREE.Vector3();
+const _pipeM4 = new THREE.Matrix4();
+const _pipePos = new THREE.Vector3();
+const _pipeScale = new THREE.Vector3();
+const _pipeEuler = new THREE.Euler();
+const _pipeQuat = new THREE.Quaternion();
 
 // ── Module-level shared textures (lazily created, one per process) ──────────
 let _pipeNormalTex = null;
@@ -76,38 +81,41 @@ function _getMembraneNormalTex() {
 // ── Vertex shader helpers ─────────────────────────────────────────────────────
 
 /**
- * Inject a standing-wave resonance displacement into a MeshPhysicalMaterial
- * vertex shader.  Fundamental half-wave + 2nd harmonic computed on the GPU.
- * All pipe materials share the same compiled program via customProgramCacheKey.
+ * Inject standing-wave resonance into an InstancedMesh pipe material.
+ * Per-instance attributes: aResFreq, aPhase, aRadius.
+ * Shared uniforms: uTime, uResA (base amplitude), uRetractT.
  */
-function _applyResonanceShader(mat, uTime, uFreq, uAmp, uH) {
+function _applyResonanceShaderInstanced(mat, uTime, uResA, uRetractT) {
   mat.onBeforeCompile = shader => {
-    shader.uniforms.uTime  = uTime;
-    shader.uniforms.uResF  = uFreq;
-    shader.uniforms.uResA  = uAmp;
-    shader.uniforms.uPipeH = uH;
-    shader.vertexShader = [
-      'uniform float uTime;',
-      'uniform float uResF;',
-      'uniform float uResA;',
-      'uniform float uPipeH;',
-      shader.vertexShader,
-    ].join('\n').replace(
+    shader.uniforms.uTime     = uTime;
+    shader.uniforms.uResA     = uResA;
+    shader.uniforms.uRetractT = uRetractT;
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <common>',
+      [
+        '#include <common>',
+        'attribute float aResFreq;',
+        'attribute float aPhase;',
+        'attribute float aRadius;',
+      ].join('\n')
+    );
+    shader.vertexShader = shader.vertexShader.replace(
       '#include <begin_vertex>',
       /* glsl */`
       vec3 transformed = position;
-      // Standing wave: fundamental (half-wave) + 2nd harmonic
-      float normY = clamp((position.y + uPipeH * 0.5) / uPipeH, 0.0, 1.0);
-      float w1    = sin(normY * 3.14159265) * cos(uTime * uResF * 6.28318530);
-      float w2    = sin(normY * 6.28318530) * cos(uTime * uResF * 12.5663706 + 0.7);
-      float disp  = (w1 * 0.7 + w2 * 0.3) * uResA;
+      // Standing wave on unit cylinder: y in [-0.5, 0.5]
+      float normY = clamp(position.y + 0.5, 0.0, 1.0);
+      float breath = 1.0 + sin(uTime * 0.75 + aPhase) * 0.18;
+      float amp = uResA * breath * (1.0 - uRetractT * 0.92) / max(aRadius, 0.01);
+      float w1    = sin(normY * 3.14159265) * cos(uTime * aResFreq * 6.28318530);
+      float w2    = sin(normY * 6.28318530) * cos(uTime * aResFreq * 12.5663706 + 0.7);
+      float disp  = (w1 * 0.7 + w2 * 0.3) * amp;
       transformed.x += normal.x * disp;
       transformed.z += normal.z * disp;
       `
     );
   };
-  // All pipe materials share the same compiled program
-  mat.customProgramCacheKey = () => 'pipeorgan-resonance';
+  mat.customProgramCacheKey = () => 'pipeorgan-resonance-instanced';
 }
 
 /**
@@ -145,17 +153,24 @@ export class PipeOrgan {
     this.group = new THREE.Group();
     this.time  = Math.random() * 100;
 
-    // Shared time uniform drives all GPU shaders on this instance
-    this._uTime = { value: this.time };
+    // Shared uniforms for GPU shaders
+    this._uTime     = { value: this.time };
+    this._uResA     = { value: 0.013 };
+    this._uRetractT = { value: 0 };
 
     // Hydraulic state machine: idle → retracting → retracted → extending → idle
     this._state    = 'idle';
     this._retractT = 0; // 0 = fully extended, 1 = fully retracted
 
+    // Slowly-varying internal pseudo-current (no global current system exists)
+    this._currentAngle    = Math.random() * Math.PI * 2;
+    this._currentStrength = 0.006 + Math.random() * 0.004;
+
     // Per-tier animation handles (null until built)
-    this._nearData   = null;
-    this._mediumData = null;
-    this._glowMat    = null;
+    this._nearData     = null;
+    this._mediumData   = null;
+    this._pipeIMeshMat = null;
+    this._glowMat      = null;
 
     this._buildModel();
     this.group.position.copy(position);
@@ -163,6 +178,16 @@ export class PipeOrgan {
   }
 
   // ── Build ──────────────────────────────────────────────────────────────────
+
+  _getVisibleTierName() {
+    if (!this.lod || !this.lod.levels) return null;
+    for (let i = 0; i < this.lod.levels.length; i++) {
+      if (this.lod.levels[i].object.visible) {
+        return this.lod.levels[i].object.userData.tierName || null;
+      }
+    }
+    return null;
+  }
 
   _buildModel() {
     const lod    = new THREE.LOD();
@@ -173,6 +198,10 @@ export class PipeOrgan {
     this._nearData   = near;
     this._mediumData = medium;
 
+    near.group.userData.tierName   = 'near';
+    medium.group.userData.tierName = 'medium';
+    far.group.userData.tierName    = 'far';
+
     lod.addLevel(near.group,   0);
     lod.addLevel(medium.group, LOD_NEAR_DISTANCE);
     lod.addLevel(far.group,    LOD_MEDIUM_DISTANCE);
@@ -181,7 +210,8 @@ export class PipeOrgan {
     this.group.scale.setScalar(2 + Math.random() * 2);
   }
 
-  // Near tier: full fidelity — 8 pipes, membrane frills, polyp tentacles, resonance shader
+  // Near tier: full fidelity — 8 instanced pipes (1 draw call), membrane frills,
+  // polyp tentacles, GPU resonance shader
   _buildNearTier() {
     const g = new THREE.Group();
 
@@ -250,146 +280,183 @@ export class PipeOrgan {
       g.add(new THREE.Mesh(tGeo, fleshMat));
     }
 
-    // Pipes
+    // ── Pipe InstancedMesh (single draw call for all 8 pipe bodies) ──────────
     const PIPE_COUNT = 8;
     const FLARE_SEGS = 20;
+
+    // Unit cylinder template shared by all pipe instances
+    const unitPipeGeo = new THREE.CylinderGeometry(1, 1.1, 1, 20, 16);
+    const pp = unitPipeGeo.attributes.position;
+    for (let v = 0; v < pp.count; v++) {
+      pp.setX(v, pp.getX(v) + Math.sin(pp.getY(v) * 14) * 0.004);
+    }
+    unitPipeGeo.computeVertexNormals();
+
+    // Pre-compute per-pipe layout
+    const pipeLayout  = [];
+    const attrHeight  = new Float32Array(PIPE_COUNT);
+    const attrRadius  = new Float32Array(PIPE_COUNT);
+    const attrResFreq = new Float32Array(PIPE_COUNT);
+    const attrPhase   = new Float32Array(PIPE_COUNT);
+
+    for (let i = 0; i < PIPE_COUNT; i++) {
+      const x      = (i - (PIPE_COUNT - 1) * 0.5) * 0.38;
+      const height = 2.0 + Math.sin(i * 0.7) * 1.5 + Math.random() * 0.5;
+      const radius = 0.09 + Math.random() * 0.06;
+      const resFreq = 1.4 / height + 0.25;
+      const phase   = Math.random() * Math.PI * 2;
+      const z       = (Math.random() - 0.5) * 0.4;
+      pipeLayout.push({ x, z, height, radius, resFreq, phase });
+      attrHeight[i]  = height;
+      attrRadius[i]  = radius;
+      attrResFreq[i] = resFreq;
+      attrPhase[i]   = phase;
+    }
+
+    // Per-instance attributes for the resonance vertex shader
+    unitPipeGeo.setAttribute('aResFreq', new THREE.InstancedBufferAttribute(attrResFreq, 1));
+    unitPipeGeo.setAttribute('aPhase',   new THREE.InstancedBufferAttribute(attrPhase, 1));
+    unitPipeGeo.setAttribute('aRadius',  new THREE.InstancedBufferAttribute(attrRadius, 1));
+
+    // Single InstancedMesh material with instanced resonance shader
+    const pipeIMat = pipeSrcMat.clone();
+    _applyResonanceShaderInstanced(pipeIMat, this._uTime, this._uResA, this._uRetractT);
+    this._pipeIMeshMat = pipeIMat;
+
+    const pipeIMesh = new THREE.InstancedMesh(unitPipeGeo, pipeIMat, PIPE_COUNT);
+    pipeIMesh.frustumCulled = false; // LOD manages visibility
+
+    // Set initial instance transforms
+    for (let i = 0; i < PIPE_COUNT; i++) {
+      const d = pipeLayout[i];
+      _pipePos.set(d.x, d.height * 0.5, d.z);
+      _pipeScale.set(d.radius, d.height, d.radius);
+      _pipeM4.compose(_pipePos, _pipeQuat.identity(), _pipeScale);
+      pipeIMesh.setMatrixAt(i, _pipeM4);
+    }
+    pipeIMesh.instanceMatrix.needsUpdate = true;
+    g.add(pipeIMesh);
+
+    // ── Per-pipe accessories (flare, rings, barnacles, polyp tentacles) ──────
     const pipes     = [];
     const membranes = [];
     const polyps    = [];
 
     for (let i = 0; i < PIPE_COUNT; i++) {
-      const pg     = new THREE.Group();
-      const x      = (i - (PIPE_COUNT - 1) * 0.5) * 0.38;
-      const height = 2.0 + Math.sin(i * 0.7) * 1.5 + Math.random() * 0.5;
-      const radius = 0.09 + Math.random() * 0.06;
-      const resFreq = 1.4 / height + 0.25;  // shorter pipe → higher frequency
-      const phase   = Math.random() * Math.PI * 2;
-
-      // Per-pipe resonance uniforms (each pipe clones the material; all share program)
-      const uFreq = { value: resFreq };
-      const uAmp  = { value: 0.013  };
-      const uH    = { value: height };
-      const pMat  = pipeSrcMat.clone();
-      _applyResonanceShader(pMat, this._uTime, uFreq, uAmp, uH);
-
-      // Pipe body — 20 radial × 16 height segments for smooth form
-      const pipeGeo = new THREE.CylinderGeometry(radius, radius * 1.10, height, 20, 16);
-      const pp = pipeGeo.attributes.position;
-      for (let v = 0; v < pp.count; v++) {
-        pp.setX(v, pp.getX(v) + Math.sin(pp.getY(v) * 14) * 0.004);
-      }
-      pipeGeo.computeVertexNormals();
-      const pipeMesh = new THREE.Mesh(pipeGeo, pMat);
-      pipeMesh.position.y = height * 0.5;
-      pg.add(pipeMesh);
+      const d  = pipeLayout[i];
+      const pg = new THREE.Group();
 
       // Trumpet flare with ruffled rim
       const flareGeo = new THREE.CylinderGeometry(
-        radius * 2.4, radius * 1.0, radius * 3.2, FLARE_SEGS, 4, true
+        d.radius * 2.4, d.radius * 1.0, d.radius * 3.2, FLARE_SEGS, 4, true
       );
       const fp = flareGeo.attributes.position;
       for (let v = 0; v < fp.count; v++) {
         const fy  = fp.getY(v);
         const ang = Math.atan2(fp.getZ(v), fp.getX(v));
-        const ruf = Math.cos(ang * 6) * radius * 0.09
-                  * THREE.MathUtils.clamp(-fy / (radius * 1.6), 0, 1);
+        const ruf = Math.cos(ang * 6) * d.radius * 0.09
+                  * THREE.MathUtils.clamp(-fy / (d.radius * 1.6), 0, 1);
         fp.setX(v, fp.getX(v) + Math.cos(ang) * ruf);
         fp.setZ(v, fp.getZ(v) + Math.sin(ang) * ruf);
       }
       flareGeo.computeVertexNormals();
-      const flare = new THREE.Mesh(flareGeo, pMat);
-      flare.position.y = height + radius * 1.6;
+      const flare = new THREE.Mesh(flareGeo, pipeSrcMat);
+      flare.position.y = d.height + d.radius * 1.6;
       pg.add(flare);
 
       // Bone ring at base
-      const baseRing = new THREE.Mesh(new THREE.TorusGeometry(radius * 1.5, 0.026, 8, 14), boneMat);
+      const baseRing = new THREE.Mesh(
+        new THREE.TorusGeometry(d.radius * 1.5, 0.026, 8, 14), boneMat
+      );
       baseRing.position.y = 0.12;
       baseRing.rotation.x = Math.PI / 2;
       pg.add(baseRing);
 
-      // Growth collar rings along pipe (baked into pipeMesh child list)
-      const RING_COUNT = Math.max(2, Math.floor(height * 1.8));
+      // Growth collar rings along pipe
+      const RING_COUNT = Math.max(2, Math.floor(d.height * 1.8));
       for (let r = 0; r < RING_COUNT; r++) {
-        const ry   = (r + 0.5) / RING_COUNT * height;
-        const rRad = radius * THREE.MathUtils.lerp(1.18, 1.08, ry / height);
+        const ry   = (r + 0.5) / RING_COUNT * d.height;
+        const rRad = d.radius * THREE.MathUtils.lerp(1.18, 1.08, ry / d.height);
         const cRing = new THREE.Mesh(
           new THREE.TorusGeometry(rRad, 0.013, 5, 10), boneMat
         );
         cRing.position.y = ry;
         cRing.rotation.x = Math.PI / 2;
-        pipeMesh.add(cRing);
+        pg.add(cRing);
       }
 
       // Barnacle clusters with plate structure (12+ segments)
       const BARN_COUNT = 2 + Math.floor(Math.random() * 3);
       for (let b = 0; b < BARN_COUNT; b++) {
-        const barnY   = (b + 0.5) / BARN_COUNT * height * 0.72;
+        const barnY   = (b + 0.5) / BARN_COUNT * d.height * 0.72;
         const barnAng = Math.random() * Math.PI * 2;
         const barnGeo = new THREE.SphereGeometry(
-          radius * 0.5, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.65
+          d.radius * 0.5, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.65
         );
         const barn = new THREE.Mesh(barnGeo, barnMat);
         barn.position.set(
-          Math.cos(barnAng) * radius * 1.15, barnY, Math.sin(barnAng) * radius * 1.15
+          Math.cos(barnAng) * d.radius * 1.15, barnY, Math.sin(barnAng) * d.radius * 1.15
         );
         barn.rotation.set(Math.random() * 0.5, barnAng, Math.random() * 0.4);
         // Barnacle plate structure
         for (let p = 0; p < 6; p++) {
           const pAng  = (p / 6) * Math.PI * 2;
           const plate = new THREE.Mesh(
-            new THREE.BoxGeometry(radius * 0.16, radius * 0.07, radius * 0.24), barnMat
+            new THREE.BoxGeometry(d.radius * 0.16, d.radius * 0.07, d.radius * 0.24), barnMat
           );
           plate.position.set(
-            Math.cos(pAng) * radius * 0.30, radius * 0.12, Math.sin(pAng) * radius * 0.30
+            Math.cos(pAng) * d.radius * 0.30, d.radius * 0.12, Math.sin(pAng) * d.radius * 0.30
           );
           plate.rotation.y = pAng;
           barn.add(plate);
         }
-        pipeMesh.add(barn);
+        pg.add(barn);
       }
 
-      // Polyp tentacle cluster around flare opening
+      // Polyp tentacle cluster — tip is child of tent so it follows motion
       const TENT_COUNT = 9;
       const tentacles  = [];
-      const tH = radius * 3.0;
-      const tR = radius * 2.0;
+      const tH = d.radius * 3.0;
+      const tR = d.radius * 2.0;
       for (let tp = 0; tp < TENT_COUNT; tp++) {
         const tAng = (tp / TENT_COUNT) * Math.PI * 2;
         const tent = new THREE.Mesh(
           new THREE.CylinderGeometry(0.012, 0.028, tH, 5, 3), polypMat
         );
         tent.position.set(
-          Math.cos(tAng) * tR, height + radius * 1.6 + tH * 0.5, Math.sin(tAng) * tR
+          Math.cos(tAng) * tR, d.height + d.radius * 1.6 + tH * 0.5, Math.sin(tAng) * tR
         );
         tent.rotation.x = Math.cos(tAng) * 0.28;
         tent.rotation.z = Math.sin(tAng) * 0.28;
         pg.add(tent);
 
+        // Tip attached as child of tent so it follows all tentacle rotation
         const tip = new THREE.Mesh(new THREE.SphereGeometry(0.022, 6, 4), polypTipMat);
-        tip.position.set(
-          Math.cos(tAng) * tR, height + radius * 1.6 + tH, Math.sin(tAng) * tR
-        );
-        pg.add(tip);
-        tentacles.push({ tent, angle: tAng, phase: Math.random() * Math.PI * 2 });
+        tip.position.set(0, tH * 0.5, 0);
+        tent.add(tip);
+        tentacles.push({ tent, tip, angle: tAng, phase: Math.random() * Math.PI * 2 });
       }
       polyps.push({ tentacles });
 
       // Rim ring crowning the flare
       const rim = new THREE.Mesh(
-        new THREE.TorusGeometry(radius * 2.4, 0.020, 6, FLARE_SEGS), boneMat
+        new THREE.TorusGeometry(d.radius * 2.4, 0.020, 6, FLARE_SEGS), boneMat
       );
-      rim.position.y = height + radius * 1.6 + tH * 0.5 + 0.02;
+      rim.position.y = d.height + d.radius * 1.6 + tH * 0.5 + 0.02;
       rim.rotation.x = Math.PI / 2;
       pg.add(rim);
 
-      pg.position.set(x, 0, (Math.random() - 0.5) * 0.4);
+      pg.position.set(d.x, 0, d.z);
       g.add(pg);
-      pipes.push({ group: pg, pipeMesh, height, phase, resFreq, resAmpUniform: uAmp });
+      pipes.push({
+        accessoryGroup: pg, height: d.height, phase: d.phase,
+        radius: d.radius, x: d.x, z: d.z,
+      });
 
       // Membrane frill between adjacent pipes — cloth-flutter shader
       if (i < PIPE_COUNT - 1) {
         const fW    = 0.38;
-        const fH    = height * 0.6;
+        const fH    = d.height * 0.6;
         const memGeo = new THREE.PlaneGeometry(fW, fH, 16, 8);
         // Baked-in edge ruffling
         const mp = memGeo.attributes.position;
@@ -402,10 +469,10 @@ export class PipeOrgan {
         memGeo.computeVertexNormals();
         const mMat  = memSrcMat.clone();
         const mAmp  = { value: 0.065 };
-        const mPh   = { value: phase };
+        const mPh   = { value: d.phase };
         _applyMembraneShader(mMat, this._uTime, mPh, mAmp);
         const membrane = new THREE.Mesh(memGeo, mMat);
-        membrane.position.set(x + 0.19, fH * 0.5, 0);
+        membrane.position.set(d.x + 0.19, fH * 0.5, 0);
         g.add(membrane);
         membranes.push({ mesh: membrane, ampUniform: mAmp });
       }
@@ -431,14 +498,14 @@ export class PipeOrgan {
     glowMesh.position.y = 2.0;
     g.add(glowMesh);
 
-    // Dispose template materials; each pipe/membrane already holds a clone
-    pipeSrcMat.dispose();
+    // Dispose membrane template; pipeSrcMat kept alive for flare meshes
+    // (cleaned up via traverse in dispose())
     memSrcMat.dispose();
 
-    return { group: g, pipes, membranes, polyps };
+    return { group: g, pipes, membranes, polyps, pipeIMesh };
   }
 
-  // Medium tier: 5 pipes, no polyps, no resonance shader, simplified barnacles
+  // Medium tier: 5 instanced pipes (1 draw call), simplified barnacles, no polyps/resonance
   _buildMediumTier() {
     const g = new THREE.Group();
 
@@ -478,53 +545,80 @@ export class PipeOrgan {
       g.add(t);
     }
 
+    // ── InstancedMesh for 5 medium-tier pipe bodies (single draw call) ──
     const PIPE_COUNT = 5;
-    const pipes     = [];
-    const membranes = [];
 
+    const unitMedGeo = new THREE.CylinderGeometry(1, 1.1, 1, 12, 8);
+    unitMedGeo.computeVertexNormals();
+
+    const medLayout = [];
     for (let i = 0; i < PIPE_COUNT; i++) {
       const x      = (i - (PIPE_COUNT - 1) * 0.5) * 0.40;
       const height = 2.0 + Math.sin(i * 0.7) * 1.5 + Math.random() * 0.5;
       const radius = 0.09 + Math.random() * 0.06;
       const phase  = Math.random() * Math.PI * 2;
+      const z      = (Math.random() - 0.5) * 0.4;
+      medLayout.push({ x, z, height, radius, phase });
+    }
 
+    const medPipeIMesh = new THREE.InstancedMesh(unitMedGeo, pipeMat, PIPE_COUNT);
+    medPipeIMesh.frustumCulled = false;
+
+    for (let i = 0; i < PIPE_COUNT; i++) {
+      const d = medLayout[i];
+      _pipePos.set(d.x, d.height * 0.5, d.z);
+      _pipeScale.set(d.radius, d.height, d.radius);
+      _pipeM4.compose(_pipePos, _pipeQuat.identity(), _pipeScale);
+      medPipeIMesh.setMatrixAt(i, _pipeM4);
+    }
+    medPipeIMesh.instanceMatrix.needsUpdate = true;
+    g.add(medPipeIMesh);
+
+    // ── Per-pipe accessories ──
+    const pipes     = [];
+    const membranes = [];
+
+    for (let i = 0; i < PIPE_COUNT; i++) {
+      const d  = medLayout[i];
       const pg = new THREE.Group();
-      const pipeGeo = new THREE.CylinderGeometry(radius, radius * 1.10, height, 12, 8);
-      const pipeMesh = new THREE.Mesh(pipeGeo, pipeMat);
-      pipeMesh.position.y = height * 0.5;
-      pg.add(pipeMesh);
 
       const flare = new THREE.Mesh(
-        new THREE.CylinderGeometry(radius * 2.0, radius * 1.0, radius * 2.8, 12, 2, true), pipeMat
+        new THREE.CylinderGeometry(d.radius * 2.0, d.radius * 1.0, d.radius * 2.8, 12, 2, true),
+        pipeMat
       );
-      flare.position.y = height + radius * 1.4;
+      flare.position.y = d.height + d.radius * 1.4;
       pg.add(flare);
 
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(radius * 1.4, 0.022, 6, 10), boneMat);
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(d.radius * 1.4, 0.022, 6, 10), boneMat
+      );
       ring.position.y = 0.10;
       ring.rotation.x = Math.PI / 2;
       pg.add(ring);
 
       // Simplified barnacle
       const barn = new THREE.Mesh(
-        new THREE.SphereGeometry(radius * 0.4, 8, 6, 0, Math.PI * 2, 0, Math.PI * 0.6), boneMat
+        new THREE.SphereGeometry(d.radius * 0.4, 8, 6, 0, Math.PI * 2, 0, Math.PI * 0.6), boneMat
       );
-      barn.position.set(radius * 1.1, height * 0.4, 0);
+      barn.position.set(d.radius * 1.1, d.height * 0.4, 0);
       barn.rotation.x = Math.PI / 2;
       pg.add(barn);
 
-      pg.position.set(x, 0, (Math.random() - 0.5) * 0.4);
+      pg.position.set(d.x, 0, d.z);
       g.add(pg);
-      pipes.push({ group: pg, height, phase });
+      pipes.push({
+        accessoryGroup: pg, height: d.height, phase: d.phase,
+        radius: d.radius, x: d.x, z: d.z,
+      });
 
       // Simplified membrane frill
       if (i < PIPE_COUNT - 1) {
         const fW = 0.40;
-        const fH = height * 0.55;
+        const fH = d.height * 0.55;
         const membrane = new THREE.Mesh(new THREE.PlaneGeometry(fW, fH, 8, 4), membraneMat);
-        membrane.position.set(x + 0.20, fH * 0.5, 0);
+        membrane.position.set(d.x + 0.20, fH * 0.5, 0);
         g.add(membrane);
-        membranes.push({ mesh: membrane, phase });
+        membranes.push({ mesh: membrane, phase: d.phase });
       }
     }
 
@@ -538,7 +632,7 @@ export class PipeOrgan {
       g.add(conn);
     }
 
-    return { group: g, pipes, membranes };
+    return { group: g, pipes, membranes, pipeIMesh: medPipeIMesh };
   }
 
   // Far tier: ultra-lightweight static mesh — under 100 triangles
@@ -587,10 +681,19 @@ export class PipeOrgan {
     }
 
     const rt = this._retractT;
+    this._uRetractT.value = rt;
 
-    // Near-tier animation (skip only when far tier is active)
-    if (dist < LOD_MEDIUM_DISTANCE + 30 && this._nearData) {
-      const { pipes, membranes, polyps } = this._nearData;
+    // Slowly varying pseudo-current lean direction
+    this._currentAngle += dt * 0.03;
+    const currentLeanZ = Math.sin(this._currentAngle) * this._currentStrength * (1 - rt);
+    const currentLeanX = Math.cos(this._currentAngle * 0.7) * this._currentStrength * 0.55 * (1 - rt);
+
+    // Determine active LOD tier via actual visibility (not distance heuristic)
+    const tier = this._getVisibleTierName();
+
+    // Near-tier animation
+    if (tier === 'near' && this._nearData) {
+      const { pipes, membranes, polyps, pipeIMesh } = this._nearData;
 
       // Breathing glow
       if (this._glowMat) {
@@ -598,34 +701,49 @@ export class PipeOrgan {
           0.5 + Math.sin(this.time * 0.8) * 0.28 + Math.sin(this.time * 3.1) * 0.11;
       }
 
+      // Shared pipe material emissive breathing
+      if (this._pipeIMeshMat) {
+        this._pipeIMeshMat.emissiveIntensity =
+          THREE.MathUtils.lerp(0.3, 0.7,
+            0.5 + Math.sin(this.time * 0.9) * 0.5)
+          * (1 - rt * 0.55);
+      }
+
+      // Update pipe InstancedMesh matrices (sway + retraction + current lean)
       for (let i = 0; i < pipes.length; i++) {
         const pd    = pipes[i];
         const phase = this.time * 1.5 + pd.phase;
 
-        // Hydraulic retraction (scale Y, sink into base)
+        // Hydraulic retraction
         const extY = 1 - rt * 0.88;
-        pd.group.scale.y = extY;
-        pd.group.position.y = -(1 - extY) * pd.height * 0.5;
+        const hExt  = pd.height * extY;
+        const halfH = hExt * 0.5;
+        const baseY = -(1 - extY) * pd.height * 0.5;
 
-        // Water-current drag sway
+        // Water-current drag sway + current-direction lean
         const sway = 0.013 * (1 - rt);
-        pd.group.rotation.z = Math.sin(phase * 0.5 + i * 0.4)  * sway;
-        pd.group.rotation.x = Math.cos(phase * 0.3 + i * 0.35) * sway * 0.55;
+        const rz   = Math.sin(phase * 0.5 + i * 0.4)  * sway + currentLeanZ;
+        const rx   = Math.cos(phase * 0.3 + i * 0.35) * sway * 0.55 + currentLeanX;
 
-        // Resonance amplitude — breathes with idle cycle, dies on retract
-        if (pd.resAmpUniform) {
-          const breath = 1 + Math.sin(this.time * 0.75 + pd.phase) * 0.18;
-          pd.resAmpUniform.value = 0.013 * breath * (1 - rt * 0.92);
-        }
+        // Base-anchored rotation: offset center so pipe bottom stays at baseY
+        _pipePos.set(
+          pd.x + halfH * Math.sin(rz),
+          baseY + halfH,
+          pd.z - halfH * Math.sin(rx)
+        );
+        _pipeScale.set(pd.radius, hExt, pd.radius);
+        _pipeEuler.set(rx, 0, rz);
+        _pipeQuat.setFromEuler(_pipeEuler);
+        _pipeM4.compose(_pipePos, _pipeQuat, _pipeScale);
+        pipeIMesh.setMatrixAt(i, _pipeM4);
 
-        // Emissive breathing keyed to resonance
-        if (pd.pipeMesh && pd.pipeMesh.material) {
-          pd.pipeMesh.material.emissiveIntensity =
-            THREE.MathUtils.lerp(0.3, 0.7,
-              0.5 + Math.sin(this.time * 0.9 + i * 0.55) * 0.5)
-            * (1 - rt * 0.55);
-        }
+        // Sync accessory group transform
+        pd.accessoryGroup.scale.y    = extY;
+        pd.accessoryGroup.position.y = baseY;
+        pd.accessoryGroup.rotation.z = rz;
+        pd.accessoryGroup.rotation.x = rx;
       }
+      pipeIMesh.instanceMatrix.needsUpdate = true;
 
       // Membrane flutter — billows briefly during retraction, then folds away
       for (let m = 0; m < membranes.length; m++) {
@@ -649,18 +767,36 @@ export class PipeOrgan {
       }
     }
 
-    // Medium-tier animation — simplified sway, no shader changes
-    if (dist >= LOD_NEAR_DISTANCE && dist < LOD_MEDIUM_DISTANCE + 30 && this._mediumData) {
-      const { pipes } = this._mediumData;
+    // Medium-tier animation — simplified sway via instance matrices
+    if (tier === 'medium' && this._mediumData) {
+      const { pipes, pipeIMesh } = this._mediumData;
       for (let i = 0; i < pipes.length; i++) {
         const pd    = pipes[i];
         const phase = this.time * 1.2 + pd.phase;
         const extY  = 1 - rt * 0.88;
-        pd.group.scale.y      = extY;
-        pd.group.position.y   = -(1 - extY) * pd.height * 0.5;
-        pd.group.rotation.z   = Math.sin(phase * 0.5 + i * 0.4) * 0.010 * (1 - rt);
-        pd.group.rotation.x   = Math.cos(phase * 0.3 + i * 0.35) * 0.006 * (1 - rt);
+        const hExt  = pd.height * extY;
+        const halfH = hExt * 0.5;
+        const baseY = -(1 - extY) * pd.height * 0.5;
+        const swayZ = Math.sin(phase * 0.5 + i * 0.4) * 0.010 * (1 - rt) + currentLeanZ;
+        const swayX = Math.cos(phase * 0.3 + i * 0.35) * 0.006 * (1 - rt) + currentLeanX;
+
+        _pipePos.set(
+          pd.x + halfH * Math.sin(swayZ),
+          baseY + halfH,
+          pd.z - halfH * Math.sin(swayX)
+        );
+        _pipeScale.set(pd.radius, hExt, pd.radius);
+        _pipeEuler.set(swayX, 0, swayZ);
+        _pipeQuat.setFromEuler(_pipeEuler);
+        _pipeM4.compose(_pipePos, _pipeQuat, _pipeScale);
+        pipeIMesh.setMatrixAt(i, _pipeM4);
+
+        pd.accessoryGroup.scale.y    = extY;
+        pd.accessoryGroup.position.y = baseY;
+        pd.accessoryGroup.rotation.z = swayZ;
+        pd.accessoryGroup.rotation.x = swayX;
       }
+      pipeIMesh.instanceMatrix.needsUpdate = true;
     }
 
     // Respawn when player has moved too far away
