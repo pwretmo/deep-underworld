@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { LOD_NEAR_DISTANCE, LOD_MEDIUM_DISTANCE, toStandardMaterial } from './lodUtils.js';
 
-// Module-level pre-allocated temporaries — zero per-frame GC allocation
+// ── Module-level pre-allocated temporaries — zero per-frame GC allocation ────
 const _v0 = new THREE.Vector3();
 const _v1 = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -11,19 +11,39 @@ const _m1 = new THREE.Matrix4(); // per-link instance matrix
 const _sc = new THREE.Vector3(1, 1, 1); // uniform scale for matrix compose
 const _AY = new THREE.Vector3(0, 1, 0); // +Y axis constant
 
-// Verlet physics constants
-const GRAVITY_ACC = 9.8;        // m/s² downward
-const VERLET_DAMP = 0.985;      // per-step velocity damping (slight water resistance)
-const SOLVE_ITERS = 4;          // constraint solver iterations per step
-const LINK_SPACING = 0.14;      // rest distance between adjacent particles
-const CONSTRAINT_RELAX = 0.5;   // splits distance-constraint correction equally between both particles
-const PARALLEL_THRESHOLD = 0.9; // dot-product threshold for near-parallel vector detection in cross-product fallback
-const MIN_LINKS = 8;            // minimum chain links per chain (near LOD)
+// ── Verlet physics constants ──────────────────────────────────────────────────
+const GRAVITY_ACC        = 9.8;   // m/s² downward
+const VERLET_DAMP        = 0.985; // per-step velocity damping (slight water resistance)
+const SOLVE_ITERS        = 4;     // constraint solver iterations per step
+const LINK_SPACING       = 0.14;  // rest distance between adjacent particles
+const CONSTRAINT_RELAX   = 0.5;   // splits distance-constraint correction equally between both particles
+const PARALLEL_THRESHOLD = 0.9;   // dot-product threshold for near-parallel cross-product fallback
+const MIN_LINKS          = 8;     // minimum chain links per chain (near LOD)
 
-// LOD configuration
+// ── Proximity / interaction constants ────────────────────────────────────────
+const PROXIMITY_DIST  = 18;   // player distance threshold (world units, pre-scale) for chain drag
+const PROXIMITY_FORCE = 0.04; // per-step chain-particle impulse fraction toward player
+
+// ── Collision flash constants ─────────────────────────────────────────────────
+const COLLISION_FLASH_DURATION  = 0.4;  // seconds the chain emissive flash lasts
+const COLLISION_FLASH_PEAK      = 0.9;  // peak emissiveIntensity added during flash
+const COLLISION_DOT_THRESHOLD   = -0.2; // dot-product < this (~101.5°) triggers a collision flash on sharp turns
+
+// ── Cowl animation constants ──────────────────────────────────────────────────
+const COWL_BASE_ROTATION       = 0.04;  // base Z-rotation oscillation amplitude (radians)
+const COWL_PROXIMITY_ROTATION  = 0.12;  // additional Z-rotation at full player proximity (radians)
+const COWL_PROXIMITY_SCALE     = 0.15;  // max scale increase when player is at minimum proximity distance
+
+// ── Eye animation constants ───────────────────────────────────────────────────
+const EYE_BASE_INTENSITY  = 1.4; // base emissiveIntensity for near-tier eye material
+const EYE_PULSE_FREQUENCY = 2.5; // sine-wave frequency (rad/s) for eye glow pulse
+const EYE_PULSE_AMPLITUDE = 0.4; // emissiveIntensity variation amplitude around base
+
+// ── LOD configuration ─────────────────────────────────────────────────────────
 const LOD_CFG = {
   near: {
-    bodySegs: [32, 24], cowlSegs: [24, 16],
+    // Issue #59: 48×32 minimum vertex density for near LOD body
+    bodySegs: [48, 32], cowlSegs: [24, 16],
     linkTubeSegs: [12, 16], chainCount: 4, maxLinks: 14,
     barnacles: 5, useFar: false,
   },
@@ -40,6 +60,123 @@ const LOD_CFG = {
   },
 };
 
+// ── Module-level singleton normal-map textures ────────────────────────────────
+// Not disposed per-instance (module-level singletons — SporeCloud pattern).
+let _chainNormalTex = null;
+let _bodyNormalTex  = null;
+let _cowlNormalTex  = null;
+
+// Shared barnacle geometries (two sizes, scaled at the Mesh level to vary appearance).
+// Avoids per-barnacle CylinderGeometry allocation.
+let _barnGeoSmall = null;
+let _barnGeoLarge = null;
+
+function _getBarnGeos() {
+  if (!_barnGeoSmall) {
+    _barnGeoSmall = new THREE.CylinderGeometry(0.012, 0.02, 0.04, 5);
+    _barnGeoLarge = new THREE.CylinderGeometry(0.012, 0.02, 0.07, 5);
+  }
+  return [_barnGeoSmall, _barnGeoLarge];
+}
+
+/**
+ * Build a procedural normal-map DataTexture from a height function via
+ * central differences.  Returns a DataTexture with RepeatWrapping.
+ */
+function _buildNormalTex(size, heightFn, normalScale = 2.0) {
+  const data = new Uint8Array(size * size * 4);
+  const d = 1 / size;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const idx = (y * size + x) * 4;
+      const u = x / size, v = y / size;
+      const dx = heightFn(u + d, v) - heightFn(u - d, v);
+      const dy = heightFn(u, v + d) - heightFn(u, v - d);
+      const nx = -dx * normalScale, ny = -dy * normalScale, nz = 1.0;
+      const nLen = 1 / Math.sqrt(nx * nx + ny * ny + nz * nz);
+      data[idx]     = Math.floor((nx * nLen * 0.5 + 0.5) * 255);
+      data[idx + 1] = Math.floor((ny * nLen * 0.5 + 0.5) * 255);
+      data[idx + 2] = Math.floor((nz * nLen * 0.5 + 0.5) * 255);
+      data[idx + 3] = 255;
+    }
+  }
+  const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+function _getChainNormalTex() {
+  if (_chainNormalTex) return _chainNormalTex;
+  // Rust pitting + cross-hatched wear pattern
+  _chainNormalTex = _buildNormalTex(64, (u, v) =>
+    Math.sin(u * 52) * 0.25 + Math.sin(v * 48 + u * 3) * 0.2 +
+    Math.cos(u * 34 + v * 29) * 0.15 + Math.sin(u * 18 + v * 17) * 0.1,
+  2.5);
+  return _chainNormalTex;
+}
+
+function _getBodyNormalTex() {
+  if (_bodyNormalTex) return _bodyNormalTex;
+  // Scarring ridges + armor-plate relief
+  _bodyNormalTex = _buildNormalTex(128, (u, v) =>
+    Math.sin(u * 22 + v * 7) * 0.3 + Math.cos(v * 18 + u * 4) * 0.2 +
+    Math.sin(u * 40 + v * 35) * 0.1,
+  3.0);
+  return _bodyNormalTex;
+}
+
+function _getCowlNormalTex() {
+  if (_cowlNormalTex) return _cowlNormalTex;
+  // Fabric weave pattern
+  _cowlNormalTex = _buildNormalTex(64, (u, v) =>
+    Math.sin(u * 60) * 0.25 + Math.sin(v * 60) * 0.25 +
+    Math.cos(u * 30 + v * 30) * 0.1,
+  2.0);
+  return _cowlNormalTex;
+}
+
+/**
+ * Injects body creep (slow surface displacement waves) and Fresnel rim-light
+ * into a MeshPhysicalMaterial via onBeforeCompile.
+ * Returns the uniforms object so callers can update uCreepTime each frame.
+ */
+function _applyBodyShader(material) {
+  const uniforms = { uCreepTime: { value: 0.0 } };
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uCreepTime = uniforms.uCreepTime;
+
+    // Vertex: time-driven surface displacement waves (body creep animation)
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+uniform float uCreepTime;`,
+      )
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+// Slow surface displacement waves — body creep animation
+float creep = sin(position.x * 4.0 + position.z * 3.0 + uCreepTime * 0.45) * 0.022
+            + cos(position.y * 6.0 + position.z * 2.5 + uCreepTime * 0.30) * 0.016;
+transformed += normal * creep;`,
+      );
+
+    // Fragment: Fresnel rim-light for dark cowled silhouette in deep water
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <emissivemap_fragment>',
+      `#include <emissivemap_fragment>
+float rim = pow(1.0 - abs(dot(normalize(vViewPosition), normal)), 2.5);
+totalEmissiveRadiance += vec3(0.04, 0.12, 0.22) * rim * 0.7;`,
+    );
+
+    material.userData.shader = shader;
+  };
+  material.needsUpdate = true;
+  return uniforms;
+}
+
+// ── Creature ─────────────────────────────────────────────────────────────────
 // Creature trailing chain-like segmented appendages that drag through the water
 export class ChainDragger {
   constructor(scene, position) {
@@ -53,7 +190,6 @@ export class ChainDragger {
 
     // Verlet chain physics data (near LOD only).
     // Particles stored in WORLD space; instance matrices converted to group-local.
-    // Each entry: { pos, prev, linkCount, ax, ay, az, inst, weightObj }
     this._verletChains = [];
 
     // Mid-LOD pendulum chain groups (simple Group-based, sinusoidal sway)
@@ -62,6 +198,17 @@ export class ChainDragger {
     // Near-LOD mesh refs for secondary idle animation
     this._bodyNear = null;
     this._cowlNear = null;
+
+    // Near-LOD material refs for animated effects
+    this._bodyCreepUniforms = null; // { uCreepTime: { value: 0 } } returned by _applyBodyShader
+    this._eyeMatNear        = null; // eye MeshStandardMaterial for animated emissive pulse
+    this._chainMatNear      = null; // near-tier chain MeshPhysicalMaterial for collision flash
+
+    // Chain collision flash state
+    this._chainCollisionTimer = 0;  // seconds remaining for the emissive flash
+    // Track direction XZ for collision detection on sharp turns
+    this._prevDirX = this.direction.x;
+    this._prevDirZ = this.direction.z;
 
     this._buildModel();
     this.group.position.copy(position);
@@ -77,12 +224,17 @@ export class ChainDragger {
       color: 0x1e1a28, roughness: 0.6, metalness: 0.05,
       clearcoat: 0.7, clearcoatRoughness: 0.35,
       emissive: 0x1a2840, emissiveIntensity: 0.5,
+      normalMap: useFar ? null : _getBodyNormalTex(),
+      normalScale: new THREE.Vector2(0.4, 0.4),
     });
     let chainMat = new THREE.MeshPhysicalMaterial({
-      // Rusted wet metal — moderate metalness with clearcoat gloss
+      // Rusted wet metal — moderate metalness with clearcoat gloss + iridescence (oil-film sheen)
       color: 0x2a2030, roughness: 0.45, metalness: 0.6,
       clearcoat: 0.5, clearcoatRoughness: 0.55,
       emissive: 0x102030, emissiveIntensity: 0.3,
+      iridescence: useFar ? 0 : 0.2, iridescenceIOR: 1.45,
+      normalMap: useFar ? null : _getChainNormalTex(),
+      normalScale: new THREE.Vector2(0.35, 0.35),
     });
     let weightMat = new THREE.MeshPhysicalMaterial({
       color: 0x282030, roughness: 0.55, metalness: 0.45,
@@ -125,7 +277,7 @@ export class ChainDragger {
     for (let i = 0; i < bp.count; i++) {
       const x = bp.getX(i), y = bp.getY(i), z = bp.getZ(i);
       if (!cfg.useFar) {
-        // Scarring ridges + armor-plate surface displacement
+        // Scarring ridges + armor-plate surface displacement (baked into geometry)
         bp.setX(i, x + Math.sin(y * 7) * 0.04 + Math.sin(z * 5) * 0.025);
         bp.setY(i, y + Math.cos(x * 4 + z * 3) * 0.03);
       } else {
@@ -135,7 +287,11 @@ export class ChainDragger {
     bodyGeo.computeVertexNormals();
     const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
     g.add(bodyMesh);
-    if (tierName === 'near') this._bodyNear = bodyMesh;
+    if (tierName === 'near') {
+      this._bodyNear = bodyMesh;
+      // Inject body creep wave + Fresnel rim shader into near-tier body material
+      this._bodyCreepUniforms = _applyBodyShader(bodyMat);
+    }
 
     // --- Cowl (omitted on far tier to save triangles) ---
     if (cfg.cowlSegs) {
@@ -153,7 +309,14 @@ export class ChainDragger {
         }
         cowlGeo.computeVertexNormals();
       }
-      const cowlMesh = new THREE.Mesh(cowlGeo, bodyMat);
+      // Near tier uses a dedicated cowl material with fabric-weave normal map
+      let cowlMat = bodyMat;
+      if (tierName === 'near') {
+        cowlMat = bodyMat.clone();
+        cowlMat.normalMap = _getCowlNormalTex();
+        cowlMat.normalScale.set(0.3, 0.3);
+      }
+      const cowlMesh = new THREE.Mesh(cowlGeo, cowlMat);
       cowlMesh.position.set(0.6, 0.4, 0);
       g.add(cowlMesh);
       if (tierName === 'near') this._cowlNear = cowlMesh;
@@ -168,6 +331,8 @@ export class ChainDragger {
         emissiveIntensity: tierName === 'near' ? 1.8 : 1.4,
         roughness: 0,
       });
+      // Store near-tier eye material for animated emissive pulse
+      if (tierName === 'near') this._eyeMatNear = eyeMat;
       for (const side of [-1, 1]) {
         const eye = new THREE.Mesh(new THREE.SphereGeometry(0.06, eyeSegs, eyeSegs), eyeMat);
         eye.position.set(1.0, 0.3, side * 0.3);
@@ -188,10 +353,23 @@ export class ChainDragger {
   }
 
   _buildNearChains(parentGroup, chainMat, weightMat, cfg) {
-    // Shared TorusGeometry across all InstancedMesh instances (same geometry)
+    // Store chain material ref for per-frame collision flash
+    this._chainMatNear = chainMat;
+
+    // Shared TorusGeometry across all InstancedMesh instances (single geometry)
     const linkGeo = new THREE.TorusGeometry(
       0.06, 0.015, cfg.linkTubeSegs[0], cfg.linkTubeSegs[1],
     );
+
+    // Conservative bounding sphere covering the maximum chain reach in group-local space.
+    // Replaces `inst.frustumCulled = false` so frustum culling still functions correctly.
+    const maxChainReach = cfg.maxLinks * LINK_SPACING + 1.5;
+    linkGeo.boundingSphere = new THREE.Sphere(
+      new THREE.Vector3(0, -maxChainReach * 0.5, 0),
+      maxChainReach,
+    );
+
+    const barnGeos = _getBarnGeos();
 
     for (let c = 0; c < cfg.chainCount; c++) {
       const linkCount = MIN_LINKS + Math.floor(Math.random() * (cfg.maxLinks - MIN_LINKS + 1));
@@ -200,7 +378,6 @@ export class ChainDragger {
       // InstancedMesh: single draw call for all links in this chain
       const inst = new THREE.InstancedMesh(linkGeo, chainMat, linkCount);
       inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      inst.frustumCulled = false; // particles move in world space; skip per-instance cull
       parentGroup.add(inst);
 
       // Attachment point in group-local space
@@ -213,15 +390,14 @@ export class ChainDragger {
       const pos  = new Float32Array(3 * N);
       const prev = new Float32Array(3 * N);
 
-      // Weight with barnacle accumulation detail
+      // Weight with barnacle/growth accumulation detail
       const wGroup = new THREE.Group();
       wGroup.add(new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), weightMat));
       for (let b = 0; b < cfg.barnacles; b++) {
         const ang = Math.random() * Math.PI * 2;
-        const bGeo = new THREE.CylinderGeometry(
-          0.012, 0.02, 0.04 + Math.random() * 0.04, 5,
-        );
-        const barn = new THREE.Mesh(bGeo, weightMat);
+        // Reuse shared barnacle geometries; vary appearance via random scale
+        const barn = new THREE.Mesh(barnGeos[b % 2], weightMat);
+        barn.scale.setScalar(0.7 + Math.random() * 0.6);
         barn.position.set(
           Math.cos(ang) * 0.07,
           Math.random() * 0.06 - 0.02,
@@ -341,7 +517,7 @@ export class ChainDragger {
       for (let iter = 0; iter < SOLVE_ITERS; iter++) {
         // Root–first free particle: only move the free end (root is pinned)
         {
-          const i0 = 0, i1 = 3;
+          const i1 = 3; // particle index 1 in world-space pos array (1 particle × 3 floats)
           const dx = pos[i1] - rx, dy = pos[i1+1] - ry, dz = pos[i1+2] - rz;
           const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
           if (dist > 1e-6) {
@@ -367,6 +543,32 @@ export class ChainDragger {
           pos[i1+1] -= dy * corr;
           pos[i1+2] -= dz * corr;
         }
+      }
+    }
+  }
+
+  /**
+   * Applies a small impulse toward playerPos to each free Verlet particle
+   * when the player is within PROXIMITY_DIST (scaled).
+   * Called only at near LOD after _stepVerlet.
+   */
+  _applyProximityBias(playerPos) {
+    const scale = this.group.scale.x;
+    const gdx = playerPos.x - this.group.position.x;
+    const gdz = playerPos.z - this.group.position.z;
+    const toDist = Math.sqrt(gdx * gdx + gdz * gdz);
+    const threshold = PROXIMITY_DIST * scale;
+    if (toDist >= threshold) return;
+
+    const strength = PROXIMITY_FORCE * (1 - toDist / threshold);
+    for (const chain of this._verletChains) {
+      const { pos, linkCount } = chain;
+      const N = linkCount + 1;
+      for (let p = 1; p < N; p++) {
+        const i = p * 3;
+        pos[i]   += (playerPos.x - pos[i])   * strength;
+        pos[i+1] += (playerPos.y - pos[i+1]) * strength * 0.3; // weaker Y pull
+        pos[i+2] += (playerPos.z - pos[i+2]) * strength;
       }
     }
   }
@@ -449,6 +651,14 @@ export class ChainDragger {
           Math.random() - 0.5,
         ).normalize();
       }
+
+      // Detect sharp turn (dot < COLLISION_DOT_THRESHOLD ≈ >101.5°) → chain collision flash
+      if (this._chainMatNear) {
+        const dot = this._prevDirX * this.direction.x + this._prevDirZ * this.direction.z;
+        if (dot < COLLISION_DOT_THRESHOLD) this._chainCollisionTimer = COLLISION_FLASH_DURATION;
+      }
+      this._prevDirX = this.direction.x;
+      this._prevDirZ = this.direction.z;
     }
 
     // Translate — reuse _v0 to avoid direction.clone() allocation
@@ -461,20 +671,46 @@ export class ChainDragger {
 
     const dist = this.group.position.distanceTo(playerPos);
 
-    // Near LOD: Verlet physics + instance matrix update + idle secondary motion
+    // Near LOD: Verlet physics + instance matrix update + all secondary motion
     if (dist <= LOD_NEAR_DISTANCE) {
       this._stepVerlet(dt);
+      this._applyProximityBias(playerPos);
       this._updateInstances();
 
-      // Breathing/idle: subtle body swell
+      // Body creep shader: update time uniform so displacement waves animate
+      if (this._bodyCreepUniforms) {
+        this._bodyCreepUniforms.uCreepTime.value = this.time;
+      }
+
+      // Breathing/idle: subtle body swell (scale-based)
       if (this._bodyNear) {
         const breathe = 1 + Math.sin(this.time * 0.7) * 0.015;
         this._bodyNear.scale.setScalar(breathe);
       }
-      // Cowl billowing: oscillates opposite to movement
+
+      // Cowl billowing + player-proximity flare
       if (this._cowlNear) {
-        this._cowlNear.rotation.z = Math.sin(this.time * 1.2) * 0.04;
+        const proxFraction = Math.max(0, 1 - dist / (PROXIMITY_DIST * this.group.scale.x));
+        this._cowlNear.rotation.z = Math.sin(this.time * 1.2) * COWL_BASE_ROTATION + proxFraction * COWL_PROXIMITY_ROTATION;
         this._cowlNear.rotation.x = -Math.min(this.speed * 0.025, 0.1);
+        // Cowl flares outward when player is close
+        this._cowlNear.scale.setScalar(1.0 + proxFraction * COWL_PROXIMITY_SCALE);
+      }
+
+      // Animated eye emissive pulse
+      if (this._eyeMatNear) {
+        this._eyeMatNear.emissiveIntensity = EYE_BASE_INTENSITY + Math.sin(this.time * EYE_PULSE_FREQUENCY) * EYE_PULSE_AMPLITUDE;
+      }
+
+      // Chain collision flash: brief emissive surge on sharp turns
+      if (this._chainMatNear) {
+        if (this._chainCollisionTimer > 0) {
+          this._chainCollisionTimer = Math.max(0, this._chainCollisionTimer - dt);
+          const t = 1 - this._chainCollisionTimer / COLLISION_FLASH_DURATION;
+          this._chainMatNear.emissiveIntensity = 0.3 + COLLISION_FLASH_PEAK * Math.sin(t * Math.PI);
+        } else {
+          this._chainMatNear.emissiveIntensity = 0.3; // base emissive
+        }
       }
     }
     // Mid LOD: simplified single-pivot pendulum sway
@@ -487,7 +723,8 @@ export class ChainDragger {
     }
     // Far LOD: static chains — no animation overhead
 
-    // Respawn when too far from player
+    // Respawn when too far from player; reset Verlet state so chains re-seed
+    // from the new body attachment point and don't "explode" on next near LOD entry
     if (dist > 200) {
       const a = Math.random() * Math.PI * 2;
       this.group.position.set(
@@ -495,6 +732,7 @@ export class ChainDragger {
         playerPos.y - Math.random() * 10,
         playerPos.z + Math.sin(a) * 70,
       );
+      for (const chain of this._verletChains) chain.initialized = false;
     }
   }
 
@@ -506,11 +744,24 @@ export class ChainDragger {
 
   dispose() {
     this.scene.remove(this.group);
+    // Use a Set to deduplicate geometry/material disposal —
+    // shared resources (linkGeo, chainMat, etc.) are referenced by multiple
+    // scene nodes and must only be disposed once.
+    const disposedGeos = new Set();
+    const disposedMats = new Set();
     this.group.traverse(c => {
-      if (c.geometry) c.geometry.dispose();
+      if (c.geometry && !disposedGeos.has(c.geometry)) {
+        disposedGeos.add(c.geometry);
+        c.geometry.dispose();
+      }
       if (c.material) {
-        if (Array.isArray(c.material)) c.material.forEach(m => m.dispose());
-        else c.material.dispose();
+        const mats = Array.isArray(c.material) ? c.material : [c.material];
+        for (const m of mats) {
+          if (!disposedMats.has(m)) {
+            disposedMats.add(m);
+            m.dispose();
+          }
+        }
       }
     });
     this._verletChains.length = 0;
