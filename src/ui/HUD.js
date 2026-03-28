@@ -287,6 +287,20 @@ export class HUD {
     const renderClass = this._statusClass(snapshot.postProcess?.lastRenderPressure);
     const rendererClass = snapshot.graphics?.hardwareAccelerated === false ? 'status-fallback' : 'status-normal';
     const bloomClass = snapshot.postProcess?.bloomSuspended ? 'status-pressured' : 'status-normal';
+    const bloomMode = snapshot.postProcess?.bloom?.mode === 'pipeline'
+      ? 'Pipeline'
+      : snapshot.postProcess?.bloom?.mode === 'unreal'
+        ? 'Unreal'
+        : snapshot.postProcess?.bloom?.mode === 'none'
+          ? 'Off'
+          : 'Shader';
+    const bloomStatus = snapshot.postProcess?.bloom?.mode === 'none'
+      ? 'off'
+      : snapshot.postProcess?.bloomSuspended
+        ? 'suspended'
+        : snapshot.postProcess?.bloom?.passEnabled
+          ? 'active'
+          : 'shader-only';
     const emaFlashClass = this._flashClass('ema', snapshot.postProcess?.emaPressure, now);
     const renderFlashClass = this._flashClass('render', snapshot.postProcess?.lastRenderPressure, now);
 
@@ -297,7 +311,7 @@ export class HUD {
       this._diagRow('Fog', `${snapshot.lighting?.fogColor ?? '--'} | near ${this._fmtFixed(snapshot.lighting?.fogNear, 2)} | far ${this._fmtFixed(snapshot.lighting?.fogFar, 1)}`),
       this._diagRow('Ambient', `${this._fmtFixed(snapshot.lighting?.ambientIntensity, 3)} | target exp ${this._fmtFixed(snapshot.lighting?.targetExposure, 2)}`),
       this._diagRow('Underwater FX', `trans ${this._formatRgb(snapshot.postProcess?.transmittance, 2)} | scatter ${this._fmtFixed(snapshot.postProcess?.scatter?.mix, 2)} @ ${this._fmtFixed(snapshot.postProcess?.scatter?.density, 4)}`),
-      this._diagRow('Bloom mode', `${snapshot.postProcess?.bloom?.mode === 'unreal' ? 'Unreal' : 'Shader'} | ${snapshot.postProcess?.bloomSuspended ? 'suspended' : snapshot.postProcess?.bloom?.passEnabled ? 'active' : 'shader-only'}`, bloomClass),
+      this._diagRow('Bloom mode', `${bloomMode} | ${bloomStatus}`, bloomClass),
       this._diagRow('Light budget', `${this._fmtNumber(snapshot.pointLights?.activeCount, 0)} active / ${this._fmtNumber(snapshot.pointLights?.maxLights, 0)} budget | ${this._fmtNumber(snapshot.pointLights?.managedCount, 0)} managed`),
       this._diagRow('Light cats', `active ${this._formatCategorySummary(snapshot.pointLights?.activeCategories)} | managed ${this._formatCategorySummary(snapshot.pointLights?.managedCategories)}`),
       this._diagRow('Modifiers', this._formatModifierSummary(snapshot.lighting?.modifiers)),
@@ -308,7 +322,7 @@ export class HUD {
       this._diagRow('Vendor', snapshot.graphics?.vendor ?? 'Unknown', 'muted'),
       this._diagRow('Post FX', `scale ${this._fmtFixed(snapshot.postProcess?.composerScale, 2)} | EMA ${this._fmtFixed(snapshot.postProcess?.renderEmaMs, 1)}ms`, `${emaClass} ${emaFlashClass}`.trim()),
       this._diagRow('Render', `last ${this._fmtFixed(snapshot.postProcess?.lastRenderMs, 1)}ms`, `${renderClass} ${renderFlashClass}`.trim()),
-      this._diagRow('Bloom', snapshot.postProcess?.bloomSuspended ? 'Suspended' : 'Active', bloomClass),
+      this._diagRow('Bloom', snapshot.postProcess?.bloom?.mode === 'none' ? 'Off' : snapshot.postProcess?.bloomSuspended ? 'Suspended' : 'Active', bloomClass),
       this._diagRow('Exposure', `${this._fmtFixed(snapshot.exposure, 2)} | flashlight ${snapshot.flashlightOn ? 'on' : 'off'}`),
       this._diagRow('Player', `x ${this._fmtFixed(snapshot.playerPosition?.x, 1)}  y ${this._fmtFixed(snapshot.playerPosition?.y, 1)}  z ${this._fmtFixed(snapshot.playerPosition?.z, 1)}`),
       this._diagRow('State', `${snapshot.running ? 'running' : 'idle'}${snapshot.autoplay ? ' | autoplay' : ''}${snapshot.physicsReady ? ' | physics' : ''}`),
