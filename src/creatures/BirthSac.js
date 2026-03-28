@@ -417,14 +417,16 @@ export class BirthSac {
         sacGroup.add(embryo);
       }
 
-      // Attachment stalk — TubeGeometry with organic curve
-      const stalkLen  = size * 0.8;
-      const stalkPts  = [];
+      // Attachment stalk — TubeGeometry with organic curve.
+      // Curve starts at the membrane underside (y = -size) and extends downward by stalkLen.
+      const stalkLen    = size * 0.8;
+      const attachY     = -size;          // bottom of the sphere surface
+      const stalkPts    = [];
       for (let s = 0; s <= profile.stalkSegs; s++) {
         const t2 = s / profile.stalkSegs;
         stalkPts.push(new THREE.Vector3(
           Math.sin(t2 * 2.5 + i) * 0.025,
-          -stalkLen * t2,
+          attachY - stalkLen * t2,
           Math.cos(t2 * 2.1 + i * 0.7) * 0.025
         ));
       }
@@ -433,10 +435,12 @@ export class BirthSac {
       const stalk      = new THREE.Mesh(stalkGeo, veinMat);
       sacGroup.add(stalk);
 
-      // Stalk junction torus — micro-detail at base where stalk meets sac (near only)
+      // Stalk junction torus — micro-detail at membrane attachment point (near only)
       if (profile.poreCount > 0) {
-        const juncGeo = new THREE.TorusGeometry(0.02 + size * 0.03, 0.008, 6, 12);
-        sacGroup.add(new THREE.Mesh(juncGeo, veinMat));
+        const juncGeo  = new THREE.TorusGeometry(0.02 + size * 0.03, 0.008, 6, 12);
+        const juncMesh = new THREE.Mesh(juncGeo, veinMat);
+        juncMesh.position.y = attachY;   // place at membrane underside, not at sac center
+        sacGroup.add(juncMesh);
       }
 
       // Membrane pores — distributed on upper hemisphere (near only)
