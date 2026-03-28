@@ -1,30 +1,30 @@
-import * as THREE from 'three';
+import * as THREE from "three";
 import {
   createAdvancedVolumetricBeamMaterial,
   createFallbackBeamMaterial,
-} from '../shaders/VolumetricBeamMaterial.js';
+} from "../shaders/VolumetricBeamMaterial.js";
 
 const DEFAULTS = {
-  headlightIntensity: 140,
-  headlightRange: 120,
-  coneAngle: Math.PI / 9,
-  penumbra: 0.45,
+  headlightIntensity: 200,
+  headlightRange: 170,
+  coneAngle: Math.PI / 10,
+  penumbra: 0.35,
   decay: 1.8,
   headlightSpacing: 2.2,
-  beamLength: 48,
-  beamBaseOpacity: 0.018,
+  beamLength: 80,
+  beamBaseOpacity: 0.028,
   hullIntensity: 6,
   hullRange: 38,
   hullDecay: 2,
 };
 
 const HULL_LIGHT_LAYOUT = [
-  { position: [0, 1.5, -0.6], multiplier: 1.0 },   // top
-  { position: [0, -1.5, -0.6], multiplier: 0.9 },  // bottom
+  { position: [0, 1.5, -0.6], multiplier: 1.0 }, // top
+  { position: [0, -1.5, -0.6], multiplier: 0.9 }, // bottom
   { position: [-1.7, 0, -0.6], multiplier: 0.95 }, // left
-  { position: [1.7, 0, -0.6], multiplier: 0.95 },  // right
-  { position: [0, 0.15, -2.3], multiplier: 1.1 },  // forward
-  { position: [0, 0.15, 2.2], multiplier: 0.85 },  // aft
+  { position: [1.7, 0, -0.6], multiplier: 0.95 }, // right
+  { position: [0, 0.15, -2.3], multiplier: 1.1 }, // forward
+  { position: [0, 0.15, 2.2], multiplier: 0.85 }, // aft
 ];
 
 function createBeamGeometry(beamLength, coneAngle) {
@@ -68,13 +68,13 @@ export class ExternalLightingSystem {
         cfg.headlightRange,
         cfg.coneAngle,
         cfg.penumbra,
-        cfg.decay
+        cfg.decay,
       );
       spot.position.set(x, 0, 0);
       spot.target.position.set(x, 0, -1);
       spot.userData.baseIntensity = cfg.headlightIntensity;
       spot.userData.baseRange = cfg.headlightRange;
-      spot.userData.duwCategory = 'player_headlight';
+      spot.userData.duwCategory = "player_headlight";
       this.group.add(spot);
       this.group.add(spot.target);
       this.headlights.push(spot);
@@ -105,11 +105,16 @@ export class ExternalLightingSystem {
     for (let i = 0; i < HULL_LIGHT_LAYOUT.length; i++) {
       const item = HULL_LIGHT_LAYOUT[i];
       const intensity = cfg.hullIntensity * item.multiplier;
-      const light = new THREE.PointLight(0x88a8cc, intensity, cfg.hullRange, cfg.hullDecay);
+      const light = new THREE.PointLight(
+        0x88a8cc,
+        intensity,
+        cfg.hullRange,
+        cfg.hullDecay,
+      );
       light.position.set(item.position[0], item.position[1], item.position[2]);
       light.userData.baseIntensity = intensity;
       light.userData.baseRange = cfg.hullRange;
-      light.userData.duwCategory = 'player_practical';
+      light.userData.duwCategory = "player_practical";
       this.hullLightsGroup.add(light);
       this.hullLights.push(light);
     }
@@ -127,7 +132,8 @@ export class ExternalLightingSystem {
 
     for (let i = 0; i < this.headlights.length; i++) {
       const light = this.headlights[i];
-      const baseIntensity = light.userData.baseIntensity ?? this.config.headlightIntensity;
+      const baseIntensity =
+        light.userData.baseIntensity ?? this.config.headlightIntensity;
       const baseRange = light.userData.baseRange ?? this.config.headlightRange;
       light.intensity = baseIntensity * intensityAttenuation;
       light.distance = baseRange * rangeAttenuation;
@@ -135,7 +141,8 @@ export class ExternalLightingSystem {
 
     for (let i = 0; i < this.hullLights.length; i++) {
       const light = this.hullLights[i];
-      const baseIntensity = light.userData.baseIntensity ?? this.config.hullIntensity;
+      const baseIntensity =
+        light.userData.baseIntensity ?? this.config.hullIntensity;
       const baseRange = light.userData.baseRange ?? this.config.hullRange;
       light.intensity = baseIntensity;
       light.distance = baseRange;

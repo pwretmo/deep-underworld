@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from "three";
 
 /**
  * Volumetric beam shader for the flashlight cone.
@@ -177,8 +177,8 @@ const AdvancedVolumetricBeamShader = {
     time: { value: 0 },
     // Color authored as sRGB hex; convert to linear so OutputPass encodes correctly
     beamColor: { value: new THREE.Color(0x8eaad1).convertSRGBToLinear() },
-    beamLength: { value: 54.0 },
-    baseOpacity: { value: 0.042 },
+    beamLength: { value: 80.0 },
+    baseOpacity: { value: 0.055 },
     anisotropy: { value: 0.63 },
     noiseScale: { value: 2.1 },
     noiseStrength: { value: 0.42 },
@@ -187,7 +187,7 @@ const AdvancedVolumetricBeamShader = {
     fogColor: { value: new THREE.Color(0x000000) },
     fogNear: { value: 1.0 },
     fogFar: { value: 300.0 },
-    coneTanHalfAngle: { value: Math.tan(Math.PI / 9) },
+    coneTanHalfAngle: { value: Math.tan(Math.PI / 10) },
     waterExtinction: { value: new THREE.Vector3(0.38, 0.065, 0.018) },
     waterDepth: { value: 0 },
   },
@@ -314,7 +314,7 @@ const AdvancedVolumetricBeamShader = {
       density *= (1.0 - fogFactor * 0.68);
 
       // beamColor uniform is already in linear space; OutputPass handles sRGB encoding
-      gl_FragColor = vec4(finalColor, clamp(density, 0.0, 0.10));
+      gl_FragColor = vec4(finalColor, clamp(density, 0.0, 0.14));
     }
   `,
 };
