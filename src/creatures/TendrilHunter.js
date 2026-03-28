@@ -6,9 +6,14 @@ import { qualityManager } from '../QualityManager.js';
 const _v3A    = new THREE.Vector3();
 const _v3B    = new THREE.Vector3();
 const _v3C    = new THREE.Vector3();
+const _v3D    = new THREE.Vector3();
+const _v3E    = new THREE.Vector3();
+const _v3F    = new THREE.Vector3();
+const _v3G    = new THREE.Vector3();
 const _v3Root = new THREE.Vector3();
 const _qA     = new THREE.Quaternion();
 const _upY    = new THREE.Vector3(0, 1, 0);
+const _axisX  = new THREE.Vector3(1, 0, 0);
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const TWO_PI          = Math.PI * 2;
@@ -22,6 +27,11 @@ const RETRACT_DURATION = 0.7;
 const EYE_SCAN_STEP         = 0.8;   // radians added per scan event
 const PISTON_RATTLE         = 0.015; // position noise during strike
 const TENDRIL_SPREAD_FACTOR = 1.5;   // max spread radius of tendril tips when idle (not seeking)
+const PISTON_SIDE_OFFSET    = 0.085;
+const PISTON_TIP_OFFSET     = 0.072;
+const PISTON_SLEEVE_LEN     = 0.13;
+const PISTON_ROD_OVERLAP    = 0.035;
+const PISTON_ROD_MIN_LEN    = 0.025;
 
 // Strike state IDs
 const S_IDLE    = 0;
@@ -252,6 +262,7 @@ export class TendrilHunter {
     this._rightMandible     = null;
     this._abdomenMesh       = null;
     this._nearEyeMat        = null; // shared eyeMat ref for animated emissive flicker
+    this._nearMandibleGlowMat = null;
 
     // Medium-tier tendril refs for sinusoidal sway
     this._mediumTendrilData = []; // [{group, phase}]
@@ -330,6 +341,16 @@ export class TendrilHunter {
       ...(isNear ? { iridescence: 0.5, iridescenceIOR: 1.4 } : {}),
       ...(chitinNorm ? { normalMap: chitinNorm, normalScale: new THREE.Vector2(0.6, 0.6) } : {}),
     });
+    const mandibleGlowMat = profile.mandibleSegs > 0 ? new THREE.MeshPhysicalMaterial({
+      color: 0x0f180c,
+      roughness: 0.15,
+      metalness: 0.05,
+      clearcoat: 0.8,
+      emissive: 0x7cff9b,
+      emissiveIntensity: isNear ? 0.45 : 0.3,
+      transparent: true,
+      opacity: 0.95,
+    }) : null;
 
     // Downgrade to MeshStandardMaterial on far tier for GPU savings
     if (isFar) {
@@ -342,10 +363,15 @@ export class TendrilHunter {
 
     // ── Far LOD: minimal geometry (<100 triangles total) ──────────────────────
     if (isFar) {
-      const fBody = new THREE.SphereGeometry(1, 8, 6);
+      const fBody = new THREE.SphereGeometry(1, 6, 4);
       fBody.scale(1.6, 0.85, 0.75);
       g.add(new THREE.Mesh(fBody, bodyMat));
-      const fAbd = new THREE.Mesh(new THREE.SphereGeometry(0.55, 6, 4), abdomenMat);
+      const fHead = new THREE.Mesh(new THREE.SphereGeometry(0.42, 5, 4), bodyMat);
+      fHead.scale.set(1.25, 0.82, 0.7);
+      fHead.position.set(1.25, 0, 0);
+      g.add(fHead);
+      const fAbd = new THREE.Mesh(new THREE.SphereGeometry(0.5, 5, 3), abdomenMat);
+      fAbd.scale.set(1.3, 0.9, 0.82);
       fAbd.position.set(-1.5, 0, 0);
       g.add(fAbd);
       return g;
@@ -396,12 +422,33 @@ export class TendrilHunter {
           mg.add(sp);
         }
 
+        if (mandibleGlowMat) {
+          const glowStrip = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.012, 0.018, 0.52, 6),
+            mandibleGlowMat
+          );
+          glowStrip.position.set(side * 0.03, -0.03, 0);
+          glowStrip.rotation.z = side * 0.12;
+          mg.add(glowStrip);
+
+          for (let s = 0; s < 3; s++) {
+            const gland = new THREE.Mesh(
+              new THREE.SphereGeometry(0.02, 6, 5),
+              mandibleGlowMat
+            );
+            gland.position.set(side * 0.034, -0.22 + s * 0.17, side * 0.012);
+            mg.add(gland);
+          }
+        }
+
         g.add(mg);
         if (isNear) {
           if (side < 0) this._leftMandible  = mg;
           else           this._rightMandible = mg;
         }
       }
+
+      if (isNear && mandibleGlowMat) this._nearMandibleGlowMat = mandibleGlowMat;
     }
 
     // ── Compound eyes — multi-lens cluster ────────────────────────────────────
@@ -519,15 +566,38 @@ export class TendrilHunter {
         jointMeshes.push(jm);
       }
 
-      // Hydraulic piston lines alongside first 3 segments (near only)
+      // Hydraulic pistons spanning the first 3 joints (near only)
+      const pistons = [];
       if (isNear && profile.pistonSegs > 0) {
-        for (let s = 0; s < Math.min(segCount - 1, 3); s++) {
-          const piston = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.012, 0.012, TENDRIL_SEG_LEN * 0.8, profile.pistonSegs),
+        for (let s = 0; s < Math.min(segCount - 2, 3); s++) {
+          const sleeve = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.018, 0.021, 1, profile.pistonSegs),
             metalMat
           );
-          piston.position.set(0.07, 0, 0);
-          segments[s].add(piston);
+          const rod = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.009, 0.011, 1, profile.pistonSegs),
+            metalMat
+          );
+          const baseCollar = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.024, 0.024, 0.04, profile.pistonSegs),
+            organicMat
+          );
+          const tipCollar = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.015, 0.015, 0.03, profile.pistonSegs),
+            organicMat
+          );
+          tendrilGroup.add(sleeve);
+          tendrilGroup.add(rod);
+          tendrilGroup.add(baseCollar);
+          tendrilGroup.add(tipCollar);
+          pistons.push({
+            jointIndex: s,
+            side: ((i + s) % 2 === 0) ? 1 : -1,
+            sleeve,
+            rod,
+            baseCollar,
+            tipCollar,
+          });
         }
       }
 
@@ -551,6 +621,7 @@ export class TendrilHunter {
         joints,
         segments,
         jointMeshes,
+        pistons,
         hook,
         phase:       (i / profile.tendrilCount) * TWO_PI,
         segCount,
@@ -757,6 +828,14 @@ export class TendrilHunter {
         : 0.3 + Math.sin(t * 0.8) * 0.15;
     }
 
+    if (this._nearMandibleGlowMat) {
+      const hunting = (this._state === S_STALK || this._state === S_STRIKE);
+      const pulse = 0.5 + 0.5 * Math.sin(t * (hunting ? 5.2 : 1.4) + 0.9);
+      this._nearMandibleGlowMat.emissiveIntensity = hunting
+        ? 0.55 + pulse * 0.75 + this._strikePhase * 0.35
+        : 0.2 + pulse * 0.18;
+    }
+
     // ── Abdomen breathing pulse + secondary sway ──────────────────────────────
     if (this._abdomenMesh) {
       const breathe = 1 + Math.sin(t * 1.4 + this._abdomenPhase) * 0.04;
@@ -827,6 +906,8 @@ export class TendrilHunter {
         }
       }
 
+      this._updateNearPistons(td, doRattle);
+
       // ── Update articulation joint balls ───────────────────────────────────
       for (let s = 0; s < td.jointMeshes.length; s++) {
         td.jointMeshes[s].position.copy(td.joints[s + 1]);
@@ -846,6 +927,57 @@ export class TendrilHunter {
           td.hook.quaternion.copy(_qA);
         }
       }
+    }
+  }
+
+  _updateNearPistons(td, doRattle) {
+    if (!td.pistons || td.pistons.length === 0) return;
+
+    for (let i = 0; i < td.pistons.length; i++) {
+      const piston = td.pistons[i];
+      const jointIndex = piston.jointIndex;
+      const pa = td.joints[jointIndex];
+      const pb = td.joints[jointIndex + 1];
+      const pc = td.joints[jointIndex + 2];
+
+      _v3D.copy(_axisX).applyQuaternion(td.segments[jointIndex].quaternion);
+      _v3E.copy(_axisX).applyQuaternion(td.segments[jointIndex + 1].quaternion);
+      if (piston.side < 0) {
+        _v3D.negate();
+        _v3E.negate();
+      }
+
+      _v3F.lerpVectors(pa, pb, 0.78).addScaledVector(_v3D, PISTON_SIDE_OFFSET);
+      _v3G.lerpVectors(pb, pc, 0.22).addScaledVector(_v3E, PISTON_TIP_OFFSET);
+
+      if (doRattle) {
+        const jitter = Math.sin(this.time * 36 + td.phase * 2 + jointIndex * 1.7) * PISTON_RATTLE * 0.45;
+        _v3F.addScaledVector(_v3D, jitter);
+        _v3G.addScaledVector(_v3E, -jitter * 0.6);
+      }
+
+      _v3A.subVectors(_v3G, _v3F);
+      const actualLen = _v3A.length();
+      if (actualLen <= 0.0001) continue;
+
+      _v3A.divideScalar(actualLen);
+      _qA.setFromUnitVectors(_upY, _v3A);
+
+      piston.sleeve.position.copy(_v3F).addScaledVector(_v3A, PISTON_SLEEVE_LEN * 0.5);
+      piston.sleeve.quaternion.copy(_qA);
+      piston.sleeve.scale.set(1, PISTON_SLEEVE_LEN, 1);
+
+      const rodVisibleLen = Math.max(actualLen - (PISTON_SLEEVE_LEN - PISTON_ROD_OVERLAP), PISTON_ROD_MIN_LEN);
+      _v3D.copy(_v3F).addScaledVector(_v3A, PISTON_SLEEVE_LEN - PISTON_ROD_OVERLAP);
+      piston.rod.position.copy(_v3D).addScaledVector(_v3A, rodVisibleLen * 0.5);
+      piston.rod.quaternion.copy(_qA);
+      piston.rod.scale.set(1, rodVisibleLen, 1);
+
+      piston.baseCollar.position.copy(_v3F).addScaledVector(_v3A, 0.02);
+      piston.baseCollar.quaternion.copy(_qA);
+
+      piston.tipCollar.position.copy(_v3G).addScaledVector(_v3A, -0.015);
+      piston.tipCollar.quaternion.copy(_qA);
     }
   }
 
