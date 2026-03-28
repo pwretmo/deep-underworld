@@ -5,14 +5,14 @@ import {
 } from '../shaders/VolumetricBeamMaterial.js';
 
 const DEFAULTS = {
-  headlightIntensity: 140,
-  headlightRange: 120,
-  coneAngle: Math.PI / 9,
-  penumbra: 0.45,
+  headlightIntensity: 200,
+  headlightRange: 170,
+  coneAngle: Math.PI / 10,
+  penumbra: 0.35,
   decay: 1.8,
   headlightSpacing: 2.2,
-  beamLength: 48,
-  beamBaseOpacity: 0.018,
+  beamLength: 80,
+  beamBaseOpacity: 0.028,
   hullIntensity: 6,
   hullRange: 38,
   hullDecay: 2,
