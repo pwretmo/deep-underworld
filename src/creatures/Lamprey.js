@@ -1,117 +1,425 @@
 import * as THREE from 'three';
+import { LOD_NEAR_DISTANCE, LOD_MEDIUM_DISTANCE } from './lodUtils.js';
 
-// Parasitic lamprey with circular mouth of rotating teeth, segmented metallic body
+// ─── constants ────────────────────────────────────────────────────────────────
+const BODY_LENGTH            = 3.36;  // 12 × 0.28 — preserves original total length
+const BASE_TUBE_RADIUS       = 0.25;
+const LAMPREY_RESPAWN_DIST   = 200;
+const PURSUIT_ACTIVE_DIST    = 15;   // scaled-space distance below which prey-chase modifiers kick in
+const MIN_SCALE_DIVISOR      = 0.1;  // prevents division by zero when scale is near-zero
+const GILL_BREATH_FREQ       = 2.0;  // gill pulse frequency multiplier relative to mouth phase
+const GILL_PHASE_OFFSET      = 0.7;  // phase stagger between adjacent gill pairs
+const GILL_PULSE_AMPLITUDE   = 0.18; // normalised scale amplitude of gill breathing
+
+// Pre-allocated temp — zero per-frame allocation
+const _tmpVec3 = new THREE.Vector3();
+
+// ─── module-level singleton textures (never disposed per instance) ─────────────
+let _bodyNormalTex = null;
+
+function _getBodyNormalTexture() {
+  if (_bodyNormalTex) return _bodyNormalTex;
+  const W = 256, H = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(W, H);
+  const d = img.data;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const u = x / W, v = y / H;
+      // muscle-band pattern along body (u), scale-ridge pattern around girth (v)
+      const band  = Math.sin(u * 64.0) * 0.20;
+      const ridge = Math.sin(v * 96.0 + u * 16.0) * 0.10;
+      const nx = THREE.MathUtils.clamp(0.5 + ridge, 0, 1);
+      const ny = THREE.MathUtils.clamp(0.5 + band,  0, 1);
+      const nz = Math.sqrt(Math.max(0, 1 - (nx * 2 - 1) ** 2 - (ny * 2 - 1) ** 2)) * 0.5 + 0.5;
+      const i = (y * W + x) * 4;
+      d[i]     = Math.round(nx * 255);
+      d[i + 1] = Math.round(ny * 255);
+      d[i + 2] = Math.round(nz * 255);
+      d[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  _bodyNormalTex = new THREE.CanvasTexture(canvas);
+  _bodyNormalTex.wrapS = THREE.RepeatWrapping;
+  _bodyNormalTex.wrapT = THREE.RepeatWrapping;
+  _bodyNormalTex.needsUpdate = true;
+  return _bodyNormalTex;
+}
+
+let _bodyDispTex = null;
+function _getBodyDisplacementTexture() {
+  if (_bodyDispTex) return _bodyDispTex;
+  const W = 256, H = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(W, H);
+  const d = img.data;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const u = x / W, v = y / H;
+      const band  = Math.sin(u * 64.0) * 0.35 + 0.5;
+      const ridge = Math.sin(v * 96.0 + u * 16.0) * 0.15 + 0.5;
+      const val = Math.round(THREE.MathUtils.clamp(band * ridge, 0, 1) * 255);
+      const i = (y * W + x) * 4;
+      d[i] = val; d[i+1] = val; d[i+2] = val; d[i+3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  _bodyDispTex = new THREE.CanvasTexture(canvas);
+  _bodyDispTex.wrapS = THREE.RepeatWrapping;
+  _bodyDispTex.wrapT = THREE.RepeatWrapping;
+  _bodyDispTex.needsUpdate = true;
+  return _bodyDispTex;
+}
+
+// ─── geometry helpers ─────────────────────────────────────────────────────────
+
+/** Spine curve: head at x = 0, tail at x = −BODY_LENGTH */
+function _makeSpineCurve() {
+  return new THREE.CatmullRomCurve3([
+    new THREE.Vector3(0,                   0, 0),
+    new THREE.Vector3(-BODY_LENGTH * 0.25, 0, 0),
+    new THREE.Vector3(-BODY_LENGTH * 0.5,  0, 0),
+    new THREE.Vector3(-BODY_LENGTH * 0.75, 0, 0),
+    new THREE.Vector3(-BODY_LENGTH,        0, 0),
+  ]);
+}
+
+/**
+ * Tapered TubeGeometry along the spine.
+ * Radius tapers from BASE_TUBE_RADIUS at head (uv.x = 0)
+ * to BASE_TUBE_RADIUS × 0.5 at tail (uv.x = 1).
+ * BufferGeometry attribute mutation only — no dispose/recreate.
+ */
+function _buildBodyTube(tubularSegs, radialSegs) {
+  const curve = _makeSpineCurve();
+  const geo   = new THREE.TubeGeometry(curve, tubularSegs, BASE_TUBE_RADIUS, radialSegs, false);
+  const pos   = geo.attributes.position;
+  const uvAttr = geo.attributes.uv;
+  for (let i = 0; i < pos.count; i++) {
+    const t     = uvAttr.getX(i);          // 0 = head, 1 = tail
+    const taper = 1.0 - t * 0.5;           // 1.0 → 0.5
+    pos.setY(i, pos.getY(i) * taper);
+    pos.setZ(i, pos.getZ(i) * taper);
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+
+// ─── material helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Build the body tube material.
+ * All tiers receive a vertex-shader anguilliform wave + peristaltic bulge.
+ * Non-far tiers also receive a Fresnel rim-light fragment shader.
+ * Near tier (useDisplacement=true) receives displacement mapping.
+ * Returns { mat, shaderUniforms, isFar }.
+ */
+function _buildBodyMat(useFarMat, useDisplacement) {
+  // Per-instance uniform objects — each tier gets its own set
+  const shaderUniforms = {
+    uWavePhase:  { value: 0.0 },
+    uWaveNumber: { value: 2.5 },
+    uAmplitude:  { value: 0.18 },
+  };
+
+  let mat;
+  if (useFarMat) {
+    mat = new THREE.MeshStandardMaterial({
+      color: 0x0c0a08, roughness: 0.15, metalness: 0.8,
+      emissive: 0x502040, emissiveIntensity: 0.5,
+    });
+  } else {
+    const props = {
+      color: 0x0c0a08, roughness: 0.12, metalness: 0.85,
+      clearcoat: 1.0, clearcoatRoughness: 0.05,
+      emissive: 0x502040, emissiveIntensity: 0.5,
+      normalMap: _getBodyNormalTexture(),
+      normalScale: new THREE.Vector2(0.5, 0.5),
+    };
+    if (useDisplacement) {
+      props.displacementMap = _getBodyDisplacementTexture();
+      props.displacementScale = 0.03;
+    }
+    mat = new THREE.MeshPhysicalMaterial(props);
+  }
+
+  mat.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, shaderUniforms);
+
+    // Vertex shader: GPU anguilliform body wave + peristaltic bulge (all tiers)
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+uniform float uWavePhase;
+uniform float uWaveNumber;
+uniform float uAmplitude;`
+      )
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+float _bodyT = uv.x;
+float _bulge = sin(uWavePhase * 2.0 - _bodyT * 8.0) * 0.08;
+transformed.y *= 1.0 + _bulge;
+float _wave = sin(uWavePhase - _bodyT * uWaveNumber * 6.2832) * uAmplitude * _bodyT;
+transformed.z += _wave;`
+      );
+
+    // Fragment shader: Fresnel rim-light (non-far tiers only)
+    if (!useFarMat) {
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <emissivemap_fragment>',
+          `#include <emissivemap_fragment>
+float _fresnel = pow(1.0 - abs(dot(normalize(vViewPosition), normal)), 3.0);
+totalEmissiveRadiance += vec3(0.25, 0.10, 0.35) * _fresnel * 0.55;`
+        );
+    }
+  };
+
+  return { mat, shaderUniforms, isFar: useFarMat };
+}
+
+// ─── LOD tier profiles ────────────────────────────────────────────────────────
+const _LAMPREY_TIERS = [
+  { name: 'near',   tubularSegs: 80, radialSegs: 16, mouthDetail: true,  gillDetail: true,  dist: 0                  },
+  { name: 'medium', tubularSegs: 40, radialSegs: 8,  mouthDetail: true,  gillDetail: false, dist: LOD_NEAR_DISTANCE   },
+  { name: 'far',    tubularSegs: 6,  radialSegs: 3,  mouthDetail: false, gillDetail: false, dist: LOD_MEDIUM_DISTANCE },
+];
+
+// ─── Lamprey class ─────────────────────────────────────────────────────────────
+// Parasitic lamprey with continuous TubeGeometry body, anguilliform vertex-shader
+// wave, 3-tier LOD, counter-rotating tooth rings, bioluminescent lip ring.
 export class Lamprey {
   constructor(scene, position) {
-    this.scene = scene;
-    this.group = new THREE.Group();
-    this.time = Math.random() * 100;
-    this.speed = 2.5 + Math.random() * 1.5;
+    this.scene     = scene;
+    this.group     = new THREE.Group();
+    this.time      = Math.random() * 100;
+    this.speed     = 2.5 + Math.random() * 1.5;
     this.direction = new THREE.Vector3(Math.random() - 0.5, -0.1, Math.random() - 0.5).normalize();
-    this.turnTimer = 0;
+    this.turnTimer    = 0;
     this.turnInterval = 4 + Math.random() * 5;
-    this.mouthRing = null;
+
+    // Per-instance procedural variation
+    this._wavePhase  = Math.random() * Math.PI * 2;
+    this._waveFreq   = 2.8 + Math.random() * 0.8;
+    this._mouthPhase = Math.random() * Math.PI * 2;
+
+    // Body shader uniform refs (updated each frame, zero alloc)
+    this._bodyShaderUniforms = [];
+    this._farShaderUniforms  = [];
+    this._frameCount = 0;
+
+    // Weight & inertia tracking
+    this._prevPos  = position.clone();
+    this._trailRotX = 0;
+    this._trailRotZ = 0;
+
+    // Near-tier animated mesh refs
+    this._outerRing  = null;   // outer tooth ring — forward rotation
+    this._innerRing  = null;   // inner tooth ring — counter-rotation
+    this._lipMesh    = null;   // torus lip for dilation pulsation
+    this._gillMeshes = [];     // gill slit planes for breathing animation
 
     this._buildModel();
     this.group.position.copy(position);
     scene.add(this.group);
   }
 
+  // ── build ───────────────────────────────────────────────────────────────────
   _buildModel() {
-    const metalMat = new THREE.MeshPhysicalMaterial({
-      color: 0x0c0a08, roughness: 0.15, metalness: 0.8,
-      clearcoat: 1.0, clearcoatRoughness: 0.05,
-      emissive: 0x502040, emissiveIntensity: 0.4,
-    });
-    const fleshMat = new THREE.MeshPhysicalMaterial({
-      color: 0x1a1020, roughness: 0.3, metalness: 0,
-      clearcoat: 0.8,
-      emissive: 0x602040, emissiveIntensity: 0.6,
-    });
-    const toothMat = new THREE.MeshPhysicalMaterial({
-      color: 0x504038, roughness: 0.2, metalness: 0, clearcoat: 1.0,
-      emissive: 0x504030, emissiveIntensity: 0.4,
-    });
+    const lod = new THREE.LOD();
 
-    // Segmented body
-    const segments = 12;
-    for (let i = 0; i < segments; i++) {
-      const t = i / segments;
-      const radius = 0.25 * (1 - t * 0.5);
-      const segGeo = new THREE.CylinderGeometry(radius * 0.95, radius, 0.3, 10);
-      const mat = i % 2 === 0 ? metalMat : fleshMat;
-      const seg = new THREE.Mesh(segGeo, mat);
-      seg.position.set(-i * 0.28, 0, 0);
-      seg.rotation.z = Math.PI / 2;
-      this.group.add(seg);
+    for (const cfg of _LAMPREY_TIERS) {
+      const useFar = (cfg.name === 'far');
+      const isNear = (cfg.name === 'near');
+      const tierGroup = this._buildTier(cfg, useFar, isNear);
+      lod.addLevel(tierGroup, cfg.dist);
+    }
 
-      // Lateral ridges
-      if (i % 3 === 0) {
+    this.group.add(lod);
+
+    this.group.scale.setScalar(2 + Math.random() * 2);
+  }
+
+  _buildTier(cfg, useFarMat, isNear) {
+    const g = new THREE.Group();
+
+    // ── continuous body tube ───────────────────────────────────────────────
+    const tubeGeo = _buildBodyTube(cfg.tubularSegs, cfg.radialSegs);
+    const { mat: bodyMat, shaderUniforms, isFar } = _buildBodyMat(useFarMat, isNear);
+    if (isFar) {
+      this._farShaderUniforms.push(shaderUniforms);
+    } else {
+      this._bodyShaderUniforms.push(shaderUniforms);
+    }
+    g.add(new THREE.Mesh(tubeGeo, bodyMat));
+
+    // ── gill openings (near tier only) ────────────────────────────────────
+    if (cfg.gillDetail) {
+      const gillMat = new THREE.MeshPhysicalMaterial({
+        color: 0x080408, roughness: 0.9, metalness: 0,
+        emissive: 0x300a10, emissiveIntensity: 0.5,
+        side: THREE.DoubleSide,
+      });
+      const spine = _makeSpineCurve();
+      for (let gi = 0; gi < 7; gi++) {
+        const t  = 0.10 + gi * 0.10;
+        const cp = spine.getPointAt(t);
+        const r  = BASE_TUBE_RADIUS * (1 - t * 0.5) + 0.01;
         for (const side of [-1, 1]) {
-          const ridgeGeo = new THREE.BoxGeometry(0.08, 0.02, 0.03);
-          const ridge = new THREE.Mesh(ridgeGeo, metalMat);
-          ridge.position.set(-i * 0.28, side * radius, 0);
-          this.group.add(ridge);
+          const gillGeo = new THREE.PlaneGeometry(0.05, 0.10);
+          const gill    = new THREE.Mesh(gillGeo, gillMat);
+          gill.position.set(cp.x, 0, side * r);
+          gill.rotation.y = Math.PI / 2;
+          g.add(gill);
+          if (isNear) this._gillMeshes.push(gill);
         }
       }
     }
 
-    // Circular mouth with concentric tooth rings
-    this.mouthRing = new THREE.Group();
-    for (let ring = 0; ring < 3; ring++) {
-      const r = 0.22 - ring * 0.05;
-      const count = 10 - ring * 2;
-      for (let t = 0; t < count; t++) {
-        const angle = (t / count) * Math.PI * 2;
-        const tGeo = new THREE.ConeGeometry(0.015, 0.08 + ring * 0.02, 4);
-        const tooth = new THREE.Mesh(tGeo, toothMat);
-        tooth.position.set(0, Math.cos(angle) * r, Math.sin(angle) * r);
-        tooth.rotation.z = Math.PI / 2;
-        this.mouthRing.add(tooth);
+    // ── mouth + teeth ──────────────────────────────────────────────────────
+    if (cfg.mouthDetail) {
+      const mouthGrp = new THREE.Group();
+      mouthGrp.position.set(0.34, 0, 0);   // just ahead of tube head at x = 0
+
+      const toothMat = useFarMat
+        ? new THREE.MeshStandardMaterial({
+            color: 0x504038, roughness: 0.2, metalness: 0,
+            emissive: 0x504030, emissiveIntensity: 0.4,
+          })
+        : new THREE.MeshPhysicalMaterial({
+            color: 0x504038, roughness: 0.2, metalness: 0, clearcoat: 1.0,
+            emissive: 0x504030, emissiveIntensity: 0.5,
+          });
+
+      // Two independently rotating rings for counter-rotation effect
+      const outerRing = new THREE.Group();
+      const innerRing = new THREE.Group();
+
+      // 3 concentric rings: 12, 10, 8 teeth (8+ segment cones with serration)
+      for (let ring = 0; ring < 3; ring++) {
+        const r      = 0.22 - ring * 0.05;
+        const count  = 12 - ring * 2;
+        const parent = ring <= 1 ? outerRing : innerRing;
+        for (let ti = 0; ti < count; ti++) {
+          const ang  = (ti / count) * Math.PI * 2;
+          const tGeo = new THREE.ConeGeometry(0.013, 0.09 + ring * 0.015, 8, 1);
+          // serration: displace tip vertices radially
+          const tPos = tGeo.attributes.position;
+          for (let vi = 0; vi < tPos.count; vi++) {
+            if (tPos.getY(vi) > 0.03) {
+              const serr = Math.sin(Math.atan2(tPos.getX(vi), tPos.getZ(vi)) * 4.0) * 0.006;
+              tPos.setX(vi, tPos.getX(vi) + serr);
+            }
+          }
+          tGeo.computeVertexNormals();
+          const tooth = new THREE.Mesh(tGeo, toothMat);
+          tooth.position.set(0, Math.cos(ang) * r, Math.sin(ang) * r);
+          tooth.rotation.z = Math.PI / 2;
+          parent.add(tooth);
+        }
       }
+
+      // Rasping tongue geometry inside mouth (near tier only)
+      if (isNear) {
+        const tongueMat = new THREE.MeshPhysicalMaterial({
+          color: 0x3a1018, roughness: 0.5, metalness: 0, clearcoat: 0.4,
+          emissive: 0x601020, emissiveIntensity: 0.6,
+        });
+        const tongueGeo = new THREE.CylinderGeometry(0.06, 0.03, 0.10, 8, 2);
+        const tongue    = new THREE.Mesh(tongueGeo, tongueMat);
+        tongue.rotation.z = Math.PI / 2;
+        mouthGrp.add(tongue);
+      }
+
+      mouthGrp.add(outerRing);
+      mouthGrp.add(innerRing);
+
+      // High-quality fleshy lip ring — bioluminescent + fleshy transmission
+      const lipMat = useFarMat
+        ? new THREE.MeshStandardMaterial({
+            color: 0x1a1020, roughness: 0.3, metalness: 0,
+            emissive: 0x602040, emissiveIntensity: 0.6,
+          })
+        : new THREE.MeshPhysicalMaterial({
+            color: 0x1a1020, roughness: 0.35, metalness: 0,
+            clearcoat: 0.8, clearcoatRoughness: 0.1,
+            emissive: 0x802050, emissiveIntensity: 1.2,
+            transmission: 0.12,    // SSS-like fleshy translucency
+          });
+      const lipGeo = isNear
+        ? new THREE.TorusGeometry(0.24, 0.04, 48, 32)
+        : new THREE.TorusGeometry(0.24, 0.04, 16, 32);
+      const lip = new THREE.Mesh(lipGeo, lipMat);
+      lip.rotation.y = Math.PI / 2;
+      mouthGrp.add(lip);
+
+      // Sensor eyes × 4 — improved 10×10 sphere geometry
+      for (let ei = 0; ei < 4; ei++) {
+        const eyeAng = (ei / 4) * Math.PI * 2;
+        const eyeGeo = new THREE.SphereGeometry(0.022, 10, 10);
+        const eyeMat = new THREE.MeshPhysicalMaterial({
+          color: 0xff4400, emissive: 0xff2200, emissiveIntensity: 3.0, roughness: 0,
+        });
+        const eye = new THREE.Mesh(eyeGeo, eyeMat);
+        eye.position.set(0.10, Math.cos(eyeAng) * 0.28, Math.sin(eyeAng) * 0.28);
+        mouthGrp.add(eye);
+      }
+
+      g.add(mouthGrp);
+
+      // Store animated refs for near tier only
+      if (isNear) {
+        this._outerRing = outerRing;
+        this._innerRing = innerRing;
+        this._lipMesh   = lip;
+      }
+    } else {
+      // Far tier: minimal emissive billboard quad (~2 tris)
+      const simpleMouth = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.12, 0.12),
+        new THREE.MeshStandardMaterial({
+          color: 0x1a1020, emissive: 0x602040, emissiveIntensity: 0.5,
+          side: THREE.DoubleSide,
+        })
+      );
+      simpleMouth.position.set(0.34, 0, 0);
+      simpleMouth.rotation.y = Math.PI / 2;
+      g.add(simpleMouth);
     }
-    this.mouthRing.position.set(0.3, 0, 0);
-    this.group.add(this.mouthRing);
 
-    // Fleshy lip ring
-    const lipGeo = new THREE.TorusGeometry(0.24, 0.04, 8, 16);
-    const lip = new THREE.Mesh(lipGeo, fleshMat);
-    lip.position.set(0.3, 0, 0);
-    lip.rotation.y = Math.PI / 2;
-    this.group.add(lip);
+    // ── tail fin ───────────────────────────────────────────────────────────
+    const tailProps = { color: 0x0c0a08, roughness: 0.15, metalness: 0.8, emissive: 0x502040, emissiveIntensity: 0.4, side: THREE.DoubleSide };
+    const tailMat   = useFarMat
+      ? new THREE.MeshStandardMaterial(tailProps)
+      : new THREE.MeshPhysicalMaterial({ ...tailProps, clearcoat: 0.6 });
+    const tailGeo = useFarMat
+      ? new THREE.PlaneGeometry(0.12, 0.35, 1, 1)
+      : new THREE.PlaneGeometry(0.12, 0.35, 2, 4);
+    const tail = new THREE.Mesh(tailGeo, tailMat);
+    tail.position.set(-BODY_LENGTH - 0.06, 0, 0);
+    tail.rotation.y = Math.PI / 2;
+    g.add(tail);
 
-    // Tiny sensor eyes ringing the mouth
-    for (let i = 0; i < 4; i++) {
-      const angle = (i / 4) * Math.PI * 2;
-      const eyeGeo = new THREE.SphereGeometry(0.02, 6, 6);
-      const eye = new THREE.Mesh(eyeGeo, new THREE.MeshPhysicalMaterial({
-        color: 0xff4400, emissive: 0xff2200, emissiveIntensity: 2, roughness: 0,
-      }));
-      eye.position.set(0.32, Math.cos(angle) * 0.28, Math.sin(angle) * 0.28);
-      this.group.add(eye);
-    }
-
-    // Tail fin - mechanical blade
-    const tailGeo = new THREE.BoxGeometry(0.02, 0.3, 0.15);
-    const tail = new THREE.Mesh(tailGeo, metalMat);
-    tail.position.set(-segments * 0.28, 0, 0);
-    this.group.add(tail);
-
-    // Predatory red glow from mouth ring
-    this.mouthLight = new THREE.PointLight(0xff2200, 0.8, 12);
-    this.mouthLight.position.set(0.3, 0, 0);
-    this.group.add(this.mouthLight);
-
-    const s = 2 + Math.random() * 2;
-    this.group.scale.setScalar(s);
+    return g;
   }
 
+  // ── update ──────────────────────────────────────────────────────────────────
   update(dt, playerPos) {
-    this.time += dt;
-    this.turnTimer += dt;
+    this.time        += dt;
+    this._wavePhase  += dt * this._waveFreq;
+    this._mouthPhase += dt * 1.2;
+    this.turnTimer   += dt;
 
+    // Direction changes
     if (this.turnTimer > this.turnInterval) {
-      this.turnTimer = 0;
+      this.turnTimer    = 0;
       this.turnInterval = 4 + Math.random() * 5;
       if (Math.random() < 0.5) {
         this.direction.subVectors(playerPos, this.group.position).normalize();
@@ -121,27 +429,88 @@ export class Lamprey {
       }
     }
 
-    this.group.position.add(this.direction.clone().multiplyScalar(this.speed * dt));
+    // Movement — zero allocation via pre-allocated _tmpVec3
+    _tmpVec3.copy(this.direction).multiplyScalar(this.speed * dt);
+    this.group.position.add(_tmpVec3);
 
-    // Face direction
+    // Face direction of travel
     const angle = Math.atan2(this.direction.x, this.direction.z);
     this.group.rotation.y = THREE.MathUtils.lerp(this.group.rotation.y, angle + Math.PI / 2, dt * 4);
 
-    // Sinusoidal body motion
-    this.group.rotation.z = Math.sin(this.time * 4) * 0.1;
+    // Body corkscrew roll (occasional, more aggressive near player)
+    const scaledDist   = this.group.position.distanceTo(playerPos) / Math.max(this.group.scale.x, MIN_SCALE_DIVISOR);
+    const pursuitFactor = scaledDist < PURSUIT_ACTIVE_DIST ? (1.0 - scaledDist / PURSUIT_ACTIVE_DIST) : 0;
+    this.group.rotation.x = Math.sin(this.time * (0.5 + pursuitFactor)) * (0.06 + pursuitFactor * 0.08);
 
-    // Rotating tooth ring
-    this.mouthRing.rotation.x += dt * 3;
+    // ── Weight & inertia: tail trails head with fluid-drag ──
+    const dx = this.group.position.x - this._prevPos.x;
+    const dy = this.group.position.y - this._prevPos.y;
+    const dz = this.group.position.z - this._prevPos.z;
+    this._prevPos.copy(this.group.position);
 
-    if (this.group.position.distanceTo(playerPos) > 200) {
+    const trailStrength = 0.15;
+    const trailDamping = 3.0;
+    this._trailRotX = THREE.MathUtils.lerp(this._trailRotX, -dy * trailStrength, dt * trailDamping);
+    this._trailRotZ = THREE.MathUtils.lerp(this._trailRotZ, -dx * trailStrength, dt * trailDamping);
+    this.group.rotation.x += this._trailRotX;
+    this.group.rotation.z += this._trailRotZ;
+
+    // ── GPU body wave: update shader uniforms (breathing amplitude variation) ──
+    this._frameCount++;
+    const breathAmp = 0.18 + Math.sin(this.time * 0.3) * 0.03;
+    for (const su of this._bodyShaderUniforms) {
+      su.uWavePhase.value = this._wavePhase;
+      su.uAmplitude.value = breathAmp;
+    }
+    // Far tier: throttled update (every 4th frame)
+    if (this._frameCount % 4 === 0) {
+      for (const su of this._farShaderUniforms) {
+        su.uWavePhase.value = this._wavePhase;
+        su.uAmplitude.value = breathAmp;
+      }
+    }
+
+    // ── near-tier mouth animations ──
+    if (this._outerRing) {
+      this._outerRing.rotation.x += dt * 1.8;           // forward
+    }
+    if (this._innerRing) {
+      this._innerRing.rotation.x -= dt * 2.6;           // counter-rotation
+    }
+
+    // Lip dilation pulsation — opens wider when player is close
+    if (this._lipMesh) {
+      const reactivity = pursuitFactor > 0 ? 1.0 + pursuitFactor * 1.5 : 1.0;
+      const dil = 1.0 + Math.sin(this._mouthPhase) * 0.07 * reactivity;
+      this._lipMesh.scale.set(dil, dil, 1);
+    }
+
+    // Gill flap pulse (secondary breathing motion)
+    for (let gi = 0; gi < this._gillMeshes.length; gi++) {
+      this._gillMeshes[gi].scale.y = 1.0 + Math.sin(this._mouthPhase * GILL_BREATH_FREQ + gi * GILL_PHASE_OFFSET) * GILL_PULSE_AMPLITUDE;
+    }
+
+    // Respawn when too far from player
+    if (this.group.position.distanceTo(playerPos) > LAMPREY_RESPAWN_DIST) {
       const a = Math.random() * Math.PI * 2;
-      this.group.position.set(playerPos.x + Math.cos(a) * 60, playerPos.y - Math.random() * 10, playerPos.z + Math.sin(a) * 60);
+      this.group.position.set(
+        playerPos.x + Math.cos(a) * 60,
+        playerPos.y - Math.random() * 10,
+        playerPos.z + Math.sin(a) * 60
+      );
     }
   }
 
   getPosition() { return this.group.position; }
+
   dispose() {
     this.scene.remove(this.group);
-    this.group.traverse(c => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); });
+    this.group.traverse(c => {
+      if (c.geometry) c.geometry.dispose();
+      if (c.material) {
+        if (Array.isArray(c.material)) c.material.forEach(m => m.dispose());
+        else c.material.dispose();
+      }
+    });
   }
 }
