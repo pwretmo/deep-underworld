@@ -1,8 +1,14 @@
-import * as THREE from 'three';
-import { LOD_NEAR_DISTANCE, LOD_MEDIUM_DISTANCE, toStandardMaterial } from './lodUtils.js';
+import * as THREE from "three";
+import {
+  LOD_NEAR_DISTANCE,
+  LOD_MEDIUM_DISTANCE,
+  toStandardMaterial,
+} from "./lodUtils.js";
 
 // -- Pre-allocated temps (zero per-frame allocations) -------------------------
 const _v3A = new THREE.Vector3();
+const _v3B = new THREE.Vector3();
+const _v3C = new THREE.Vector3();
 
 const TWO_PI = Math.PI * 2;
 const RESPAWN_DISTANCE = 200;
@@ -46,7 +52,7 @@ const AMALGAM_LOD = {
     clawSegs: 8,
   },
   far: {
-    coreSegs: [6, 5],   // ~48 triangles: lightweight silhouette beyond fog plane
+    coreSegs: [6, 5], // ~48 triangles: lightweight silhouette beyond fog plane
     skulls: 0,
     limbs: 2,
     claws: 0,
@@ -72,18 +78,23 @@ function _createFleshNormalTexture() {
   const size = 64;
   const data = new Uint8Array(size * size * 4);
   const sampleHeight = (u, v) => {
-    const fiber = Math.sin(u * 58 + v * 9) * 0.35 + Math.sin(u * 26 + v * 42) * 0.18;
+    const fiber =
+      Math.sin(u * 58 + v * 9) * 0.35 + Math.sin(u * 26 + v * 42) * 0.18;
     const vein = Math.sin(v * 48 + u * 4) * 0.22;
     return fiber + vein;
   };
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const idx = (y * size + x) * 4;
-      const u = x / size, v = y / size;
-      const du = 1 / size, dv = 1 / size;
+      const u = x / size,
+        v = y / size;
+      const du = 1 / size,
+        dv = 1 / size;
       const dx = sampleHeight(u + du, v) - sampleHeight(u - du, v);
       const dy = sampleHeight(u, v + dv) - sampleHeight(u, v - dv);
-      const nx = -dx * 2.2, ny = -dy * 2.2, nz = 1.0;
+      const nx = -dx * 2.2,
+        ny = -dy * 2.2,
+        nz = 1.0;
       const nLen = 1 / Math.sqrt(nx * nx + ny * ny + nz * nz);
       data[idx] = Math.floor((nx * nLen * 0.5 + 0.5) * 255);
       data[idx + 1] = Math.floor((ny * nLen * 0.5 + 0.5) * 255);
@@ -102,18 +113,23 @@ function _createBoneNormalTexture() {
   const size = 64;
   const data = new Uint8Array(size * size * 4);
   const sampleHeight = (u, v) => {
-    const pore = Math.sin(u * 38 + v * 20) * 0.3 + Math.sin(u * 15 + v * 34) * 0.2;
+    const pore =
+      Math.sin(u * 38 + v * 20) * 0.3 + Math.sin(u * 15 + v * 34) * 0.2;
     const ridge = Math.sin(v * 28 + u * 6) * 0.25;
     return pore + ridge;
   };
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const idx = (y * size + x) * 4;
-      const u = x / size, v = y / size;
-      const du = 1 / size, dv = 1 / size;
+      const u = x / size,
+        v = y / size;
+      const du = 1 / size,
+        dv = 1 / size;
       const dx = sampleHeight(u + du, v) - sampleHeight(u - du, v);
       const dy = sampleHeight(u, v + dv) - sampleHeight(u, v - dv);
-      const nx = -dx * 2.0, ny = -dy * 2.0, nz = 1.0;
+      const nx = -dx * 2.0,
+        ny = -dy * 2.0,
+        nz = 1.0;
       const nLen = 1 / Math.sqrt(nx * nx + ny * ny + nz * nz);
       data[idx] = Math.floor((nx * nLen * 0.5 + 0.5) * 255);
       data[idx + 1] = Math.floor((ny * nLen * 0.5 + 0.5) * 255);
@@ -142,36 +158,36 @@ function _applyCoreShader(material, uniformsOut) {
     shader.uniforms.uProximity = shaderUniforms.uProximity;
 
     shader.vertexShader = shader.vertexShader.replace(
-      '#include <common>',
+      "#include <common>",
       `#include <common>
 uniform float uTime;
 uniform float uPulse;
-uniform float uProximity;`
+uniform float uProximity;`,
     );
     shader.vertexShader = shader.vertexShader.replace(
-      '#include <begin_vertex>',
+      "#include <begin_vertex>",
       `#include <begin_vertex>
 float dist = length(position);
 float wave = sin(dist * 6.0 - uTime * 3.0) * 0.08 * uPulse;
 float breathe = sin(uTime * 1.2 + dist * 2.0) * 0.03;
 float react = sin(uTime * 8.0 + position.y * 5.0) * 0.04 * uProximity;
-transformed += normal * (wave + breathe + react);`
+transformed += normal * (wave + breathe + react);`,
     );
 
     shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <common>',
+      "#include <common>",
       `#include <common>
 uniform float uTime;
 uniform float uPulse;
-uniform float uProximity;`
+uniform float uProximity;`,
     );
     shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <emissivemap_fragment>',
+      "#include <emissivemap_fragment>",
       `#include <emissivemap_fragment>
 float rim = pow(1.0 - abs(dot(normalize(vViewPosition), normal)), 2.5);
 totalEmissiveRadiance += vec3(0.18, 0.06, 0.12) * rim * (0.6 + uProximity * 0.5);
 float organPulse = sin(uTime * 2.5 + gl_FragCoord.x * 0.02 + gl_FragCoord.y * 0.015) * 0.5 + 0.5;
-totalEmissiveRadiance += vec3(0.12, 0.02, 0.06) * organPulse * uPulse;`
+totalEmissiveRadiance += vec3(0.12, 0.02, 0.06) * organPulse * uPulse;`,
     );
 
     material.userData.shader = shader;
@@ -193,18 +209,18 @@ function _applyLimbShader(material, uniformsOut, limbIdx) {
     shader.uniforms.uTwitch = shaderUniforms.uTwitch;
 
     shader.vertexShader = shader.vertexShader.replace(
-      '#include <common>',
+      "#include <common>",
       `#include <common>
 uniform float uTime;
-uniform float uTwitch;`
+uniform float uTwitch;`,
     );
     shader.vertexShader = shader.vertexShader.replace(
-      '#include <begin_vertex>',
+      "#include <begin_vertex>",
       `#include <begin_vertex>
 float limbAxis = position.y;
 float muscleWave = sin(limbAxis * 8.0 + uTime * 4.0) * 0.015 * uTwitch;
 transformed.x += muscleWave;
-transformed.z += sin(limbAxis * 6.0 + uTime * 3.0 + 1.5) * 0.01 * uTwitch;`
+transformed.z += sin(limbAxis * 6.0 + uTime * 3.0 + 1.5) * 0.01 * uTwitch;`,
     );
 
     material.userData.shader = shader;
@@ -221,7 +237,11 @@ export class Amalgam {
     this.group = new THREE.Group();
     this.time = Math.random() * 100;
     this.speed = 0.3 + Math.random() * 0.2;
-    this.direction = new THREE.Vector3(Math.random() - 0.5, -0.05, Math.random() - 0.5).normalize();
+    this.direction = new THREE.Vector3(
+      Math.random() - 0.5,
+      -0.05,
+      Math.random() - 0.5,
+    ).normalize();
 
     // Pre-allocated animation state
     this._breathPhase = Math.random() * TWO_PI;
@@ -235,6 +255,7 @@ export class Amalgam {
     this._proximityFactor = 0;
     this._ribBreathPhase = 0;
     this._shaderUniforms = {};
+    this._frameCount = 0;
 
     this._buildModel();
     this.group.position.copy(position);
@@ -247,7 +268,12 @@ export class Amalgam {
     for (const [tierName, profile] of Object.entries(AMALGAM_LOD)) {
       const tier = this._buildTier(profile, tierName);
       this.tiers[tierName] = tier;
-      const dist = tierName === 'near' ? 0 : tierName === 'medium' ? AMALGAM_MEDIUM_DIST : AMALGAM_FAR_DIST;
+      const dist =
+        tierName === "near"
+          ? 0
+          : tierName === "medium"
+            ? AMALGAM_MEDIUM_DIST
+            : AMALGAM_FAR_DIST;
       lod.addLevel(tier.group, dist);
     }
     this.lod = lod;
@@ -262,18 +288,18 @@ export class Amalgam {
     const levels = this.lod.levels;
     for (let i = levels.length - 1; i >= 0; i--) {
       if (levels[i].object.visible) {
-        if (levels[i].distance === 0) return 'near';
-        if (levels[i].distance === AMALGAM_MEDIUM_DIST) return 'medium';
-        return 'far';
+        if (levels[i].distance === 0) return "near";
+        if (levels[i].distance === AMALGAM_MEDIUM_DIST) return "medium";
+        return "far";
       }
     }
-    return 'far';
+    return "far";
   }
 
   _buildTier(profile, tierName) {
     const tierGroup = new THREE.Group();
-    const isNear = tierName === 'near';
-    const isFar = tierName === 'far';
+    const isNear = tierName === "near";
+    const isFar = tierName === "far";
 
     const fleshNormal = isNear ? _createFleshNormalTexture() : null;
     const boneNormal = isNear ? _createBoneNormalTexture() : null;
@@ -335,18 +361,34 @@ export class Amalgam {
     });
 
     if (isFar) {
-      const origFlesh = fleshMat; fleshMat = toStandardMaterial(fleshMat); origFlesh.dispose();
-      const origMetal = metalMat; metalMat = toStandardMaterial(metalMat); origMetal.dispose();
-      const origBone = boneMat; boneMat = toStandardMaterial(boneMat); origBone.dispose();
-      const origOrgan = organMat; organMat = toStandardMaterial(organMat); origOrgan.dispose();
-      const origEye = eyeMat; eyeMat = toStandardMaterial(eyeMat); origEye.dispose();
+      const origFlesh = fleshMat;
+      fleshMat = toStandardMaterial(fleshMat);
+      origFlesh.dispose();
+      const origMetal = metalMat;
+      metalMat = toStandardMaterial(metalMat);
+      origMetal.dispose();
+      const origBone = boneMat;
+      boneMat = toStandardMaterial(boneMat);
+      origBone.dispose();
+      const origOrgan = organMat;
+      organMat = toStandardMaterial(organMat);
+      origOrgan.dispose();
+      const origEye = eyeMat;
+      eyeMat = toStandardMaterial(eyeMat);
+      origEye.dispose();
     }
 
     // -- Core mass (48x32 min at near) ----------------------------------------
-    const coreGeo = new THREE.SphereGeometry(1.0, profile.coreSegs[0], profile.coreSegs[1]);
+    const coreGeo = new THREE.SphereGeometry(
+      1.0,
+      profile.coreSegs[0],
+      profile.coreSegs[1],
+    );
     const cp = coreGeo.attributes.position;
     for (let i = 0; i < cp.count; i++) {
-      const x = cp.getX(i), y = cp.getY(i), z = cp.getZ(i);
+      const x = cp.getX(i),
+        y = cp.getY(i),
+        z = cp.getZ(i);
       // Multi-octave noise displacement
       const n1 = Math.sin(x * 3.2 + y * 4.1) * 0.2;
       const n2 = Math.cos(z * 5.3 + x * 2.7) * 0.15;
@@ -376,15 +418,25 @@ export class Amalgam {
     for (let si = 0; si < profile.skulls; si++) {
       const skullGroup = new THREE.Group();
       const r = 0.28 + Math.random() * 0.08;
-      const skullGeo = new THREE.SphereGeometry(r, isNear ? 24 : isFar ? 6 : 12, isNear ? 16 : isFar ? 4 : 8);
+      const skullGeo = new THREE.SphereGeometry(
+        r,
+        isNear ? 24 : isFar ? 6 : 12,
+        isNear ? 16 : isFar ? 4 : 8,
+      );
 
       // Cranial detail: flatten bottom, elongate, eye sockets
       const spos = skullGeo.attributes.position;
       for (let vi = 0; vi < spos.count; vi++) {
-        let sx = spos.getX(vi), sy = spos.getY(vi), sz = spos.getZ(vi);
+        let sx = spos.getX(vi),
+          sy = spos.getY(vi),
+          sz = spos.getZ(vi);
         if (isNear) {
-          const eyeL = Math.exp(-((sx - 0.08) ** 2 + (sy - 0.06) ** 2 + (sz - r * 0.8) ** 2) * 60);
-          const eyeR = Math.exp(-((sx + 0.08) ** 2 + (sy - 0.06) ** 2 + (sz - r * 0.8) ** 2) * 60);
+          const eyeL = Math.exp(
+            -((sx - 0.08) ** 2 + (sy - 0.06) ** 2 + (sz - r * 0.8) ** 2) * 60,
+          );
+          const eyeR = Math.exp(
+            -((sx + 0.08) ** 2 + (sy - 0.06) ** 2 + (sz - r * 0.8) ** 2) * 60,
+          );
           const indent = (eyeL + eyeR) * 0.04;
           sz -= indent;
           const browMask = Math.exp(-((sy - 0.1) ** 2) * 40) * Math.max(0, sz);
@@ -406,7 +458,10 @@ export class Amalgam {
           r * 0.75,
           isNear ? 16 : 8,
           isNear ? 8 : 4,
-          0, TWO_PI, Math.PI * 0.5, Math.PI * 0.5
+          0,
+          TWO_PI,
+          Math.PI * 0.5,
+          Math.PI * 0.5,
         );
         jawGeo.scale(1.1, 0.6, 0.8);
         jaw = new THREE.Mesh(jawGeo, boneMat);
@@ -420,7 +475,11 @@ export class Amalgam {
       // Eye sockets with glow
       if (!isFar) {
         for (const side of [-1, 1]) {
-          const eyeGeo = new THREE.SphereGeometry(0.04, isNear ? 10 : 6, isNear ? 10 : 6);
+          const eyeGeo = new THREE.SphereGeometry(
+            0.04,
+            isNear ? 10 : 6,
+            isNear ? 10 : 6,
+          );
           const eye = new THREE.Mesh(eyeGeo, eyeMat);
           eye.position.set(side * 0.08, 0.06, r * 0.85);
           skullGroup.add(eye);
@@ -442,13 +501,21 @@ export class Amalgam {
     for (let li = 0; li < profile.limbs; li++) {
       const limbGroup = new THREE.Group();
       const len = 0.6 + Math.random() * 1.8;
-      const limbGeo = new THREE.CylinderGeometry(0.08, 0.04, len, profile.limbRadial, isNear ? 8 : isFar ? 1 : 4);
+      const limbGeo = new THREE.CylinderGeometry(
+        0.08,
+        0.04,
+        len,
+        profile.limbRadial,
+        isNear ? 8 : isFar ? 1 : 4,
+      );
 
       // Muscle fiber surface detail
       if (isNear) {
         const lp = limbGeo.attributes.position;
         for (let vi = 0; vi < lp.count; vi++) {
-          const lx = lp.getX(vi), ly = lp.getY(vi), lz = lp.getZ(vi);
+          const lx = lp.getX(vi),
+            ly = lp.getY(vi),
+            lz = lp.getZ(vi);
           const fiber = Math.sin(ly * 16 + lx * 24) * 0.003;
           const twist = Math.sin(ly * 8) * 0.005;
           lp.setX(vi, lx + fiber + twist);
@@ -457,7 +524,7 @@ export class Amalgam {
         limbGeo.computeVertexNormals();
       }
 
-      const limbMat = (li % 2 === 0) ? metalMat.clone() : fleshMat.clone();
+      const limbMat = li % 2 === 0 ? metalMat.clone() : fleshMat.clone();
       if (isNear) {
         _applyLimbShader(limbMat, this._shaderUniforms, li);
         if (li % 2 !== 0 && fleshNormal) {
@@ -472,7 +539,7 @@ export class Amalgam {
       if (Math.random() > 0.3) {
         const knob = new THREE.Mesh(
           new THREE.SphereGeometry(0.07, isNear ? 10 : 6, isNear ? 10 : 6),
-          boneMat
+          boneMat,
         );
         knob.position.y = -len * 0.5;
         limbGroup.add(knob);
@@ -491,7 +558,12 @@ export class Amalgam {
     // -- Claws with bone detail -----------------------------------------------
     const claws = [];
     for (let ci = 0; ci < profile.claws; ci++) {
-      const clawGeo = new THREE.ConeGeometry(0.035, 0.4 + Math.random() * 0.2, profile.clawSegs, isNear ? 4 : 2);
+      const clawGeo = new THREE.ConeGeometry(
+        0.035,
+        0.4 + Math.random() * 0.2,
+        profile.clawSegs,
+        isNear ? 4 : 2,
+      );
       if (isNear) {
         const clp = clawGeo.attributes.position;
         for (let vi = 0; vi < clp.count; vi++) {
@@ -513,7 +585,7 @@ export class Amalgam {
         claw.position.set(
           Math.sin(theta) * Math.cos(phi) * 1.35,
           Math.sin(theta) * Math.sin(phi) * 1.35,
-          Math.cos(theta) * 1.35
+          Math.cos(theta) * 1.35,
         );
         claw.lookAt(0, 0, 0);
         tierGroup.add(claw);
@@ -546,7 +618,11 @@ export class Amalgam {
     for (let spi = 0; spi < profile.spineSegs; spi++) {
       const t = spi / Math.max(1, profile.spineSegs - 1);
       const r = 0.06 * (1 - t * 0.6);
-      const segGeo = new THREE.SphereGeometry(r, isNear ? 16 : isFar ? 4 : 8, isNear ? 12 : isFar ? 3 : 6);
+      const segGeo = new THREE.SphereGeometry(
+        r,
+        isNear ? 16 : isFar ? 4 : 8,
+        isNear ? 12 : isFar ? 3 : 6,
+      );
 
       // Vertebral process spikes at near
       if (isNear) {
@@ -566,7 +642,7 @@ export class Amalgam {
       tierGroup.add(seg);
     }
 
-    // -- Connective tissue webs -----------------------------------------------
+    // -- Connective tissue webs (TubeGeometry spanning adjacent limb pairs) ----
     const webs = [];
     if (profile.webs > 0) {
       const webMat = new THREE.MeshPhysicalMaterial({
@@ -580,21 +656,27 @@ export class Amalgam {
         emissiveIntensity: 0.4,
       });
       for (let wi = 0; wi < profile.webs; wi++) {
-        const webGeo = new THREE.PlaneGeometry(0.6 + Math.random() * 0.4, 0.4 + Math.random() * 0.3, 4, 3);
-        const wp = webGeo.attributes.position;
-        for (let vi = 0; vi < wp.count; vi++) {
-          wp.setZ(vi, (Math.random() - 0.5) * 0.05);
-        }
-        webGeo.computeVertexNormals();
+        const limbAIdx = (wi * 2) % Math.max(1, limbs.length);
+        const limbBIdx = Math.min(wi * 2 + 1, limbs.length - 1);
+        const limbA = limbs[limbAIdx];
+        const limbB = limbs[limbBIdx];
+        const pA = limbA.position;
+        const pB = limbB.position;
+        const midPt = new THREE.Vector3().addVectors(pA, pB).multiplyScalar(0.5);
+        const outLen = midPt.length() + 0.18;
+        const outward = midPt.clone().normalize().multiplyScalar(outLen);
+        const curve = new THREE.CatmullRomCurve3([
+          pA.clone(),
+          outward,
+          pB.clone(),
+        ]);
+        const webGeo = new THREE.TubeGeometry(curve, 8, 0.016, 4, false);
         const web = new THREE.Mesh(webGeo, webMat);
-        const phi = Math.random() * TWO_PI;
-        const theta = Math.random() * Math.PI;
-        web.position.set(
-          Math.sin(theta) * Math.cos(phi) * 0.9,
-          Math.sin(theta) * Math.sin(phi) * 0.9,
-          Math.cos(theta) * 0.9
-        );
-        web.lookAt(0, 0, 0);
+        web.userData.limbA = limbA;
+        web.userData.limbB = limbB;
+        web.userData.tubeSegs = 8;
+        web.userData.tubeRadius = 0.016;
+        web.userData.tubeSides = 4;
         webs.push(web);
         tierGroup.add(web);
       }
@@ -604,11 +686,18 @@ export class Amalgam {
     const organs = [];
     for (let oi = 0; oi < profile.organs; oi++) {
       const orgSize = 0.12 + Math.random() * 0.1;
-      const orgGeo = new THREE.SphereGeometry(orgSize, isNear ? 16 : 8, isNear ? 12 : 6);
+      const orgGeo = new THREE.SphereGeometry(
+        orgSize,
+        isNear ? 16 : 8,
+        isNear ? 12 : 6,
+      );
       const orgP = orgGeo.attributes.position;
       for (let vi = 0; vi < orgP.count; vi++) {
-        const ox = orgP.getX(vi), oy = orgP.getY(vi), oz = orgP.getZ(vi);
-        const bump = Math.sin(ox * 12 + oy * 10) * 0.01 + Math.cos(oz * 14) * 0.01;
+        const ox = orgP.getX(vi),
+          oy = orgP.getY(vi),
+          oz = orgP.getZ(vi);
+        const bump =
+          Math.sin(ox * 12 + oy * 10) * 0.01 + Math.cos(oz * 14) * 0.01;
         orgP.setX(vi, ox + bump);
         orgP.setY(vi, oy + bump * 0.5);
       }
@@ -620,8 +709,9 @@ export class Amalgam {
       organ.position.set(
         Math.sin(theta) * Math.cos(phi) * rad,
         Math.sin(theta) * Math.sin(phi) * rad,
-        Math.cos(theta) * rad
+        Math.cos(theta) * rad,
       );
+      organ.userData.basePos = organ.position.clone();
       organs.push(organ);
       tierGroup.add(organ);
     }
@@ -653,11 +743,13 @@ export class Amalgam {
       const y = 1 - (i / Math.max(1, count - 1)) * 2;
       const radiusAtY = Math.sqrt(1 - y * y);
       const theta = i * 2.399963; // golden angle
-      points.push(new THREE.Vector3(
-        Math.cos(theta) * radiusAtY * radius,
-        y * radius,
-        Math.sin(theta) * radiusAtY * radius
-      ));
+      points.push(
+        new THREE.Vector3(
+          Math.cos(theta) * radiusAtY * radius,
+          y * radius,
+          Math.sin(theta) * radiusAtY * radius,
+        ),
+      );
     }
     return points;
   }
@@ -677,13 +769,15 @@ export class Amalgam {
 
     // Breathing scale pulse
     this._breathPhase += dt * 1.2;
-    const breathScale = this._baseScale * (1 + Math.sin(this._breathPhase) * 0.02);
+    const breathScale =
+      this._baseScale * (1 + Math.sin(this._breathPhase) * 0.02);
     this.group.scale.setScalar(breathScale);
 
     // Player proximity factor
     const distToPlayer = this.group.position.distanceTo(playerPos);
     const targetProx = THREE.MathUtils.clamp(1 - distToPlayer / 40, 0, 1);
-    this._proximityFactor += (targetProx - this._proximityFactor) * Math.min(1, dt * 2);
+    this._proximityFactor +=
+      (targetProx - this._proximityFactor) * Math.min(1, dt * 2);
 
     // -- Spinal tail whip on threat -------------------------------------------
     if (this._proximityFactor > 0.5 && !this._spineWhipActive) {
@@ -706,23 +800,24 @@ export class Amalgam {
     const farTier = this.tiers.far;
 
     // Near-tier shader uniform updates
-    if (tier === 'near' && this._shaderUniforms.core) {
+    if (tier === "near" && this._shaderUniforms.core) {
       this._shaderUniforms.core.uTime.value = this.time;
-      this._shaderUniforms.core.uPulse.value = 0.5 + Math.sin(this.time * 1.5) * 0.5;
+      this._shaderUniforms.core.uPulse.value =
+        0.5 + Math.sin(this.time * 1.5) * 0.5;
       this._shaderUniforms.core.uProximity.value = this._proximityFactor;
     }
 
     // Limb animation — gate to visible tier only
-    if (tier === 'near') {
+    if (tier === "near") {
       this._animateLimbs(dt, nearTier, true);
-    } else if (tier === 'medium') {
+    } else if (tier === "medium") {
       this._animateLimbsBasic(dt, medTier);
     } else {
       this._animateLimbsBasic(dt, farTier);
     }
 
     // Skull jaw articulation (near only)
-    if (tier === 'near' && nearTier.skullJaws.length > 0) {
+    if (tier === "near" && nearTier.skullJaws.length > 0) {
       for (let i = 0; i < nearTier.skullJaws.length; i++) {
         if (Math.random() < dt * 0.3) {
           this._jawTargets[i] = Math.random() * 0.35;
@@ -730,13 +825,14 @@ export class Amalgam {
         if (Math.random() < dt * 0.15) {
           this._jawTargets[i] = 0;
         }
-        this._jawAngles[i] += (this._jawTargets[i] - this._jawAngles[i]) * Math.min(1, dt * 3);
+        this._jawAngles[i] +=
+          (this._jawTargets[i] - this._jawAngles[i]) * Math.min(1, dt * 3);
         nearTier.skullJaws[i].rotation.x = this._jawAngles[i];
       }
     }
 
     // Eye independent tracking (near only)
-    if (tier === 'near' && nearTier.skullEyes.length > 0) {
+    if (tier === "near" && nearTier.skullEyes.length > 0) {
       for (let i = 0; i < nearTier.skullEyes.length; i++) {
         const eye = nearTier.skullEyes[i];
         const eyePhase = this.time * 1.5 + i * 2.1;
@@ -746,7 +842,7 @@ export class Amalgam {
     }
 
     // Claw grasping articulation (near only)
-    if (tier === 'near' && nearTier.claws.length > 0) {
+    if (tier === "near" && nearTier.claws.length > 0) {
       for (let i = 0; i < nearTier.claws.length; i++) {
         const claw = nearTier.claws[i];
         claw.userData.clawTimer += dt;
@@ -754,33 +850,83 @@ export class Amalgam {
           claw.userData.clawTimer = 0;
           claw.userData.clawNext = 2 + Math.random() * 5;
           const isOpen = claw.rotation.x > claw.userData.clawBase + 0.1;
-          claw.userData.clawTarget = isOpen ? claw.userData.clawBase : claw.userData.clawBase + 0.5;
+          claw.userData.clawTarget = isOpen
+            ? claw.userData.clawBase
+            : claw.userData.clawBase + 0.5;
         }
-        claw.rotation.x += (claw.userData.clawTarget - claw.rotation.x) * Math.min(1, dt * 4);
+        claw.rotation.x +=
+          (claw.userData.clawTarget - claw.rotation.x) * Math.min(1, dt * 4);
       }
     }
 
     // Rib cage breathing (near+medium)
-    if (tier !== 'far') {
+    if (tier !== "far") {
       this._ribBreathPhase += dt * 1.0;
-      const activeTier = tier === 'near' ? nearTier : medTier;
+      const activeTier = tier === "near" ? nearTier : medTier;
       for (let i = 0; i < activeTier.ribs.length; i++) {
         const rib = activeTier.ribs[i];
         const ribBreath = Math.sin(this._ribBreathPhase + i * 0.4) * 0.04;
-        rib.scale.setScalar(rib.userData.baseScale + rib.userData.breathRandom + ribBreath);
+        rib.scale.setScalar(
+          rib.userData.baseScale + rib.userData.breathRandom + ribBreath,
+        );
       }
     }
 
     // Spinal tail animation
-    this._animateSpine(dt, tier === 'near' ? nearTier : tier === 'medium' ? medTier : farTier);
+    this._animateSpine(
+      dt,
+      tier === "near" ? nearTier : tier === "medium" ? medTier : farTier,
+    );
 
-    // Organ bioluminescence pulse (near only)
-    if (tier === 'near') {
+    // Organ bioluminescence pulse + radial shift with core pulsation (near only)
+    if (tier === "near") {
+      const radialPush = Math.sin(this._breathPhase) * 0.04;
       for (let i = 0; i < nearTier.organs.length; i++) {
         const organ = nearTier.organs[i];
         if (organ.material && organ.material.emissiveIntensity !== undefined) {
-          organ.material.emissiveIntensity = 1.0 + Math.sin(this.time * 2 + i * 1.7) * 0.4;
+          organ.material.emissiveIntensity =
+            1.0 + Math.sin(this.time * 2 + i * 1.7) * 0.4;
         }
+        // Secondary motion: organs shift radially outward as core expands
+        if (organ.userData.basePos) {
+          _v3A.copy(organ.userData.basePos).multiplyScalar(1.0 + radialPush);
+          organ.position.lerp(_v3A, Math.min(1, dt * 8));
+        }
+      }
+    }
+
+    // Secondary motion: connective web stretch with limb movement (near only, every 3rd frame)
+    this._frameCount++;
+    if (tier === "near" && nearTier.webs.length > 0 && this._frameCount % 3 === 0) {
+      for (let wi = 0; wi < nearTier.webs.length; wi++) {
+        const web = nearTier.webs[wi];
+        const limbA = web.userData.limbA;
+        const limbB = web.userData.limbB;
+        if (!limbA || !limbB) continue;
+        // Approximate displaced positions based on limb rotation
+        _v3B.copy(limbA.position);
+        _v3B.x += Math.sin(limbA.rotation.x) * 0.35;
+        _v3B.z += Math.sin(limbA.rotation.z) * 0.35;
+        _v3C.copy(limbB.position);
+        _v3C.x += Math.sin(limbB.rotation.x) * 0.35;
+        _v3C.z += Math.sin(limbB.rotation.z) * 0.35;
+        // Midpoint pushed outward — web bows taut as limbs extend
+        _v3A.addVectors(_v3B, _v3C).multiplyScalar(0.5);
+        const outLen = _v3A.length() + 0.18;
+        _v3A.normalize().multiplyScalar(outLen);
+        const curve = new THREE.CatmullRomCurve3([
+          _v3B.clone(),
+          _v3A.clone(),
+          _v3C.clone(),
+        ]);
+        web.geometry.dispose();
+        web.geometry = new THREE.TubeGeometry(
+          curve,
+          web.userData.tubeSegs,
+          web.userData.tubeRadius,
+          web.userData.tubeSides,
+          false,
+        );
       }
     }
 
@@ -790,10 +936,9 @@ export class Amalgam {
       this.group.position.set(
         playerPos.x + Math.cos(a) * 80,
         playerPos.y - Math.random() * 15,
-        playerPos.z + Math.sin(a) * 80
+        playerPos.z + Math.sin(a) * 80,
       );
     }
-
   }
 
   _animateLimbs(dt, tier, isNear) {
@@ -816,11 +961,16 @@ export class Amalgam {
 
       // Coordinated reaching on proximity
       if (this._proximityFactor > 0.3) {
-        limb.rotation.x += Math.sin(this.time * 3 + i * 0.8) * 0.008 * this._proximityFactor;
+        limb.rotation.x +=
+          Math.sin(this.time * 3 + i * 0.8) * 0.008 * this._proximityFactor;
       }
 
       // Near-LOD shader uniforms
-      if (isNear && this._shaderUniforms.limbs && this._shaderUniforms.limbs[i]) {
+      if (
+        isNear &&
+        this._shaderUniforms.limbs &&
+        this._shaderUniforms.limbs[i]
+      ) {
         this._shaderUniforms.limbs[i].uTime.value = this.time;
         this._shaderUniforms.limbs[i].uTwitch.value = twitchRaw;
       }
@@ -847,21 +997,27 @@ export class Amalgam {
 
       // Whip reaction
       if (this._spineWhipActive) {
-        const whipWave = Math.sin(this._spineWhipPhase - t * 3) * 0.08 * this._spineWhipDecay * (0.3 + t);
+        const whipWave =
+          Math.sin(this._spineWhipPhase - t * 3) *
+          0.08 *
+          this._spineWhipDecay *
+          (0.3 + t);
         seg.position.x += whipWave;
       }
     }
   }
 
-  getPosition() { return this.group.position; }
+  getPosition() {
+    return this.group.position;
+  }
 
   dispose() {
     this.scene.remove(this.group);
-    this.group.traverse(c => {
+    this.group.traverse((c) => {
       if (c.geometry) c.geometry.dispose();
       if (c.material) {
         if (Array.isArray(c.material)) {
-          c.material.forEach(m => m.dispose());
+          c.material.forEach((m) => m.dispose());
         } else {
           c.material.dispose();
         }
