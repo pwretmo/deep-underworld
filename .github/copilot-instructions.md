@@ -150,6 +150,16 @@ GitHub review-thread state is part of merge readiness in this repository.
 4. **Reviewer** re-reviews until approved.
 5. **Merger** merges approved PRs into `main` one at a time, verifies build, cleans up worktrees.
 
+### Issue Review Lifecycle
+
+1. **Issue Reviewer** reads the target issue, its comments, and all reachable sub-issues.
+2. Unless the user explicitly says otherwise, assume a coding agent will implement the reviewed issue after this workflow completes.
+3. If the topic is advanced or complex, the Issue Reviewer researches high-quality external sources and cites them in the issue updates.
+4. The Issue Reviewer runs the issue through three lenses in order: **software architect** -> **software engineer** -> **technical writer**.
+5. The Issue Reviewer updates issue bodies/comments, creates or reprioritizes sub-issues, and handles safe duplicate consolidation as needed.
+6. If those changes reveal new findings, the Issue Reviewer re-reads the affected issue tree and repeats the full pass.
+7. The workflow completes only when a full architect -> engineer -> technical writer pass produces no new findings and the issue is explicit enough for a coding agent to implement without inventing missing requirements, or a real blocker is reported.
+
 ### Labels
 
 - `agent-work` — PR was created by a local worker agent
@@ -172,14 +182,15 @@ GitHub cloud agents (Copilot coding agent) follow these rules:
 
 ## Agent Roles
 
-Four agent roles are defined in `.github/agents/`:
+Five agent roles are defined in `.github/agents/`:
 
-| Agent            | File                    | Purpose                                                           |
-| ---------------- | ----------------------- | ----------------------------------------------------------------- |
-| **Local Worker** | `local-worker.agent.md` | Implements changes in a worktree, pushes, creates PR              |
-| **Reviewer**     | `reviewer.agent.md`     | Expert code reviewer — reads diffs, posts reviews, manages labels |
-| **Merger**       | `merger.agent.md`       | Squash-merges approved PRs, verifies build, cleans up             |
-| **UX Tester**    | `ux-tester.agent.md`    | Plays the game in a browser, finds UX issues, dispatches workers  |
+| Agent              | File                      | Purpose                                                                                                    |
+| ------------------ | ------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| **Local Worker**   | `local-worker.agent.md`   | Implements changes in a worktree, pushes, creates PR                                                       |
+| **Reviewer**       | `reviewer.agent.md`       | Expert code reviewer — reads diffs, posts reviews, manages labels                                          |
+| **Issue Reviewer** | `issue-reviewer.agent.md` | Reviews issues and epics, researches complex topics, and rewrites issue trees for implementation readiness |
+| **Merger**         | `merger.agent.md`         | Squash-merges approved PRs, verifies build, cleans up                                                      |
+| **UX Tester**      | `ux-tester.agent.md`      | Plays the game in a browser, finds UX issues, dispatches workers                                           |
 
 Supporting skills in `.github/skills/`:
 
@@ -187,6 +198,7 @@ Supporting skills in `.github/skills/`:
 | ------------------------ | --------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | Worktree Workflow        | `worktree-workflow/`        | How to create, use, and clean up worktrees + push via git/MCP                                               |
 | Review Workflow          | `review-workflow/`          | How to read PR diffs, post reviews, and manage labels via MCP                                               |
+| Issue Review Workflow    | `issue-review-workflow/`    | How to review issues/sub-issues, research complex topics, reshape issue trees, and iterate until stable     |
 | Review Thread Resolution | `review-thread-resolution/` | How to verify addressed review feedback, resolve threads when possible, and fall back to an in-thread reply |
 | Merge Workflow           | `merge-workflow/`           | How to find approved PRs, squash-merge, verify, and clean up                                                |
 | UX Testing               | `ux-testing/`               | How to play-test the game in a browser and dispatch fixes                                                   |
@@ -210,6 +222,30 @@ When the user asks to `ship-it` an existing PR or names a specific PR number, in
 For existing `agent/` PRs, use the Local Worker re-dispatch template and current worktree. For existing `copilot/` PRs, update the existing PR branch in place rather than forcing the local worktree template onto a cloud branch.
 
 The main conversation agent acts as orchestrator. Example dispatch prompts:
+
+### Dispatch an Issue Reviewer
+
+```
+Before dispatching this agent, read .github/skills/issue-review-workflow/SKILL.md in the main thread. Do not skip this step.
+
+You are an Issue Reviewer agent for the deep-underworld repo (owner: pwretmo, repo: deep-underworld).
+Target issue: #<number>
+Focus area (optional): <area or "full issue tree">
+
+Read this skill before starting:
+- .github/skills/issue-review-workflow/SKILL.md
+
+Non-negotiables:
+1. Read the target issue, its comments, and all reachable sub-issues before making any modifications. Never write to an issue you have not read.
+2. Always assume a coding agent will implement the issue after review. Only drop this assumption if the user explicitly says "review only" or "no implementation planned."
+3. If the subject is advanced, niche, architecture-heavy, or otherwise uncertain, research high-quality external sources and cite them in the issue updates.
+4. Run the issue through these roles in order: software architect -> software engineer -> technical writer.
+5. Apply findings directly to GitHub issues: update bodies/comments, create or reprioritize sub-issues, and close only exact duplicates with a clear canonical replacement.
+6. If your own changes reveal new findings, re-read the affected issue tree and repeat the full pass until stable.
+7. Never implement code, create branches, or open PRs. If the issue requires implementation, state that in your output so the orchestrator can dispatch the coding workflow separately.
+
+Return `ISSUE REVIEW RESULT`, then call task_complete.
+```
 
 ### Dispatch a Local Worker
 
