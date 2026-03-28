@@ -50,6 +50,13 @@ const HEAVY_FRAME_DT = 1 / 20;
 const MAX_SPAWN_BUDGET_MS = 10;
 const SPAWN_EMA_ALPHA = 0.2;
 const HEAVY_SPAWN_WARN_MS = 50;
+const CREATURE_VISIBILITY_DEPTH_BUDGETS = [
+  { depth: 80, maxVisible: 6 },
+  { depth: 160, maxVisible: 5 },
+  { depth: 260, maxVisible: 4 },
+  { depth: 380, maxVisible: 3 },
+  { depth: Infinity, maxVisible: 3 },
+];
 
 export class CreatureManager {
   constructor(scene) {
@@ -64,6 +71,7 @@ export class CreatureManager {
     this._spawnCooldown = 0;
     this._spawnCostEmaMs = 0;
     this._lastSpawnCostMs = 0;
+    this._visibilityScratch = [];
   }
 
   prepareInitialQueue(playerPos) {
@@ -352,6 +360,48 @@ export class CreatureManager {
     return { loaded: this._spawnedCount, total: this._spawnTotal };
   }
 
+  _resolveVisibleCreatureBudget(depth) {
+    for (const band of CREATURE_VISIBILITY_DEPTH_BUDGETS) {
+      if (depth < band.depth) {
+        return band.maxVisible;
+      }
+    }
+    return CREATURE_VISIBILITY_DEPTH_BUDGETS[CREATURE_VISIBILITY_DEPTH_BUDGETS.length - 1].maxVisible;
+  }
+
+  _applyVisibilityBudget(playerPos, depth) {
+    const maxVisible = this._resolveVisibleCreatureBudget(depth);
+    const candidates = this._visibilityScratch;
+    candidates.length = 0;
+
+    for (const creature of this.creatures) {
+      const root = creature.instance?.group;
+      const pos = creature.instance.getPosition ? creature.instance.getPosition() : null;
+      if (!root || !pos) continue;
+
+      const dist = pos.distanceTo(playerPos);
+      if (dist > CULL_DISTANCE) {
+        root.visible = false;
+        continue;
+      }
+
+      // Bias toward already-visible creatures so the budget doesn't flicker
+      // constantly when several neighbors sit at similar distances.
+      const visibilityBias = root.visible ? 10 : 0;
+      candidates.push({
+        creature,
+        root,
+        score: dist - visibilityBias,
+      });
+    }
+
+    candidates.sort((a, b) => a.score - b.score);
+
+    for (let i = 0; i < candidates.length; i++) {
+      candidates[i].root.visible = i < maxVisible;
+    }
+  }
+
   update(dt, playerPos, depth, spawnBudgetMs = 8) {
     this.prepareInitialQueue(playerPos);
 
@@ -396,8 +446,11 @@ export class CreatureManager {
       }
     }
 
+    this._applyVisibilityBudget(playerPos, depth);
+
     // Update creatures with distance culling — skip far-away updates
     for (const creature of this.creatures) {
+      if (creature.instance?.group?.visible === false) continue;
       const pos = creature.instance.getPosition ? creature.instance.getPosition() : null;
       if (pos && pos.distanceTo(playerPos) > CULL_DISTANCE) continue;
       creature.instance.update(dt, playerPos);
