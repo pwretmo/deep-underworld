@@ -1,6 +1,7 @@
 import { Game } from './Game.js';
 
 const game = new Game();
+await game.init();
 
 // Expose game instance globally for automated testing (UX Tester / Chrome DevTools)
 window.game = game;

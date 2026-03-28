@@ -1,4 +1,4 @@
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import { Player } from "./player/Player.js";
 import { Ocean } from "./environment/Ocean.js";
 import { Terrain } from "./environment/Terrain.js";
@@ -24,7 +24,7 @@ export class Game {
     this._streamingFrameParity = 0;
 
     // Renderer
-    this.renderer = new THREE.WebGLRenderer({
+    this.renderer = new THREE.WebGPURenderer({
       antialias: true,
       powerPreference: "high-performance",
     });
@@ -57,37 +57,21 @@ export class Game {
     this.scene.add(this.camera);
 
     // Systems
-    this.player = new Player(
-      this.camera,
-      this.renderer.domElement,
-      this.renderer,
-    );
+    this.player = null;
     this.ocean = new Ocean(this.scene);
     this.terrain = new Terrain(this.scene);
     this.flora = new Flora(this.scene);
     this.creatures = new CreatureManager(this.scene);
     this.hud = new HUD();
     this.audio = new AudioManager();
-    this.underwaterEffect = new UnderwaterEffect(
-      this.renderer,
-      this.scene,
-      this.camera,
-    );
+    this.underwaterEffect = null;
     this.abyssEncounter = new AbyssEncounter();
     this.physicsWorld = null; // initialized async in _primeAndEnterGameplay
+    this.preload = null;
+    this.graphicsDiagnostics = null;
 
-    // Detect high-end GPU for potential ultra tier auto-select
-    qualityManager.detectGPU(this.renderer);
-    // If GPU detection switched to ultra, apply renderer settings now
-    if (qualityManager.tier === "ultra") {
-      this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-      this.renderer.setPixelRatio(window.devicePixelRatio);
-    }
-    this.graphicsDiagnostics = this._detectGraphicsDiagnostics();
-    // Item 9: start software/fallback renderers in a reduced post-process profile.
-    if (this.graphicsDiagnostics.hardwareAccelerated === false) {
-      this.underwaterEffect.applySoftwareRendererPolicy();
-    }
+    // GPU detection and graphics diagnostics are deferred to async init()
+    // because WebGPURenderer requires await renderer.init() before backend access.
 
     this.lightingPolicy = new LightingPolicy();
     this._pointLightBudget = {
@@ -166,8 +150,55 @@ export class Game {
       startRequested: false,
       started: false,
     };
+    this._eventsBound = false;
+    // Preload warmup and event binding are deferred to async init() because
+    // those paths touch renderer-dependent systems that require renderer.init().
+    // _initEnvironmentColors() and _animate() are deferred to async init()
+    // because PMREMGenerator and the render loop require renderer.init().
+  }
 
-    this.preload = new PreloadCoordinator({
+  /**
+   * Async initialization — must be called after construction.
+   * WebGPURenderer requires `await renderer.init()` before first use.
+   */
+  async init() {
+    await this.renderer.init();
+
+    this.player = new Player(
+      this.camera,
+      this.renderer.domElement,
+      this.renderer,
+    );
+
+    // Detect high-end GPU for potential ultra tier auto-select
+    await qualityManager.detectGPU(this.renderer);
+    // If GPU detection switched to ultra, apply renderer settings now
+    if (qualityManager.tier === "ultra") {
+      this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      this.renderer.setPixelRatio(window.devicePixelRatio);
+    }
+
+    this.underwaterEffect = new UnderwaterEffect(
+      this.renderer,
+      this.scene,
+      this.camera,
+    );
+    this.preload = this._createPreloadCoordinator();
+
+    this.graphicsDiagnostics = this._detectGraphicsDiagnostics();
+    // Item 9: start software/fallback renderers in a reduced post-process profile.
+    if (this.graphicsDiagnostics.hardwareAccelerated === false) {
+      this.underwaterEffect.applySoftwareRendererPolicy();
+    }
+
+    this._initEnvironmentColors();
+    this._setupEvents();
+    this.preload.startMenuIdleWarmup();
+    this._animate();
+  }
+
+  _createPreloadCoordinator() {
+    return new PreloadCoordinator({
       renderer: this.renderer,
       underwaterEffect: this.underwaterEffect,
       player: this.player,
@@ -176,19 +207,22 @@ export class Game {
       creatures: this.creatures,
       prepareDepthState: (depth) => {
         this.lightingPolicy.update(
-          depth, false, this._fog, this.ocean.ambientLight,
-          this.scene.background, this.renderer, this.underwaterEffect,
+          depth,
+          false,
+          this._fog,
+          this.ocean.ambientLight,
+          this.scene.background,
+          this.renderer,
+          this.underwaterEffect,
         );
       },
     });
-    this.preload.startMenuIdleWarmup();
-
-    this._initEnvironmentColors();
-    this._setupEvents();
-    this._animate();
   }
 
   _setupEvents() {
+    if (this._eventsBound) return;
+    this._eventsBound = true;
+
     window.addEventListener("resize", () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
@@ -373,8 +407,13 @@ export class Game {
     this._descentLastTeaseTime = 0;
     this.descentOverlay.classList.remove("visible", "fade-out");
     this.lightingPolicy.update(
-      0, false, this._fog, this.ocean.ambientLight,
-      this.scene.background, this.renderer, this.underwaterEffect,
+      0,
+      false,
+      this._fog,
+      this.ocean.ambientLight,
+      this.scene.background,
+      this.renderer,
+      this.underwaterEffect,
     );
     if (this.autoplay) {
       this._autoplayState = this._createAutoplayState();
@@ -437,11 +476,11 @@ export class Game {
     this.descentOverlay.classList.remove("fade-out");
     this.descentProgressBar.style.width = "0%";
     this._descentActive = true;
-    this._descentPhase = 'physics';
+    this._descentPhase = "physics";
     this._descentLastCreatureCount = 0;
     this._descentLastTeaseTime = 0;
-    this._descentItems.innerHTML = '';
-    this._descentTease.innerHTML = '';
+    this._descentItems.innerHTML = "";
+    this._descentTease.innerHTML = "";
     this._updateDescentProgress();
     this.underwaterEffect.beginStartupGuard();
 
@@ -454,7 +493,7 @@ export class Game {
     this.terrain.setPhysicsWorld(physicsWorld);
     this.player.setPhysicsWorld(physicsWorld);
 
-    this._descentPhase = 'shaders';
+    this._descentPhase = "shaders";
     this._updateDescentProgress();
 
     const primeSummary = await this.preload.primeStartBaseline({
@@ -517,7 +556,7 @@ export class Game {
         responsiveFrames++;
         if (responsiveFrames >= requiredResponsiveFrames) {
           onProgress?.({
-            phase: 'opening',
+            phase: "opening",
             openingFrames: {
               responsiveFrames,
               requiredResponsiveFrames,
@@ -533,7 +572,7 @@ export class Game {
         responsiveFrames = 0;
       }
       onProgress?.({
-        phase: 'opening',
+        phase: "opening",
         openingFrames: {
           responsiveFrames,
           requiredResponsiveFrames,
@@ -549,9 +588,9 @@ export class Game {
   _updateDescentProgress(data) {
     // Update phase from PreloadCoordinator progress data
     if (data && data.phase) {
-      if (data.phase === 'loading') this._descentPhase = 'loading';
-      else if (data.phase === 'finalizing') this._descentPhase = 'finalizing';
-      else if (data.phase === 'opening') this._descentPhase = 'opening';
+      if (data.phase === "loading") this._descentPhase = "loading";
+      else if (data.phase === "finalizing") this._descentPhase = "finalizing";
+      else if (data.phase === "opening") this._descentPhase = "opening";
     }
 
     // Composite progress spans the full startup pipeline so the bar does not
@@ -601,7 +640,7 @@ export class Game {
       finalizationStepIndex > 0
         ? Math.min(
             1,
-            ((finalizationStepIndex - 1) + finalizationStepPct) /
+            (finalizationStepIndex - 1 + finalizationStepPct) /
               finalizationStepTotal,
           )
         : 0;
@@ -649,8 +688,7 @@ export class Game {
       phase === "finalizing" && finalizationStepIndex === 4;
     let openingLabel = "Stabilizing live render...";
     if (phase === "opening" && opening) {
-      openingLabel =
-        `Stabilizing live render... ${opening.responsiveFrames}/${opening.requiredResponsiveFrames} stable frames`;
+      openingLabel = `Stabilizing live render... ${opening.responsiveFrames}/${opening.requiredResponsiveFrames} stable frames`;
       if (opening.guardActive) {
         openingLabel += ` (${Math.ceil(opening.guardRemainingMs)}ms guard)`;
       }
@@ -989,51 +1027,65 @@ export class Game {
 
   _detectGraphicsDiagnostics() {
     try {
-      const gl = this.renderer.getContext();
-      if (!gl) {
+      const backend = this.renderer.backend;
+      const isWebGL = backend && backend.isWebGLBackend;
+
+      if (isWebGL) {
+        // WebGL fallback mode — use traditional GL context
+        const gl = backend.gl;
+        if (!gl) {
+          return {
+            context: "webgl",
+            vendor: "Unknown",
+            renderer: "Unavailable",
+            hardwareAccelerated: null,
+            hardwareAcceleratedLabel: "Unknown",
+          };
+        }
+        const context =
+          typeof WebGL2RenderingContext !== "undefined" &&
+          gl instanceof WebGL2RenderingContext
+            ? "webgl2"
+            : "webgl1";
+        const ext = gl.getExtension?.("WEBGL_debug_renderer_info");
+        const vendor = ext
+          ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL)
+          : gl.getParameter(gl.VENDOR);
+        const renderer = ext
+          ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)
+          : gl.getParameter(gl.RENDERER);
+        const normalized = `${vendor ?? ""} ${renderer ?? ""}`.toLowerCase();
+        const softwareRenderer = [
+          "swiftshader",
+          "llvmpipe",
+          "software",
+          "softpipe",
+          "mesa offscreen",
+        ].some((token) => normalized.includes(token));
+        const hardwareAccelerated = !softwareRenderer;
+
         return {
-          context: "webgl",
-          vendor: "Unknown",
-          renderer: "Unavailable",
-          hardwareAccelerated: null,
-          hardwareAcceleratedLabel: "Unknown",
+          context,
+          vendor: vendor || "Unknown",
+          renderer: renderer || "Unavailable",
+          hardwareAccelerated,
+          hardwareAcceleratedLabel: hardwareAccelerated
+            ? "Hardware accelerated"
+            : "Software / fallback",
         };
       }
 
-      const context =
-        typeof WebGL2RenderingContext !== "undefined" &&
-        gl instanceof WebGL2RenderingContext
-          ? "webgl2"
-          : "webgl1";
-      const ext = gl.getExtension?.("WEBGL_debug_renderer_info");
-      const vendor = ext
-        ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL)
-        : gl.getParameter(gl.VENDOR);
-      const renderer = ext
-        ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)
-        : gl.getParameter(gl.RENDERER);
-      const normalized = `${vendor ?? ""} ${renderer ?? ""}`.toLowerCase();
-      const softwareRenderer = [
-        "swiftshader",
-        "llvmpipe",
-        "software",
-        "softpipe",
-        "mesa offscreen",
-      ].some((token) => normalized.includes(token));
-      const hardwareAccelerated = !softwareRenderer;
-
+      // WebGPU backend
       return {
-        context,
-        vendor: vendor || "Unknown",
-        renderer: renderer || "Unavailable",
-        hardwareAccelerated,
-        hardwareAcceleratedLabel: hardwareAccelerated
-          ? "Hardware accelerated"
-          : "Software / fallback",
+        context: "webgpu",
+        vendor: "WebGPU",
+        renderer: "WebGPU Backend",
+        hardwareAccelerated: true,
+        hardwareAcceleratedLabel: "Yes (WebGPU)",
       };
-    } catch {
+    } catch (_) {
       return {
-        context: "webgl",
+        context: "unknown",
         vendor: "Unknown",
         renderer: "Unavailable",
         hardwareAccelerated: null,
@@ -1081,7 +1133,7 @@ export class Game {
     for (const light of budget.managedLights) {
       if (!light.parent) continue;
       managedCount++;
-      const category = light.userData.duwCategory ?? 'uncategorized';
+      const category = light.userData.duwCategory ?? "uncategorized";
       managedCategories[category] = (managedCategories[category] ?? 0) + 1;
 
       if ((light.userData.duwTargetIntensity ?? 0) > 0.01) {
@@ -1215,75 +1267,76 @@ export class Game {
         wd.lastX = px;
         wd.lastZ = pz;
       } else {
-      const depthGain = depth - wd.lastDepth;
-      const posChange = Math.sqrt((px - wd.lastX) ** 2 + (pz - wd.lastZ) ** 2);
-      const depthProgress = depthGain >= wd.depthGainMin;
-      const lateralProgress = posChange >= wd.posGainMin;
-      if (depthProgress || lateralProgress) {
-        wd.stallTime = 0;
-      } else {
-        wd.stallTime += wd.checkInterval;
-      }
-      if (depth >= wd.lastClearDepth + wd.depthClearMargin) {
-        wd.lastClearDepth = depth;
-        wd.depthStallTime = 0;
-      } else {
-        wd.depthStallTime += wd.checkInterval;
-      }
-      wd.lastDepth = depth;
-      wd.lastX = px;
-      wd.lastZ = pz;
-
-      // Trigger recovery when stalled long enough and not already recovering
-      const stalledOnDepth = wd.depthStallTime >= wd.depthStallThreshold;
-      if (
-        (wd.stallTime >= wd.stallThreshold ||
-          stalledOnDepth) &&
-        !rec.active
-      ) {
-        const samePocket =
-          Math.abs(depth - rec.lastTriggerDepth) <= rec.samePocketDepth &&
-          Math.hypot(px - rec.lastTriggerX, pz - rec.lastTriggerZ) <=
-            rec.samePocketDistance;
-        rec.active = true;
-        rec.timer = 0;
-        rec.attempts = samePocket ? Math.min(rec.attempts + 1, 4) : 1;
-        rec.duration = THREE.MathUtils.lerp(
-          4.2,
-          6.4,
-          Math.min(1, (rec.attempts - 1) / 3),
+        const depthGain = depth - wd.lastDepth;
+        const posChange = Math.sqrt(
+          (px - wd.lastX) ** 2 + (pz - wd.lastZ) ** 2,
         );
-        // Randomise recovery direction each stall to reduce chance of re-hitting the same wall
-        rec.rightInput = Math.random() < 0.5 ? 1 : -1;
-        rec.turnDirection = rec.rightInput;
-        rec.lastTriggerDepth = depth;
-        rec.lastTriggerX = px;
-        rec.lastTriggerZ = pz;
-        wd.stallTime = 0;
-        wd.depthStallTime = 0;
-        wd.recoveryGraceTime = 0;
-        this.player.velocity.set(0, 0, 0);
-        let nudgeMode = "none";
-        if (stalledOnDepth || (samePocket && rec.attempts >= 2)) {
-          this.player.autoplayCollisionBypassTimer = Math.max(
-            this.player.autoplayCollisionBypassTimer || 0,
-            rec.duration + 1,
-          );
-          nudgeMode = this._applyAutoplayRecoveryNudge(
-            rec.turnDirection,
-            rec.attempts,
-          );
+        const depthProgress = depthGain >= wd.depthGainMin;
+        const lateralProgress = posChange >= wd.posGainMin;
+        if (depthProgress || lateralProgress) {
+          wd.stallTime = 0;
+        } else {
+          wd.stallTime += wd.checkInterval;
         }
-        wd.lastDepth = Math.max(0, -this.player.position.y);
-        wd.lastClearDepth = wd.lastDepth;
-        wd.lastX = this.player.position.x;
-        wd.lastZ = this.player.position.z;
-        console.log("[autoplay] Stall detected — entering recovery", {
-          depth,
-          attempts: rec.attempts,
-          nudgeMode,
-        });
-      }
+        if (depth >= wd.lastClearDepth + wd.depthClearMargin) {
+          wd.lastClearDepth = depth;
+          wd.depthStallTime = 0;
+        } else {
+          wd.depthStallTime += wd.checkInterval;
+        }
+        wd.lastDepth = depth;
+        wd.lastX = px;
+        wd.lastZ = pz;
+
+        // Trigger recovery when stalled long enough and not already recovering
+        const stalledOnDepth = wd.depthStallTime >= wd.depthStallThreshold;
+        if (
+          (wd.stallTime >= wd.stallThreshold || stalledOnDepth) &&
+          !rec.active
+        ) {
+          const samePocket =
+            Math.abs(depth - rec.lastTriggerDepth) <= rec.samePocketDepth &&
+            Math.hypot(px - rec.lastTriggerX, pz - rec.lastTriggerZ) <=
+              rec.samePocketDistance;
+          rec.active = true;
+          rec.timer = 0;
+          rec.attempts = samePocket ? Math.min(rec.attempts + 1, 4) : 1;
+          rec.duration = THREE.MathUtils.lerp(
+            4.2,
+            6.4,
+            Math.min(1, (rec.attempts - 1) / 3),
+          );
+          // Randomise recovery direction each stall to reduce chance of re-hitting the same wall
+          rec.rightInput = Math.random() < 0.5 ? 1 : -1;
+          rec.turnDirection = rec.rightInput;
+          rec.lastTriggerDepth = depth;
+          rec.lastTriggerX = px;
+          rec.lastTriggerZ = pz;
+          wd.stallTime = 0;
+          wd.depthStallTime = 0;
+          wd.recoveryGraceTime = 0;
+          this.player.velocity.set(0, 0, 0);
+          let nudgeMode = "none";
+          if (stalledOnDepth || (samePocket && rec.attempts >= 2)) {
+            this.player.autoplayCollisionBypassTimer = Math.max(
+              this.player.autoplayCollisionBypassTimer || 0,
+              rec.duration + 1,
+            );
+            nudgeMode = this._applyAutoplayRecoveryNudge(
+              rec.turnDirection,
+              rec.attempts,
+            );
+          }
+          wd.lastDepth = Math.max(0, -this.player.position.y);
+          wd.lastClearDepth = wd.lastDepth;
+          wd.lastX = this.player.position.x;
+          wd.lastZ = this.player.position.z;
+          console.log("[autoplay] Stall detected — entering recovery", {
+            depth,
+            attempts: rec.attempts,
+            nudgeMode,
+          });
+        }
       }
     }
 
@@ -1566,7 +1619,7 @@ export class Game {
       if (!obj.isPointLight) return;
       if (obj === this.player.subLight) return;
       const cat = obj.userData.duwCategory;
-      if (cat === 'player_practical' || cat === 'player_headlight') return;
+      if (cat === "player_practical" || cat === "player_headlight") return;
 
       if (obj.userData.duwBaseIntensity === undefined) {
         obj.userData.duwBaseIntensity = obj.intensity;
@@ -1609,10 +1662,14 @@ export class Game {
       const isActive = (light.userData.duwTargetIntensity ?? 0) > 0.01;
       const hysteresis = isActive ? 1.2 : 1.0;
       // Category priority tiebreaker: encounter_hero > creature_bio > flora_decor
-      const catPriority = light.userData.duwCategory === 'encounter_hero' ? 1.15
-        : light.userData.duwCategory === 'creature_bio' ? 1.10
-        : light.userData.duwCategory === 'flora_decor' ? 1.05
-        : 1.0;
+      const catPriority =
+        light.userData.duwCategory === "encounter_hero"
+          ? 1.15
+          : light.userData.duwCategory === "creature_bio"
+            ? 1.1
+            : light.userData.duwCategory === "flora_decor"
+              ? 1.05
+              : 1.0;
       light.userData.duwScore =
         ((baseIntensity + 0.001) / (distanceSq + 1)) * hysteresis * catPriority;
       light.userData.duwTargetIntensity = 0;
@@ -1668,6 +1725,3 @@ export class Game {
     }
   }
 }
-
-
-

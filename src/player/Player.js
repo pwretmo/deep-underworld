@@ -1,27 +1,38 @@
-import * as THREE from 'three';
-import { ExternalLightingSystem } from './ExternalLightingSystem.js';
+import * as THREE from "three";
+import { ExternalLightingSystem } from "./ExternalLightingSystem.js";
 
 /**
  * Detect if the GPU can handle volumetric shaders.
- * Falls back on OES_standard_derivatives absence or low max texture units.
+ * Stay conservative before backend init, but preserve the advanced beam path
+ * on native WebGPU once the renderer has completed initialization.
  */
 function canUseVolumetricBeam(renderer) {
   if (!renderer) return false;
-  const gl = renderer.getContext();
+  const backend = renderer.backend;
+  if (!backend) return false;
+  if (!backend.isWebGLBackend) {
+    return !!backend.device;
+  }
+  // WebGL fallback — check capabilities on the raw GL context
+  const gl = backend.gl;
   if (!gl) return false;
-  // Require at least 8 texture units and standard derivatives
   const maxTexUnits = gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS);
   if (maxTexUnits < 8) return false;
-  // WebGL2 always supports derivatives; for WebGL1, check extension
-  if (!gl.getExtension || gl instanceof WebGL2RenderingContext) return true;
-  return !!gl.getExtension('OES_standard_derivatives');
+  if (
+    typeof WebGL2RenderingContext !== "undefined" &&
+    gl instanceof WebGL2RenderingContext
+  ) {
+    return true;
+  }
+  if (!gl.getExtension) return false;
+  return !!gl.getExtension("OES_standard_derivatives");
 }
 
 export class Player {
   /**
    * @param {THREE.PerspectiveCamera} camera
    * @param {HTMLElement} domElement
-   * @param {THREE.WebGLRenderer} [renderer] - optional, used for GPU capability detection
+  * @param {object} [renderer] - optional, used for backend capability detection
    */
   constructor(camera, domElement, renderer) {
     this.camera = camera;
@@ -37,7 +48,7 @@ export class Player {
     this.autoplayCollisionBypassTimer = 0;
 
     // Mouse look
-    this.euler = new THREE.Euler(0, 0, 0, 'YXZ');
+    this.euler = new THREE.Euler(0, 0, 0, "YXZ");
     this.locked = false;
     this.mouseSensitivity = 0.002;
 
@@ -79,20 +90,38 @@ export class Player {
     this._setupControls();
   }
 
-  _setupControls() {
-    document.addEventListener('keydown', (e) => { this.keys[e.code] = true; });
-    document.addEventListener('keyup', (e) => { this.keys[e.code] = false; });
+  configureRenderer(renderer) {
+    const volumetricEnabled = canUseVolumetricBeam(renderer);
+    if (volumetricEnabled === this._volumetricEnabled) {
+      return this._volumetricEnabled;
+    }
 
-    document.addEventListener('mousemove', (e) => {
+    this._volumetricEnabled = volumetricEnabled;
+    this.externalLighting.setVolumetricEnabled(volumetricEnabled);
+    return this._volumetricEnabled;
+  }
+
+  _setupControls() {
+    document.addEventListener("keydown", (e) => {
+      this.keys[e.code] = true;
+    });
+    document.addEventListener("keyup", (e) => {
+      this.keys[e.code] = false;
+    });
+
+    document.addEventListener("mousemove", (e) => {
       if (!this.locked) return;
       this.euler.setFromQuaternion(this.camera.quaternion);
       this.euler.y -= e.movementX * this.mouseSensitivity;
       this.euler.x -= e.movementY * this.mouseSensitivity;
-      this.euler.x = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, this.euler.x));
+      this.euler.x = Math.max(
+        -Math.PI / 2 + 0.01,
+        Math.min(Math.PI / 2 - 0.01, this.euler.x),
+      );
       this.camera.quaternion.setFromEuler(this.euler);
     });
 
-    document.addEventListener('pointerlockchange', () => {
+    document.addEventListener("pointerlockchange", () => {
       this.locked = document.pointerLockElement === this.domElement;
       if (this.onLockChange) this.onLockChange(this.locked);
     });
@@ -115,9 +144,11 @@ export class Player {
   setPhysicsWorld(physicsWorld) {
     this._physicsWorld = physicsWorld;
     const { collider, body } = physicsWorld.createPlayerCollider(
-      this.position.x, this.position.y, this.position.z,
-      1,  // half-height
-      2   // radius
+      this.position.x,
+      this.position.y,
+      this.position.z,
+      1, // half-height
+      2, // radius
     );
     this._physicsCollider = collider;
     this._physicsBody = body;
@@ -162,26 +193,32 @@ export class Player {
     this._accel.set(0, 0, 0);
 
     const forwardInput = THREE.MathUtils.clamp(
-      (this.keys['KeyW'] ? 1 : 0) - (this.keys['KeyS'] ? 1 : 0) + this.autoplayInput.forward,
+      (this.keys["KeyW"] ? 1 : 0) -
+        (this.keys["KeyS"] ? 1 : 0) +
+        this.autoplayInput.forward,
       -1,
-      1
+      1,
     );
     const rightInput = THREE.MathUtils.clamp(
-      (this.keys['KeyD'] ? 1 : 0) - (this.keys['KeyA'] ? 1 : 0) + this.autoplayInput.right,
+      (this.keys["KeyD"] ? 1 : 0) -
+        (this.keys["KeyA"] ? 1 : 0) +
+        this.autoplayInput.right,
       -1,
-      1
+      1,
     );
     const verticalInput = THREE.MathUtils.clamp(
-      (this.keys['Space'] ? 1 : 0)
-        - ((this.keys['ShiftLeft'] || this.keys['ShiftRight']) ? 1 : 0)
-        + this.autoplayInput.vertical,
+      (this.keys["Space"] ? 1 : 0) -
+        (this.keys["ShiftLeft"] || this.keys["ShiftRight"] ? 1 : 0) +
+        this.autoplayInput.vertical,
       -1,
-      1
+      1,
     );
 
-    if (forwardInput !== 0) this._accel.addScaledVector(this._forward, forwardInput);
+    if (forwardInput !== 0)
+      this._accel.addScaledVector(this._forward, forwardInput);
     if (rightInput !== 0) this._accel.addScaledVector(this._right, rightInput);
-    if (verticalInput !== 0) this._accel.addScaledVector(this._up, verticalInput);
+    if (verticalInput !== 0)
+      this._accel.addScaledVector(this._up, verticalInput);
 
     if (this._accel.length() > 0) {
       this._accel.normalize().multiplyScalar(this.moveSpeed);
@@ -195,15 +232,23 @@ export class Player {
     const dy = this.velocity.y * dt;
     const dz = this.velocity.z * dt;
     if (this.autoplayCollisionBypassTimer > 0) {
-      this.autoplayCollisionBypassTimer = Math.max(0, this.autoplayCollisionBypassTimer - dt);
+      this.autoplayCollisionBypassTimer = Math.max(
+        0,
+        this.autoplayCollisionBypassTimer - dt,
+      );
     }
     const bypassCollisions = this.autoplayCollisionBypassTimer > 0;
 
     // Use physics character controller if available
-    if (this._physicsWorld && this._physicsCollider && this._physicsBody && !bypassCollisions) {
+    if (
+      this._physicsWorld &&
+      this._physicsCollider &&
+      this._physicsBody &&
+      !bypassCollisions
+    ) {
       const corrected = this._physicsWorld.computeMovement(
         this._physicsCollider,
-        { x: dx, y: dy, z: dz }
+        { x: dx, y: dy, z: dz },
       );
       this.position.x += corrected.x;
       this.position.y += corrected.y;
@@ -212,9 +257,12 @@ export class Player {
       // If movement was blocked on an axis, zero that velocity component
       // to prevent velocity buildup against walls
       const tolerance = 0.001;
-      if (Math.abs(dx) > tolerance && Math.abs(corrected.x) < tolerance) this.velocity.x = 0;
-      if (Math.abs(dy) > tolerance && Math.abs(corrected.y) < tolerance) this.velocity.y = 0;
-      if (Math.abs(dz) > tolerance && Math.abs(corrected.z) < tolerance) this.velocity.z = 0;
+      if (Math.abs(dx) > tolerance && Math.abs(corrected.x) < tolerance)
+        this.velocity.x = 0;
+      if (Math.abs(dy) > tolerance && Math.abs(corrected.y) < tolerance)
+        this.velocity.y = 0;
+      if (Math.abs(dz) > tolerance && Math.abs(corrected.z) < tolerance)
+        this.velocity.z = 0;
 
       // Sync kinematic body to new position
       this._physicsBody.setNextKinematicTranslation({
@@ -239,7 +287,8 @@ export class Player {
     const speed = this.velocity.length();
     if (speed > 0.5) {
       this.bobTime += dt * speed * 0.5;
-      const bob = Math.sin(this.bobTime) * this.bobAmount * Math.min(speed / 5, 1);
+      const bob =
+        Math.sin(this.bobTime) * this.bobAmount * Math.min(speed / 5, 1);
       this.camera.position.y += bob * dt;
     }
 
