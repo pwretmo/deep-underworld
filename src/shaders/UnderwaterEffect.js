@@ -5,6 +5,7 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { qualityManager } from '../QualityManager.js';
+import { DEPTH_THRESHOLDS } from '../lighting/LightingPolicy.js';
 
 function deepFreeze(obj) {
   Object.freeze(obj);
@@ -15,11 +16,7 @@ function deepFreeze(obj) {
 }
 
 const RENDER_PIPELINE_TUNING = deepFreeze({
-  depthThresholds: {
-    mid: 130,
-    deep: 340,
-    abyss: 720,
-  },
+  depthThresholds: DEPTH_THRESHOLDS,
   extinction: {
     r: 0.38,
     g: 0.065,
@@ -850,7 +847,7 @@ export class UnderwaterEffect {
 
   /**
    * Item 2: Cap the maximum composer scale for the current depth band.
-   * Called each frame from Game._updateRenderPipelineForDepth.
+   * Called each frame from LightingPolicy.applyToScene.
    * Deep/abyss zones tolerate cheaper post-FX — visual sensitivity is lower.
    */
   applyDepthScaleCap(depth) {
