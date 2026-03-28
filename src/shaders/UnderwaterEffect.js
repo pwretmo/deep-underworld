@@ -199,6 +199,21 @@ const UnderwaterShader = {
       color.rgb = color.rgb * mix(transmittance, vec3(1.0), clampedLit)
                 + scatter * (1.0 - litAmount * 0.7);
 
+      // Screen-space caustics: additive light pattern in shallow water
+      float shallowCaustic = 1.0 - smoothstep(0.0, 80.0, depth);
+      if (shallowCaustic > 0.001) {
+        vec2 cUV = uv * 12.0;
+        float ct = time * 0.35;
+        float c1 = sin(cUV.x * 3.7 + ct) * sin(cUV.y * 4.1 - ct * 0.8);
+        float c2 = sin(cUV.x * 2.3 - ct * 1.2 + 1.7) * sin(cUV.y * 3.3 + ct * 0.9);
+        float c3 = sin((cUV.x + cUV.y) * 2.8 + ct * 0.6);
+        float causticVal = max(0.0, c1 + c2 * 0.7 + c3 * 0.5);
+        causticVal = pow(causticVal * 0.33, 2.2);
+        float nearSurface = smoothstep(60.0, 5.0, depth) * 0.14;
+        float midCaustic = smoothstep(80.0, 25.0, depth) * 0.05;
+        color.rgb += color.rgb * causticVal * (nearSurface + midCaustic) * shallowCaustic;
+      }
+
       // Depth-aware contrast to strengthen separation in mid/deep zones.
       float contrast = mix(1.0, grading.x, depthBlend);
       color.rgb = (color.rgb - 0.18) * contrast + 0.18;

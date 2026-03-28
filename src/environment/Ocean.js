@@ -66,6 +66,8 @@ export class Ocean {
       side: THREE.DoubleSide,
       metalness: 0.9,
       roughness: 0.1,
+      emissive: new THREE.Color(0x336688),
+      emissiveIntensity: 0.15,
     });
     this.waterSurface = new THREE.Mesh(geo, mat);
     this.waterSurface.rotation.x = -Math.PI / 2;
@@ -134,6 +136,8 @@ export class Ocean {
         uniform float time;
         uniform float baseSize;
         varying vec3 vColor;
+        varying float vViewDist;
+        varying float vBokeh;
 
         void main() {
           vColor = color;
@@ -145,7 +149,19 @@ export class Ocean {
           pos.z += cos(time * 0.1 + idx * 0.7) * 1.5;
 
           vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
-          gl_PointSize = size * baseSize * (300.0 / -mvPosition.z);
+          float dist = -mvPosition.z;
+          vViewDist = dist;
+
+          // DOF circle-of-confusion: near/far particles enlarge slightly
+          float focusDist = 30.0;
+          float coc = abs(dist - focusDist) / focusDist;
+          float dofScale = 1.0 + coc * 0.35;
+
+          // Occasional bokeh highlights: ~5% of particles get extra size
+          vBokeh = step(0.95, fract(seed * 127.1 + phase * 311.7));
+          float bokehScale = 1.0 + vBokeh * 1.4;
+
+          gl_PointSize = size * baseSize * dofScale * bokehScale * (300.0 / max(dist, 1.0));
           gl_Position = projectionMatrix * mvPosition;
         }
       `,
@@ -153,10 +169,22 @@ export class Ocean {
         uniform sampler2D map;
         uniform float baseOpacity;
         varying vec3 vColor;
+        varying float vViewDist;
+        varying float vBokeh;
 
         void main() {
           vec4 texColor = texture2D(map, gl_PointCoord);
-          gl_FragColor = vec4(vColor, baseOpacity) * texColor;
+
+          // Forward scatter: nearer particles catch more light
+          float scatter = 1.0 + 0.35 / (1.0 + vViewDist * 0.02);
+
+          // Bokeh highlights: occasional bright out-of-focus particles
+          float bokehBright = 1.0 + vBokeh * 2.0;
+
+          // Near particles fade slightly for DOF softness
+          float distFade = smoothstep(3.0, 14.0, vViewDist);
+
+          gl_FragColor = vec4(vColor * scatter * bokehBright, baseOpacity * distFade) * texColor;
         }
       `,
       transparent: true,
@@ -170,19 +198,19 @@ export class Ocean {
 
   _createCausticLights() {
     this.causticLights = [];
-    for (let i = 0; i < 6; i++) {
-      const light = new THREE.PointLight(0x88ccff, 0.3, 50);
+    for (let i = 0; i < 10; i++) {
+      const light = new THREE.PointLight(0x88ccff, 0.5, 70);
       light.position.set(
-        (Math.random() - 0.5) * 40,
-        -5 - Math.random() * 15,
-        (Math.random() - 0.5) * 40
+        (Math.random() - 0.5) * 50,
+        -3 - Math.random() * 18,
+        (Math.random() - 0.5) * 50
       );
       this.scene.add(light);
       this.causticLights.push({
         light,
         offset: Math.random() * Math.PI * 2,
-        speed: 0.5 + Math.random() * 1,
-        baseIntensity: 0.2 + Math.random() * 0.3,
+        speed: 0.5 + Math.random() * 1.2,
+        baseIntensity: 0.35 + Math.random() * 0.4,
       });
     }
   }
@@ -193,7 +221,7 @@ export class Ocean {
     // procedural noise shader — no geometry edges visible.
     this.godRayGroup = new THREE.Group();
     this.godRays = [];
-    const rayCount = 8;
+    const rayCount = 14;
 
     const sharedMaterial = new THREE.ShaderMaterial({
       uniforms: {
@@ -277,7 +305,7 @@ export class Ocean {
           vec3 cool = vec3(0.25, 0.45, 0.65);
           vec3 col = mix(cool, warm, radial * axial);
 
-          gl_FragColor = vec4(col, alpha * 0.13);
+          gl_FragColor = vec4(col, alpha * 0.24);
         }
       `,
       transparent: true,
@@ -287,8 +315,8 @@ export class Ocean {
     });
 
     for (let i = 0; i < rayCount; i++) {
-      const width = 5 + Math.random() * 10;
-      const height = 50 + Math.random() * 45;
+      const width = 8 + Math.random() * 16;
+      const height = 65 + Math.random() * 55;
       const geo = new THREE.PlaneGeometry(width, height, 1, 1);
       const mat = sharedMaterial.clone();
       mat.uniforms.seed.value = i + Math.random();
@@ -329,6 +357,11 @@ export class Ocean {
         Math.cos(z * 0.03 + this.time * 0.3) * 0.3;
     }
     posAttr.needsUpdate = true;
+
+    // Dynamic surface emissive: shimmer strongest in shallow water
+    const emissivePulse = 0.12 + Math.sin(this.time * 0.7) * 0.06 + Math.sin(this.time * 1.3 + 0.5) * 0.03;
+    const surfaceEmissiveFade = 1.0 - THREE.MathUtils.smoothstep(depth, 30, 80);
+    this.waterSurface.material.emissiveIntensity = emissivePulse * surfaceEmissiveFade;
 
     // Update GPU particle time uniform
     this.particleSystem.material.uniforms.time.value = this.time;
@@ -377,8 +410,9 @@ export class Ocean {
 
     // Animate caustic lights (only near surface)
     for (const c of this.causticLights) {
-      c.light.intensity = depth < 80
-        ? c.baseIntensity * (1 + Math.sin(this.time * c.speed + c.offset) * 0.5) * (1 - depth / 80)
+      const causticFade = 1.0 - THREE.MathUtils.smoothstep(depth, 40, 100);
+      c.light.intensity = causticFade > 0
+        ? c.baseIntensity * (1 + Math.sin(this.time * c.speed + c.offset) * 0.6) * causticFade
         : 0;
       // Follow player horizontally
       c.light.position.x = playerPos.x + Math.sin(c.offset + this.time * 0.2) * 20;
@@ -386,8 +420,8 @@ export class Ocean {
     }
 
     // God rays: billboard each plane toward camera, update uniforms
-    if (depth < 60) {
-      const depthFade = 1.0 - depth / 60;
+    if (depth < 80) {
+      const depthFade = 1.0 - THREE.MathUtils.smoothstep(depth, 40, 80);
       this.godRayGroup.visible = true;
       this.godRayGroup.position.set(playerPos.x, 0, playerPos.z);
       // Camera is at player position; in group-local space that's (0, playerY, 0)
