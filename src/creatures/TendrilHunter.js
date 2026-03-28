@@ -1,141 +1,148 @@
-import * as THREE from 'three';
-import { toStandardMaterial } from './lodUtils.js';
-import { qualityManager } from '../QualityManager.js';
+import * as THREE from "three";
+import { qualityManager } from "../QualityManager.js";
 
 // ── Pre-allocated temps — zero per-frame allocations ─────────────────────────
-const _v3A    = new THREE.Vector3();
-const _v3B    = new THREE.Vector3();
-const _v3C    = new THREE.Vector3();
-const _v3D    = new THREE.Vector3();
-const _v3E    = new THREE.Vector3();
-const _v3F    = new THREE.Vector3();
-const _v3G    = new THREE.Vector3();
+const _v3A = new THREE.Vector3();
+const _v3B = new THREE.Vector3();
+const _v3C = new THREE.Vector3();
+const _v3D = new THREE.Vector3();
+const _v3E = new THREE.Vector3();
+const _v3F = new THREE.Vector3();
+const _v3G = new THREE.Vector3();
 const _v3Root = new THREE.Vector3();
-const _qA     = new THREE.Quaternion();
-const _upY    = new THREE.Vector3(0, 1, 0);
-const _axisX  = new THREE.Vector3(1, 0, 0);
+const _qA = new THREE.Quaternion();
+const _upY = new THREE.Vector3(0, 1, 0);
+const _axisX = new THREE.Vector3(1, 0, 0);
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const TWO_PI          = Math.PI * 2;
+const TWO_PI = Math.PI * 2;
 const RESPAWN_DISTANCE = 200;
-const TENDRIL_SEG_LEN  = 0.55;
-const FABRIK_ITERS     = 6;
-const STALK_DISTANCE   = 60;
-const STRIKE_DISTANCE  = 30;
-const STRIKE_DURATION  = 0.35;
+const TENDRIL_SEG_LEN = 0.55;
+const FABRIK_ITERS = 6;
+const STALK_DISTANCE = 60;
+const STRIKE_DISTANCE = 30;
+const STRIKE_DURATION = 0.35;
+const GRAPPLE_DURATION = 0.45;
 const RETRACT_DURATION = 0.7;
-const EYE_SCAN_STEP         = 0.8;   // radians added per scan event
-const PISTON_RATTLE         = 0.015; // position noise during strike
-const TENDRIL_SPREAD_FACTOR = 1.5;   // max spread radius of tendril tips when idle (not seeking)
-const PISTON_SIDE_OFFSET    = 0.085;
-const PISTON_TIP_OFFSET     = 0.072;
-const PISTON_SLEEVE_LEN     = 0.13;
-const PISTON_ROD_OVERLAP    = 0.035;
-const PISTON_ROD_MIN_LEN    = 0.025;
+const EYE_SCAN_STEP = 0.8; // radians added per scan event
+const PISTON_RATTLE = 0.015; // position noise during strike
+const TENDRIL_SPREAD_FACTOR = 1.5; // max spread radius of tendril tips when idle (not seeking)
+const PISTON_SIDE_OFFSET = 0.085;
+const PISTON_TIP_OFFSET = 0.072;
+const PISTON_SLEEVE_LEN = 0.13;
+const PISTON_ROD_OVERLAP = 0.035;
+const PISTON_ROD_MIN_LEN = 0.025;
 
 // Strike state IDs
-const S_IDLE    = 0;
-const S_STALK   = 1;
-const S_STRIKE  = 2;
-const S_RETRACT = 3;
+const S_IDLE = 0;
+const S_STALK = 1;
+const S_STRIKE = 2;
+const S_GRAPPLE = 3;
+const S_RETRACT = 4;
 
 // ── Creature-specific LOD thresholds ────────────────────────────────────────
 // TendrilHunter's depth zone (Dark/Abyss, 250m+) has a fog far-plane of ~55m.
 // Using the shared lodUtils constants (42/86) would keep the medium tier alive
 // up to 86m — entirely fog-occluded — wasting GPU. Use tighter distances.
-const TH_LOD_NEAR_DIST   = 30; // near  ↔ medium transition
+const TH_LOD_NEAR_DIST = 30; // near  ↔ medium transition
 const TH_LOD_MEDIUM_DIST = 55; // medium ↔ far transition (equals fog far-plane)
 const LOD_PROFILE = {
   near: {
-    headSegs:     [48, 32],
-    mandibleSegs:  12,
-    eyeSegs:      [16, 12],
-    eyeCount:      4,
-    abdomenSegs:  [24, 16],
-    tendrilCount:  6,
-    tendrilSegs:   6,
+    headSegs: [48, 32],
+    mandibleSegs: 12,
+    eyeSegs: [16, 12],
+    eyeCount: 4,
+    abdomenSegs: [24, 16],
+    tendrilCount: 6,
+    tendrilSegs: 6,
     tendrilRadial: 12,
-    pistonSegs:    8,
-    jointSegs:     8,
-    hookSegs:      8,
-    dorsalPlates:  5,
-    hasIK:           true,
+    pistonSegs: 8,
+    jointSegs: 8,
+    hookSegs: 8,
+    dorsalPlates: 5,
+    hasIK: true,
     hasCompoundEyes: true,
-    hasMicroDetail:  true,
-    hasChitinBands:  true,
-    hasRimLight:     true,
+    hasMicroDetail: true,
+    hasChitinBands: true,
+    hasRimLight: true,
   },
   medium: {
-    headSegs:     [16, 12],
-    mandibleSegs:  8,
-    eyeSegs:      [8, 6],
-    eyeCount:      4,
-    abdomenSegs:  [14, 10],
-    tendrilCount:  3,
-    tendrilSegs:   4,
+    headSegs: [16, 12],
+    mandibleSegs: 8,
+    eyeSegs: [8, 6],
+    eyeCount: 4,
+    abdomenSegs: [14, 10],
+    tendrilCount: 3,
+    tendrilSegs: 4,
     tendrilRadial: 8,
-    pistonSegs:    4,
-    jointSegs:     6,
-    hookSegs:      5,
-    dorsalPlates:  3,
-    hasIK:           false,
+    pistonSegs: 4,
+    jointSegs: 6,
+    hookSegs: 5,
+    dorsalPlates: 3,
+    hasIK: false,
     hasCompoundEyes: false,
-    hasMicroDetail:  false,
-    hasChitinBands:  false,
-    hasRimLight:     false,
+    hasMicroDetail: false,
+    hasChitinBands: false,
+    hasRimLight: false,
   },
   far: {
-    headSegs:     [8, 6],
-    mandibleSegs:  0,
-    eyeSegs:      [4, 4],
-    eyeCount:      0,
-    abdomenSegs:  [6, 4],
-    tendrilCount:  0,
-    tendrilSegs:   2,
+    headSegs: [8, 6],
+    mandibleSegs: 0,
+    eyeSegs: [4, 4],
+    eyeCount: 0,
+    abdomenSegs: [6, 4],
+    tendrilCount: 0,
+    tendrilSegs: 2,
     tendrilRadial: 4,
-    pistonSegs:    0,
-    jointSegs:     0,
-    hookSegs:      0,
-    dorsalPlates:  0,
-    hasIK:           false,
+    pistonSegs: 0,
+    jointSegs: 0,
+    hookSegs: 0,
+    dorsalPlates: 0,
+    hasIK: false,
     hasCompoundEyes: false,
-    hasMicroDetail:  false,
-    hasChitinBands:  false,
-    hasRimLight:     false,
+    hasMicroDetail: false,
+    hasChitinBands: false,
+    hasRimLight: false,
   },
 };
 
 // Maps THREE.LOD insertion order to tier name
-const TIER_NAMES = ['near', 'medium', 'far'];
+const TIER_NAMES = ["near", "medium", "far"];
 
 // ── Shared canvas-based normal textures (module-level singletons) ─────────────
 let _chitinNormalTex = null;
 let _pistonNormalTex = null;
-let _eyeFacetTex     = null;
+let _eyeFacetTex = null;
 
 function _makeChitinNormalTexture() {
   if (_chitinNormalTex) return _chitinNormalTex;
   const size = 128;
   const data = new Uint8Array(size * size * 4);
   const h = (u, v) => {
-    const plate = Math.sin(u * 18 + Math.floor(v * 10) * 1.1) * 0.4
-                + Math.sin(v * 14 + Math.floor(u * 8) * 0.9) * 0.3;
-    const seam  = Math.abs(Math.sin(u * 24)) < 0.08 ? -0.5 : 0;
-    const micro = Math.sin(u * 80 + v * 64) * 0.05 + Math.cos(u * 56 - v * 72) * 0.04;
+    const plate =
+      Math.sin(u * 18 + Math.floor(v * 10) * 1.1) * 0.4 +
+      Math.sin(v * 14 + Math.floor(u * 8) * 0.9) * 0.3;
+    const seam = Math.abs(Math.sin(u * 24)) < 0.08 ? -0.5 : 0;
+    const micro =
+      Math.sin(u * 80 + v * 64) * 0.05 + Math.cos(u * 56 - v * 72) * 0.04;
     return plate + seam + micro;
   };
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      const u = x / size, v = y / size, d = 1 / size;
+      const u = x / size,
+        v = y / size,
+        d = 1 / size;
       const dx = h(u + d, v) - h(u - d, v);
       const dy = h(u, v + d) - h(u, v - d);
-      const nx = -dx * 3, ny = -dy * 3, nz = 1;
+      const nx = -dx * 3,
+        ny = -dy * 3,
+        nz = 1;
       const len = 1 / Math.sqrt(nx * nx + ny * ny + nz * nz);
       const i = (y * size + x) * 4;
-      data[i]   = Math.round((nx * len * 0.5 + 0.5) * 255);
-      data[i+1] = Math.round((ny * len * 0.5 + 0.5) * 255);
-      data[i+2] = Math.round((nz * len * 0.5 + 0.5) * 255);
-      data[i+3] = 255;
+      data[i] = Math.round((nx * len * 0.5 + 0.5) * 255);
+      data[i + 1] = Math.round((ny * len * 0.5 + 0.5) * 255);
+      data[i + 2] = Math.round((nz * len * 0.5 + 0.5) * 255);
+      data[i + 3] = 255;
     }
   }
   _chitinNormalTex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
@@ -149,23 +156,27 @@ function _makePistonNormalTexture() {
   const size = 64;
   const data = new Uint8Array(size * size * 4);
   const h = (u, v) => {
-    const ring    = Math.sin(v * 28) * 0.35;
-    const groove  = Math.sin(u * TWO_PI * 3) * 0.1;
+    const ring = Math.sin(v * 28) * 0.35;
+    const groove = Math.sin(u * TWO_PI * 3) * 0.1;
     const scratch = Math.sin(u * 200 + v * 50) * 0.05;
     return ring + groove + scratch;
   };
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      const u = x / size, v = y / size, d = 1 / size;
+      const u = x / size,
+        v = y / size,
+        d = 1 / size;
       const dx = h(u + d, v) - h(u - d, v);
       const dy = h(u, v + d) - h(u, v - d);
-      const nx = -dx * 2, ny = -dy * 2, nz = 1;
+      const nx = -dx * 2,
+        ny = -dy * 2,
+        nz = 1;
       const len = 1 / Math.sqrt(nx * nx + ny * ny + nz * nz);
       const i = (y * size + x) * 4;
-      data[i]   = Math.round((nx * len * 0.5 + 0.5) * 255);
-      data[i+1] = Math.round((ny * len * 0.5 + 0.5) * 255);
-      data[i+2] = Math.round((nz * len * 0.5 + 0.5) * 255);
-      data[i+3] = 255;
+      data[i] = Math.round((nx * len * 0.5 + 0.5) * 255);
+      data[i + 1] = Math.round((ny * len * 0.5 + 0.5) * 255);
+      data[i + 2] = Math.round((nz * len * 0.5 + 0.5) * 255);
+      data[i + 3] = 255;
     }
   }
   _pistonNormalTex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
@@ -179,22 +190,26 @@ function _makeEyeFacetTexture() {
   const size = 64;
   const data = new Uint8Array(size * size * 4);
   const h = (u, v) => {
-    const hex  = Math.sin(u * 32 + v * 18) * 0.3;
+    const hex = Math.sin(u * 32 + v * 18) * 0.3;
     const hex2 = Math.cos(u * 28 - v * 22) * 0.25;
     return hex + hex2;
   };
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      const u = x / size, v = y / size, d = 1 / size;
+      const u = x / size,
+        v = y / size,
+        d = 1 / size;
       const dx = h(u + d, v) - h(u - d, v);
       const dy = h(u, v + d) - h(u, v - d);
-      const nx = -dx * 1.5, ny = -dy * 1.5, nz = 1;
+      const nx = -dx * 1.5,
+        ny = -dy * 1.5,
+        nz = 1;
       const len = 1 / Math.sqrt(nx * nx + ny * ny + nz * nz);
       const i = (y * size + x) * 4;
-      data[i]   = Math.round((nx * len * 0.5 + 0.5) * 255);
-      data[i+1] = Math.round((ny * len * 0.5 + 0.5) * 255);
-      data[i+2] = Math.round((nz * len * 0.5 + 0.5) * 255);
-      data[i+3] = 255;
+      data[i] = Math.round((nx * len * 0.5 + 0.5) * 255);
+      data[i + 1] = Math.round((ny * len * 0.5 + 0.5) * 255);
+      data[i + 2] = Math.round((nz * len * 0.5 + 0.5) * 255);
+      data[i + 3] = 255;
     }
   }
   _eyeFacetTex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
@@ -214,14 +229,20 @@ function _solveFABRIK(joints, target, segLen) {
   // Forward pass: drag tip to target
   joints[n].copy(target);
   for (let i = n - 1; i >= 0; i--) {
-    _v3A.subVectors(joints[i], joints[i + 1]).normalize().multiplyScalar(segLen);
+    _v3A
+      .subVectors(joints[i], joints[i + 1])
+      .normalize()
+      .multiplyScalar(segLen);
     joints[i].addVectors(joints[i + 1], _v3A);
   }
 
   // Backward pass: restore root constraint
   joints[0].copy(_v3Root);
   for (let i = 0; i < n; i++) {
-    _v3A.subVectors(joints[i + 1], joints[i]).normalize().multiplyScalar(segLen);
+    _v3A
+      .subVectors(joints[i + 1], joints[i])
+      .normalize()
+      .multiplyScalar(segLen);
     joints[i + 1].addVectors(joints[i], _v3A);
   }
 }
@@ -231,37 +252,39 @@ function _solveFABRIK(joints, target, segLen) {
 // Depth zone: Dark/Abyss (250m+). Fog far-plane ~55m.
 export class TendrilHunter {
   constructor(scene, position) {
-    this.scene     = scene;
-    this.group     = new THREE.Group();
-    this.time      = Math.random() * 100;
-    this.speed     = 1.8 + Math.random() * 1.2;
+    this.scene = scene;
+    this.group = new THREE.Group();
+    this.time = Math.random() * 100;
+    this.speed = 1.8 + Math.random() * 1.2;
     this.direction = new THREE.Vector3(
-      Math.random() - 0.5, -0.1, Math.random() - 0.5
+      Math.random() - 0.5,
+      -0.1,
+      Math.random() - 0.5,
     ).normalize();
-    this.turnTimer    = 0;
+    this.turnTimer = 0;
     this.turnInterval = 6 + Math.random() * 8;
 
     // Strike state machine
-    this._state       = S_IDLE;
-    this._stateTimer  = 0;
-    this._strikePhase = 0; // 0→1 during STRIKE, 1→0 during RETRACT
+    this._state = S_IDLE;
+    this._stateTimer = 0;
+    this._strikePhase = 0; // 0→1 during STRIKE, held at 1 during GRAPPLE, 1→0 during RETRACT
 
     // Procedural variation
     this._abdomenPhase = Math.random() * TWO_PI;
-    this._scanAngle    = Math.random() * TWO_PI;
-    this._scanTimer    = 0;
+    this._scanAngle = Math.random() * TWO_PI;
+    this._scanTimer = 0;
 
     // Animation frame skip counter
-    this._frameCount  = 0;
-    this._lodTierName = 'near';
+    this._frameCount = 0;
+    this._lodTierName = "near";
 
     // Near-tier animated refs (populated in _buildTier)
-    this._tendrilIK         = []; // [{joints,segments,jointMeshes,hook,rootOffset,phase,segCount}]
-    this._eyeGroups         = []; // [THREE.Group × 4]
-    this._leftMandible      = null;
-    this._rightMandible     = null;
-    this._abdomenMesh       = null;
-    this._nearEyeMat        = null; // shared eyeMat ref for animated emissive flicker
+    this._tendrilIK = []; // [{joints,segments,jointMeshes,hook,rootOffset,phase,segCount}]
+    this._eyeGroups = []; // [THREE.Group × 4]
+    this._leftMandible = null;
+    this._rightMandible = null;
+    this._abdomenMesh = null;
+    this._nearEyeMat = null; // shared eyeMat ref for animated emissive flicker
     this._nearMandibleGlowMat = null;
 
     // Medium-tier tendril refs for sinusoidal sway
@@ -284,15 +307,18 @@ export class TendrilHunter {
   // ── Build full model ──────────────────────────────────────────────────────
   _buildModel() {
     this.tiers = {};
-    const lod  = new THREE.LOD();
-    this.lod   = lod;
+    const lod = new THREE.LOD();
+    this.lod = lod;
 
     for (const [tierName, profile] of Object.entries(LOD_PROFILE)) {
       const tierGroup = this._buildTier(profile, tierName);
       this.tiers[tierName] = tierGroup;
-      const dist = tierName === 'near'   ? 0
-                 : tierName === 'medium' ? TH_LOD_NEAR_DIST
-                 : TH_LOD_MEDIUM_DIST;
+      const dist =
+        tierName === "near"
+          ? 0
+          : tierName === "medium"
+            ? TH_LOD_NEAR_DIST
+            : TH_LOD_MEDIUM_DIST;
       lod.addLevel(tierGroup, dist);
     }
 
@@ -302,87 +328,135 @@ export class TendrilHunter {
 
   // ── Build a single LOD tier, returns THREE.Group ──────────────────────────
   _buildTier(profile, tierName) {
-    const isFar  = tierName === 'far';
-    const isNear = tierName === 'near';
-    const g      = new THREE.Group();
-
-    // ── Materials ─────────────────────────────────────────────────────────────
-    const chitinNorm = profile.hasMicroDetail  ? _makeChitinNormalTexture() : null;
-    const pistonNorm = profile.hasMicroDetail  ? _makePistonNormalTexture() : null;
-    const eyeNorm    = profile.hasCompoundEyes ? _makeEyeFacetTexture()     : null;
-
-    let bodyMat = new THREE.MeshPhysicalMaterial({
-      color: 0x1a1028, roughness: 0.2, metalness: 0,
-      clearcoat: 1.0, clearcoatRoughness: 0.1,
-      emissive: 0x502040, emissiveIntensity: 0.6,
-      ...(isNear ? { iridescence: 0.6, iridescenceIOR: 1.5 } : {}),
-      ...(chitinNorm ? { normalMap: chitinNorm, normalScale: new THREE.Vector2(0.7, 0.7) } : {}),
-    });
-    let metalMat = new THREE.MeshPhysicalMaterial({
-      color: 0x141414, roughness: 0.1, metalness: 0.9,
-      clearcoat: 1.0,
-      emissive: 0x203858, emissiveIntensity: 0.3,
-      ...(pistonNorm ? { normalMap: pistonNorm, normalScale: new THREE.Vector2(0.8, 0.8) } : {}),
-    });
-    let organicMat = new THREE.MeshPhysicalMaterial({
-      color: 0x201020, roughness: 0.3, metalness: 0,
-      clearcoat: 0.8,
-      emissive: 0x602040, emissiveIntensity: 0.5,
-    });
-    let eyeMat = new THREE.MeshPhysicalMaterial({
-      color: 0x88ff00, emissive: 0x44ff00, emissiveIntensity: 2.0,
-      roughness: 0, clearcoat: 1.0,
-      ...(eyeNorm ? { normalMap: eyeNorm, normalScale: new THREE.Vector2(0.5, 0.5) } : {}),
-    });
-    let abdomenMat = new THREE.MeshPhysicalMaterial({
-      color: 0x18101e, roughness: 0.25, metalness: 0,
-      clearcoat: 0.9,
-      emissive: 0x601830, emissiveIntensity: 0.7,
-      ...(isNear ? { iridescence: 0.5, iridescenceIOR: 1.4 } : {}),
-      ...(chitinNorm ? { normalMap: chitinNorm, normalScale: new THREE.Vector2(0.6, 0.6) } : {}),
-    });
-    const mandibleGlowMat = profile.mandibleSegs > 0 ? new THREE.MeshPhysicalMaterial({
-      color: 0x0f180c,
-      roughness: 0.15,
-      metalness: 0.05,
-      clearcoat: 0.8,
-      emissive: 0x7cff9b,
-      emissiveIntensity: isNear ? 0.45 : 0.3,
-      transparent: true,
-      opacity: 0.95,
-    }) : null;
-
-    // Downgrade to MeshStandardMaterial on far tier for GPU savings
-    if (isFar) {
-      const o0 = bodyMat;    bodyMat    = toStandardMaterial(bodyMat);    o0.dispose();
-      const o1 = metalMat;   metalMat   = toStandardMaterial(metalMat);   o1.dispose();
-      const o2 = organicMat; organicMat = toStandardMaterial(organicMat); o2.dispose();
-      const o3 = eyeMat;     eyeMat     = toStandardMaterial(eyeMat);     o3.dispose();
-      const o4 = abdomenMat; abdomenMat = toStandardMaterial(abdomenMat); o4.dispose();
-    }
+    const isFar = tierName === "far";
+    const isNear = tierName === "near";
+    const g = new THREE.Group();
 
     // ── Far LOD: minimal geometry (<100 triangles total) ──────────────────────
     if (isFar) {
+      const bodyMat = new THREE.MeshStandardMaterial({
+        color: 0x1a1028,
+        roughness: 0.2,
+        metalness: 0,
+        emissive: 0x502040,
+        emissiveIntensity: 0.6,
+      });
+      const abdomenMat = new THREE.MeshStandardMaterial({
+        color: 0x18101e,
+        roughness: 0.25,
+        metalness: 0,
+        emissive: 0x601830,
+        emissiveIntensity: 0.7,
+      });
       const fBody = new THREE.SphereGeometry(1, 6, 4);
       fBody.scale(1.6, 0.85, 0.75);
       g.add(new THREE.Mesh(fBody, bodyMat));
-      const fHead = new THREE.Mesh(new THREE.SphereGeometry(0.42, 5, 4), bodyMat);
+      const fHead = new THREE.Mesh(
+        new THREE.SphereGeometry(0.42, 5, 4),
+        bodyMat,
+      );
       fHead.scale.set(1.25, 0.82, 0.7);
       fHead.position.set(1.25, 0, 0);
       g.add(fHead);
-      const fAbd = new THREE.Mesh(new THREE.SphereGeometry(0.5, 5, 3), abdomenMat);
+      const fAbd = new THREE.Mesh(
+        new THREE.SphereGeometry(0.5, 5, 3),
+        abdomenMat,
+      );
       fAbd.scale.set(1.3, 0.9, 0.82);
       fAbd.position.set(-1.5, 0, 0);
       g.add(fAbd);
       return g;
     }
 
+    // ── Materials ─────────────────────────────────────────────────────────────
+    const chitinNorm = profile.hasMicroDetail
+      ? _makeChitinNormalTexture()
+      : null;
+    const pistonNorm = profile.hasMicroDetail
+      ? _makePistonNormalTexture()
+      : null;
+    const eyeNorm = profile.hasCompoundEyes ? _makeEyeFacetTexture() : null;
+
+    let bodyMat = new THREE.MeshPhysicalMaterial({
+      color: 0x1a1028,
+      roughness: 0.2,
+      metalness: 0,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.1,
+      emissive: 0x502040,
+      emissiveIntensity: 0.6,
+      ...(isNear ? { iridescence: 0.6, iridescenceIOR: 1.5 } : {}),
+      ...(chitinNorm
+        ? { normalMap: chitinNorm, normalScale: new THREE.Vector2(0.7, 0.7) }
+        : {}),
+    });
+    let metalMat = new THREE.MeshPhysicalMaterial({
+      color: 0x141414,
+      roughness: 0.1,
+      metalness: 0.9,
+      clearcoat: 1.0,
+      emissive: 0x203858,
+      emissiveIntensity: 0.3,
+      ...(pistonNorm
+        ? { normalMap: pistonNorm, normalScale: new THREE.Vector2(0.8, 0.8) }
+        : {}),
+    });
+    let organicMat = new THREE.MeshPhysicalMaterial({
+      color: 0x201020,
+      roughness: 0.3,
+      metalness: 0,
+      clearcoat: 0.8,
+      emissive: 0x602040,
+      emissiveIntensity: 0.5,
+    });
+    let eyeMat = new THREE.MeshPhysicalMaterial({
+      color: 0x88ff00,
+      emissive: 0x44ff00,
+      emissiveIntensity: 2.0,
+      roughness: 0,
+      clearcoat: 1.0,
+      ...(eyeNorm
+        ? { normalMap: eyeNorm, normalScale: new THREE.Vector2(0.5, 0.5) }
+        : {}),
+    });
+    let abdomenMat = new THREE.MeshPhysicalMaterial({
+      color: 0x18101e,
+      roughness: 0.25,
+      metalness: 0,
+      clearcoat: 0.9,
+      emissive: 0x601830,
+      emissiveIntensity: 0.7,
+      ...(isNear ? { iridescence: 0.5, iridescenceIOR: 1.4 } : {}),
+      ...(chitinNorm
+        ? { normalMap: chitinNorm, normalScale: new THREE.Vector2(0.6, 0.6) }
+        : {}),
+    });
+    const mandibleGlowMat =
+      profile.mandibleSegs > 0
+        ? new THREE.MeshPhysicalMaterial({
+            color: 0x0f180c,
+            roughness: 0.15,
+            metalness: 0.05,
+            clearcoat: 0.8,
+            emissive: 0x7cff9b,
+            emissiveIntensity: isNear ? 0.45 : 0.3,
+            transparent: true,
+            opacity: 0.95,
+          })
+        : null;
+
     // ── Head — chitin-plated cephalic capsule ─────────────────────────────────
-    const headGeo = new THREE.SphereGeometry(0.5, profile.headSegs[0], profile.headSegs[1]);
+    const headGeo = new THREE.SphereGeometry(
+      0.5,
+      profile.headSegs[0],
+      profile.headSegs[1],
+    );
     if (profile.hasMicroDetail) {
       const hp = headGeo.attributes.position;
       for (let i = 0; i < hp.count; i++) {
-        const x = hp.getX(i), y = hp.getY(i), z = hp.getZ(i);
+        const x = hp.getX(i),
+          y = hp.getY(i),
+          z = hp.getZ(i);
         const bump = Math.sin(y * 10) * 0.04 + Math.sin(z * 8 + x * 6) * 0.03;
         const seam = Math.abs(Math.sin(x * 15)) < 0.15 ? -0.025 : 0;
         hp.setXYZ(i, x + bump * 0.5, y + bump, z + seam);
@@ -415,7 +489,8 @@ export class TendrilHunter {
         // Inner-edge serration spines
         for (let s = 0; s < 5; s++) {
           const sp = new THREE.Mesh(
-            new THREE.ConeGeometry(0.007, 0.06, 4), metalMat
+            new THREE.ConeGeometry(0.007, 0.06, 4),
+            metalMat,
           );
           sp.position.set(side * 0.05, -0.28 + s * 0.12, 0);
           sp.rotation.z = side * (Math.PI * 0.5 + s * 0.08);
@@ -425,7 +500,7 @@ export class TendrilHunter {
         if (mandibleGlowMat) {
           const glowStrip = new THREE.Mesh(
             new THREE.CylinderGeometry(0.012, 0.018, 0.52, 6),
-            mandibleGlowMat
+            mandibleGlowMat,
           );
           glowStrip.position.set(side * 0.03, -0.03, 0);
           glowStrip.rotation.z = side * 0.12;
@@ -434,7 +509,7 @@ export class TendrilHunter {
           for (let s = 0; s < 3; s++) {
             const gland = new THREE.Mesh(
               new THREE.SphereGeometry(0.02, 6, 5),
-              mandibleGlowMat
+              mandibleGlowMat,
             );
             gland.position.set(side * 0.034, -0.22 + s * 0.17, side * 0.012);
             mg.add(gland);
@@ -443,37 +518,54 @@ export class TendrilHunter {
 
         g.add(mg);
         if (isNear) {
-          if (side < 0) this._leftMandible  = mg;
-          else           this._rightMandible = mg;
+          if (side < 0) this._leftMandible = mg;
+          else this._rightMandible = mg;
         }
       }
 
-      if (isNear && mandibleGlowMat) this._nearMandibleGlowMat = mandibleGlowMat;
+      if (isNear && mandibleGlowMat)
+        this._nearMandibleGlowMat = mandibleGlowMat;
     }
 
     // ── Compound eyes — multi-lens cluster ────────────────────────────────────
     // Hoist lensMat outside loop so all 4 eyes share one material instance.
-    const lensMat = profile.hasCompoundEyes ? new THREE.MeshPhysicalMaterial({
-      color: 0x88ff88, roughness: 0, metalness: 0, clearcoat: 1.0,
-      transparent: true, opacity: 0.35, depthWrite: false,
-      emissive: 0x22aa00, emissiveIntensity: 1.0,
-    }) : null;
+    const lensMat = profile.hasCompoundEyes
+      ? new THREE.MeshPhysicalMaterial({
+          color: 0x88ff88,
+          roughness: 0,
+          metalness: 0,
+          clearcoat: 1.0,
+          transparent: true,
+          opacity: 0.35,
+          depthWrite: false,
+          emissive: 0x22aa00,
+          emissiveIntensity: 1.0,
+        })
+      : null;
 
     const eyePos = [
-      [1.28,  0.22,  0.22],
-      [1.28,  0.22, -0.22],
-      [1.22, -0.18,  0.15],
+      [1.28, 0.22, 0.22],
+      [1.28, 0.22, -0.22],
+      [1.22, -0.18, 0.15],
       [1.22, -0.18, -0.15],
     ];
     for (let e = 0; e < profile.eyeCount; e++) {
       const eg = new THREE.Group();
       eg.position.set(...eyePos[e]);
-      eg.add(new THREE.Mesh(
-        new THREE.SphereGeometry(0.08, profile.eyeSegs[0], profile.eyeSegs[1]),
-        eyeMat
-      ));
+      eg.add(
+        new THREE.Mesh(
+          new THREE.SphereGeometry(
+            0.08,
+            profile.eyeSegs[0],
+            profile.eyeSegs[1],
+          ),
+          eyeMat,
+        ),
+      );
       if (lensMat) {
-        eg.add(new THREE.Mesh(new THREE.SphereGeometry(0.086, 12, 10), lensMat));
+        eg.add(
+          new THREE.Mesh(new THREE.SphereGeometry(0.086, 12, 10), lensMat),
+        );
       }
       g.add(eg);
       if (isNear) this._eyeGroups.push(eg);
@@ -487,7 +579,9 @@ export class TendrilHunter {
     bodyGeo.scale(1.8, 0.9, 0.8);
     const bp = bodyGeo.attributes.position;
     for (let i = 0; i < bp.count; i++) {
-      const x = bp.getX(i), y = bp.getY(i), z = bp.getZ(i);
+      const x = bp.getX(i),
+        y = bp.getY(i),
+        z = bp.getZ(i);
       bp.setX(i, x + Math.sin(y * 8) * 0.05);
       bp.setZ(i, z + Math.cos(x * 6) * 0.04);
     }
@@ -511,12 +605,18 @@ export class TendrilHunter {
     }
 
     // ── Abdomen — segmented chitin with breathing bands ───────────────────────
-    const abdomenGeo = new THREE.SphereGeometry(0.55, profile.abdomenSegs[0], profile.abdomenSegs[1]);
+    const abdomenGeo = new THREE.SphereGeometry(
+      0.55,
+      profile.abdomenSegs[0],
+      profile.abdomenSegs[1],
+    );
     if (profile.hasChitinBands) {
       const ap = abdomenGeo.attributes.position;
       for (let i = 0; i < ap.count; i++) {
-        const x = ap.getX(i), y = ap.getY(i), z = ap.getZ(i);
-        const band  = Math.sin(y * 10) * 0.04;
+        const x = ap.getX(i),
+          y = ap.getY(i),
+          z = ap.getZ(i);
+        const band = Math.sin(y * 10) * 0.04;
         const ridge = Math.sin(z * 14 + x * 10) * 0.02;
         ap.setXYZ(i, x + ridge, y + band * 0.2, z + ridge * 0.5);
       }
@@ -541,12 +641,17 @@ export class TendrilHunter {
       // Cylinder segments
       const segments = [];
       for (let s = 0; s < segCount; s++) {
-        const t  = s / Math.max(segCount - 1, 1);
+        const t = s / Math.max(segCount - 1, 1);
         const r0 = 0.055 - t * 0.012;
-        const r1 = 0.045 - t * 0.010;
+        const r1 = 0.045 - t * 0.01;
         const seg = new THREE.Mesh(
-          new THREE.CylinderGeometry(r0, r1, TENDRIL_SEG_LEN, profile.tendrilRadial),
-          metalMat
+          new THREE.CylinderGeometry(
+            r0,
+            r1,
+            TENDRIL_SEG_LEN,
+            profile.tendrilRadial,
+          ),
+          metalMat,
         );
         seg.position.set(0, -(s + 0.5) * TENDRIL_SEG_LEN, 0);
         tendrilGroup.add(seg);
@@ -559,32 +664,32 @@ export class TendrilHunter {
         const jr = 0.06 - (s / segCount) * 0.012;
         const jm = new THREE.Mesh(
           new THREE.SphereGeometry(jr, profile.jointSegs, profile.jointSegs),
-          organicMat
+          organicMat,
         );
         jm.position.set(0, -(s + 1) * TENDRIL_SEG_LEN, 0);
         tendrilGroup.add(jm);
         jointMeshes.push(jm);
       }
 
-      // Hydraulic pistons spanning the first 3 joints (near only)
+      // Hydraulic pistons spanning the first 3 joints (near animated, medium static)
       const pistons = [];
-      if (isNear && profile.pistonSegs > 0) {
+      if (profile.pistonSegs > 0) {
         for (let s = 0; s < Math.min(segCount - 2, 3); s++) {
           const sleeve = new THREE.Mesh(
             new THREE.CylinderGeometry(0.018, 0.021, 1, profile.pistonSegs),
-            metalMat
+            metalMat,
           );
           const rod = new THREE.Mesh(
             new THREE.CylinderGeometry(0.009, 0.011, 1, profile.pistonSegs),
-            metalMat
+            metalMat,
           );
           const baseCollar = new THREE.Mesh(
             new THREE.CylinderGeometry(0.024, 0.024, 0.04, profile.pistonSegs),
-            organicMat
+            organicMat,
           );
           const tipCollar = new THREE.Mesh(
             new THREE.CylinderGeometry(0.015, 0.015, 0.03, profile.pistonSegs),
-            organicMat
+            organicMat,
           );
           tendrilGroup.add(sleeve);
           tendrilGroup.add(rod);
@@ -592,7 +697,7 @@ export class TendrilHunter {
           tendrilGroup.add(tipCollar);
           pistons.push({
             jointIndex: s,
-            side: ((i + s) % 2 === 0) ? 1 : -1,
+            side: (i + s) % 2 === 0 ? 1 : -1,
             sleeve,
             rod,
             baseCollar,
@@ -604,7 +709,7 @@ export class TendrilHunter {
       // Hook tip
       const hook = new THREE.Mesh(
         new THREE.ConeGeometry(0.025, 0.2, profile.hookSegs),
-        metalMat
+        metalMat,
       );
       hook.position.set(0, -segCount * TENDRIL_SEG_LEN, 0);
       tendrilGroup.add(hook);
@@ -616,21 +721,28 @@ export class TendrilHunter {
       }
 
       const ikEntry = {
-        group:       tendrilGroup,
-        rootOffset:  new THREE.Vector3(rx, -0.3, rz),
+        group: tendrilGroup,
+        rootOffset: new THREE.Vector3(rx, -0.3, rz),
         joints,
         segments,
         jointMeshes,
         pistons,
         hook,
-        phase:       (i / profile.tendrilCount) * TWO_PI,
+        phase: (i / profile.tendrilCount) * TWO_PI,
         segCount,
       };
 
+      if (pistons.length > 0) {
+        this._updatePistons(ikEntry, false);
+      }
+
       if (isNear) {
         this._tendrilIK.push(ikEntry);
-      } else if (tierName === 'medium') {
-        this._mediumTendrilData.push({ group: tendrilGroup, phase: ikEntry.phase });
+      } else if (tierName === "medium") {
+        this._mediumTendrilData.push({
+          group: tendrilGroup,
+          phase: ikEntry.phase,
+        });
       }
     }
 
@@ -638,12 +750,21 @@ export class TendrilHunter {
     if (profile.hasRimLight) {
       const rimGeo = new THREE.SphereGeometry(1.05, 14, 10);
       rimGeo.scale(1.8, 0.9, 0.8);
-      g.add(new THREE.Mesh(rimGeo, new THREE.MeshPhysicalMaterial({
-        color: 0x000000,
-        emissive: 0x180830, emissiveIntensity: 1.2,
-        transparent: true, opacity: 0.25, roughness: 1.0,
-        side: THREE.BackSide, depthWrite: false,
-      })));
+      g.add(
+        new THREE.Mesh(
+          rimGeo,
+          new THREE.MeshPhysicalMaterial({
+            color: 0x000000,
+            emissive: 0x180830,
+            emissiveIntensity: 1.2,
+            transparent: true,
+            opacity: 0.25,
+            roughness: 1.0,
+            side: THREE.BackSide,
+            depthWrite: false,
+          }),
+        ),
+      );
     }
 
     return g;
@@ -657,15 +778,19 @@ export class TendrilHunter {
     // ── Locomotion ────────────────────────────────────────────────────────────
     this.turnTimer += dt;
     if (this.turnTimer > this.turnInterval) {
-      this.turnTimer    = 0;
+      this.turnTimer = 0;
       this.turnInterval = 6 + Math.random() * 8;
       if (Math.random() < 0.5) {
         this.direction.subVectors(playerPos, this.group.position).normalize();
         this.direction.y *= 0.3;
       } else {
-        this.direction.set(
-          Math.random() - 0.5, (Math.random() - 0.5) * 0.1, Math.random() - 0.5
-        ).normalize();
+        this.direction
+          .set(
+            Math.random() - 0.5,
+            (Math.random() - 0.5) * 0.1,
+            Math.random() - 0.5,
+          )
+          .normalize();
       }
     }
 
@@ -673,7 +798,11 @@ export class TendrilHunter {
     this.group.position.add(_v3A);
 
     const yaw = Math.atan2(this.direction.x, this.direction.z);
-    this.group.rotation.y = THREE.MathUtils.lerp(this.group.rotation.y, yaw, dt * 3);
+    this.group.rotation.y = THREE.MathUtils.lerp(
+      this.group.rotation.y,
+      yaw,
+      dt * 3,
+    );
 
     // Respawn when too far from player; recompute distance after reposition
     // so the rest of this frame's state/animation reflects actual position.
@@ -683,7 +812,7 @@ export class TendrilHunter {
       this.group.position.set(
         playerPos.x + Math.cos(a) * 70,
         playerPos.y - Math.random() * 10,
-        playerPos.z + Math.sin(a) * 70
+        playerPos.z + Math.sin(a) * 70,
       );
       distToPlayer = this.group.position.distanceTo(playerPos);
     }
@@ -696,11 +825,11 @@ export class TendrilHunter {
     // are far more numerous, so we skip more aggressively (every 4th frame) to
     // keep CPU load manageable. This matches the spec requirement: "vertex
     // shader only, update every 4th frame minimum" for far LOD at Ultra.
-    const isUltra = qualityManager.tier === 'ultra';
+    const isUltra = qualityManager.tier === "ultra";
     let skipFrames = 1;
-    if (this._lodTierName === 'far') {
+    if (this._lodTierName === "far") {
       skipFrames = isUltra ? 4 : 3;
-    } else if (this._lodTierName === 'medium') {
+    } else if (this._lodTierName === "medium") {
       skipFrames = 3;
     }
     if (this._frameCount % skipFrames !== 0) return;
@@ -711,9 +840,9 @@ export class TendrilHunter {
     this._updateStrikeState(adt, distToPlayer);
 
     // ── Tier animation ────────────────────────────────────────────────────────
-    if (this._lodTierName === 'near') {
+    if (this._lodTierName === "near") {
       this._animateNear(adt, playerPos, distToPlayer);
-    } else if (this._lodTierName === 'medium') {
+    } else if (this._lodTierName === "medium") {
       this._animateMedium();
     }
     // far tier: static pose — no per-frame work beyond movement
@@ -744,6 +873,16 @@ export class TendrilHunter {
         this._stateTimer += dt;
         this._strikePhase = Math.min(1, this._stateTimer / STRIKE_DURATION);
         if (this._stateTimer >= STRIKE_DURATION) {
+          this._state = S_GRAPPLE;
+          this._stateTimer = 0;
+          this._strikePhase = 1;
+        }
+        break;
+
+      case S_GRAPPLE:
+        this._stateTimer += dt;
+        this._strikePhase = 1;
+        if (this._stateTimer >= GRAPPLE_DURATION) {
           this._state = S_RETRACT;
           this._stateTimer = 0;
         }
@@ -751,7 +890,8 @@ export class TendrilHunter {
 
       case S_RETRACT:
         this._stateTimer += dt;
-        this._strikePhase = 1 - Math.min(1, this._stateTimer / RETRACT_DURATION);
+        this._strikePhase =
+          1 - Math.min(1, this._stateTimer / RETRACT_DURATION);
         if (this._stateTimer >= RETRACT_DURATION) {
           this._state = distToPlayer < STALK_DISTANCE ? S_STALK : S_IDLE;
           this._stateTimer = 0;
@@ -775,12 +915,16 @@ export class TendrilHunter {
     // ── Independent mandible articulation ─────────────────────────────────────
     if (this._leftMandible && this._rightMandible) {
       let spread = Math.sin(t * 1.5) * 0.05;
-      if (this._state === S_STALK || this._state === S_STRIKE) {
+      if (
+        this._state === S_STALK ||
+        this._state === S_STRIKE ||
+        this._state === S_GRAPPLE
+      ) {
         const urgency = distToPlayer < STRIKE_DISTANCE ? 1.0 : 0.4;
         spread = THREE.MathUtils.lerp(spread, 0.6, urgency);
       }
-      this._leftMandible.rotation.z  = -0.25 - spread;
-      this._rightMandible.rotation.z =  0.25 + spread;
+      this._leftMandible.rotation.z = -0.25 - spread;
+      this._rightMandible.rotation.z = 0.25 + spread;
     }
 
     // ── Compound eye independent tracking ─────────────────────────────────────
@@ -800,7 +944,7 @@ export class TendrilHunter {
       _v3C.set(
         this.group.position.x + Math.cos(this._scanAngle) * 20,
         this.group.position.y + Math.sin(this._scanAngle * 0.4) * 6,
-        this.group.position.z + Math.sin(this._scanAngle) * 20
+        this.group.position.z + Math.sin(this._scanAngle) * 20,
       );
       this._eyeGroups[1].lookAt(_v3C);
 
@@ -811,25 +955,35 @@ export class TendrilHunter {
 
       // Eye 3: rearward vigilance — orbits behind creature
       _v3C.set(
-        this.group.position.x - Math.cos(this.group.rotation.y) * 10 + Math.sin(t * 0.4) * 3,
+        this.group.position.x -
+          Math.cos(this.group.rotation.y) * 10 +
+          Math.sin(t * 0.4) * 3,
         this.group.position.y + Math.cos(t * 0.3) * 2,
-        this.group.position.z - Math.sin(this.group.rotation.y) * 10 + Math.cos(t * 0.5) * 3
+        this.group.position.z -
+          Math.sin(this.group.rotation.y) * 10 +
+          Math.cos(t * 0.5) * 3,
       );
       this._eyeGroups[3].lookAt(_v3C);
     }
 
     // ── Compound eye emissive glow — state-aware (Issue #80: no PointLights) ────
-    // STALK/STRIKE: fast flickering hunting glow per spec.
+    // STALK/STRIKE/GRAPPLE: fast flickering hunting glow per spec.
     // IDLE/RETRACT:  slow ambient pulse.
     if (this._nearEyeMat) {
-      const hunting = (this._state === S_STALK || this._state === S_STRIKE);
+      const hunting =
+        this._state === S_STALK ||
+        this._state === S_STRIKE ||
+        this._state === S_GRAPPLE;
       this._nearEyeMat.emissiveIntensity = hunting
         ? 0.8 + Math.sin(t * 4.0) * 0.3
         : 0.3 + Math.sin(t * 0.8) * 0.15;
     }
 
     if (this._nearMandibleGlowMat) {
-      const hunting = (this._state === S_STALK || this._state === S_STRIKE);
+      const hunting =
+        this._state === S_STALK ||
+        this._state === S_STRIKE ||
+        this._state === S_GRAPPLE;
       const pulse = 0.5 + 0.5 * Math.sin(t * (hunting ? 5.2 : 1.4) + 0.9);
       this._nearMandibleGlowMat.emissiveIntensity = hunting
         ? 0.55 + pulse * 0.75 + this._strikePhase * 0.35
@@ -844,8 +998,11 @@ export class TendrilHunter {
     }
 
     // ── Per-tendril FABRIK IK ──────────────────────────────────────────────────
-    const stalking = (this._state === S_STALK);
-    const striking = (this._state === S_STRIKE || this._state === S_RETRACT);
+    const stalking = this._state === S_STALK;
+    const striking =
+      this._state === S_STRIKE ||
+      this._state === S_GRAPPLE ||
+      this._state === S_RETRACT;
 
     for (let i = 0; i < this._tendrilIK.length; i++) {
       const td = this._tendrilIK[i];
@@ -869,14 +1026,14 @@ export class TendrilHunter {
 
       // Per-tendril spread to avoid all tips converging on one point
       const spread = TENDRIL_SPREAD_FACTOR * (1 - targetWeight);
-      const ptxS   = ptx + Math.cos(td.phase + t * 0.2) * spread;
-      const ptzS   = ptz + Math.sin(td.phase + t * 0.2) * spread;
+      const ptxS = ptx + Math.cos(td.phase + t * 0.2) * spread;
+      const ptzS = ptz + Math.sin(td.phase + t * 0.2) * spread;
 
       // Final IK target: lerp idle ↔ player-seek
       _v3C.set(
         idleX + (ptxS - idleX) * targetWeight,
-        idleY + (pty  - idleY) * targetWeight,
-        idleZ + (ptzS - idleZ) * targetWeight
+        idleY + (pty - idleY) * targetWeight,
+        idleZ + (ptzS - idleZ) * targetWeight,
       );
 
       // Run FABRIK
@@ -885,16 +1042,16 @@ export class TendrilHunter {
       }
 
       // ── Apply solved joint positions to segment meshes ────────────────────
-      const doRattle = (this._state === S_STRIKE);
+      const doRattle = this._state === S_STRIKE;
       for (let s = 0; s < td.segments.length; s++) {
-        const pa  = td.joints[s];
-        const pb  = td.joints[s + 1];
+        const pa = td.joints[s];
+        const pb = td.joints[s + 1];
         const seg = td.segments[s];
 
         seg.position.set(
           (pa.x + pb.x) * 0.5,
           (pa.y + pb.y) * 0.5,
-          (pa.z + pb.z) * 0.5
+          (pa.z + pb.z) * 0.5,
         );
 
         _v3A.subVectors(pb, pa);
@@ -906,7 +1063,7 @@ export class TendrilHunter {
         }
       }
 
-      this._updateNearPistons(td, doRattle);
+      this._updatePistons(td, doRattle);
 
       // ── Update articulation joint balls ───────────────────────────────────
       for (let s = 0; s < td.jointMeshes.length; s++) {
@@ -930,7 +1087,7 @@ export class TendrilHunter {
     }
   }
 
-  _updateNearPistons(td, doRattle) {
+  _updatePistons(td, doRattle) {
     if (!td.pistons || td.pistons.length === 0) return;
 
     for (let i = 0; i < td.pistons.length; i++) {
@@ -951,7 +1108,10 @@ export class TendrilHunter {
       _v3G.lerpVectors(pb, pc, 0.22).addScaledVector(_v3E, PISTON_TIP_OFFSET);
 
       if (doRattle) {
-        const jitter = Math.sin(this.time * 36 + td.phase * 2 + jointIndex * 1.7) * PISTON_RATTLE * 0.45;
+        const jitter =
+          Math.sin(this.time * 36 + td.phase * 2 + jointIndex * 1.7) *
+          PISTON_RATTLE *
+          0.45;
         _v3F.addScaledVector(_v3D, jitter);
         _v3G.addScaledVector(_v3E, -jitter * 0.6);
       }
@@ -963,12 +1123,19 @@ export class TendrilHunter {
       _v3A.divideScalar(actualLen);
       _qA.setFromUnitVectors(_upY, _v3A);
 
-      piston.sleeve.position.copy(_v3F).addScaledVector(_v3A, PISTON_SLEEVE_LEN * 0.5);
+      piston.sleeve.position
+        .copy(_v3F)
+        .addScaledVector(_v3A, PISTON_SLEEVE_LEN * 0.5);
       piston.sleeve.quaternion.copy(_qA);
       piston.sleeve.scale.set(1, PISTON_SLEEVE_LEN, 1);
 
-      const rodVisibleLen = Math.max(actualLen - (PISTON_SLEEVE_LEN - PISTON_ROD_OVERLAP), PISTON_ROD_MIN_LEN);
-      _v3D.copy(_v3F).addScaledVector(_v3A, PISTON_SLEEVE_LEN - PISTON_ROD_OVERLAP);
+      const rodVisibleLen = Math.max(
+        actualLen - (PISTON_SLEEVE_LEN - PISTON_ROD_OVERLAP),
+        PISTON_ROD_MIN_LEN,
+      );
+      _v3D
+        .copy(_v3F)
+        .addScaledVector(_v3A, PISTON_SLEEVE_LEN - PISTON_ROD_OVERLAP);
       piston.rod.position.copy(_v3D).addScaledVector(_v3A, rodVisibleLen * 0.5);
       piston.rod.quaternion.copy(_qA);
       piston.rod.scale.set(1, rodVisibleLen, 1);
@@ -984,21 +1151,23 @@ export class TendrilHunter {
   // ── Medium-tier animation: sinusoidal group rotation per tendril ──────────
   _animateMedium() {
     for (let i = 0; i < this._mediumTendrilData.length; i++) {
-      const td    = this._mediumTendrilData[i];
+      const td = this._mediumTendrilData[i];
       const phase = this.time * 2 + td.phase;
       td.group.rotation.x = Math.sin(phase) * 0.3;
       td.group.rotation.z = Math.cos(phase * 0.7) * 0.2;
     }
   }
 
-  getPosition() { return this.group.position; }
+  getPosition() {
+    return this.group.position;
+  }
 
   dispose() {
     this.scene.remove(this.group);
-    this.group.traverse(c => {
+    this.group.traverse((c) => {
       if (c.geometry) c.geometry.dispose();
       if (c.material) {
-        if (Array.isArray(c.material)) c.material.forEach(m => m.dispose());
+        if (Array.isArray(c.material)) c.material.forEach((m) => m.dispose());
         else c.material.dispose();
       }
     });
