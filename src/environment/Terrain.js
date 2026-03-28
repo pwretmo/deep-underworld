@@ -1,5 +1,67 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
+import {
+  abs,
+  attribute,
+  cameraViewMatrix,
+  clamp,
+  dot,
+  float,
+  floor,
+  fract,
+  Fn,
+  materialRoughness,
+  max,
+  mix,
+  normalView,
+  normalWorldGeometry,
+  positionWorld,
+  smoothstep,
+  varying,
+  vec3,
+} from 'three/tsl';
 import { qualityManager } from '../QualityManager.js';
+
+const hash3D = Fn(([inputPosition]) => {
+  const p = fract(vec3(inputPosition).mul(vec3(443.897, 441.423, 437.195))).toVar();
+  const offset = dot(p, p.yzx.add(vec3(19.19)));
+  p.addAssign(vec3(offset));
+
+  return fract(p.x.add(p.y).mul(p.z));
+});
+
+const noise3D = Fn(([inputPosition]) => {
+  const cell = floor(vec3(inputPosition)).toVar();
+  const fraction = fract(vec3(inputPosition)).toVar();
+
+  fraction.assign(fraction.mul(fraction).mul(vec3(3.0).sub(fraction.mul(2.0))));
+
+  const n000 = hash3D(cell);
+  const n100 = hash3D(cell.add(vec3(1.0, 0.0, 0.0)));
+  const n010 = hash3D(cell.add(vec3(0.0, 1.0, 0.0)));
+  const n110 = hash3D(cell.add(vec3(1.0, 1.0, 0.0)));
+  const n001 = hash3D(cell.add(vec3(0.0, 0.0, 1.0)));
+  const n101 = hash3D(cell.add(vec3(1.0, 0.0, 1.0)));
+  const n011 = hash3D(cell.add(vec3(0.0, 1.0, 1.0)));
+  const n111 = hash3D(cell.add(vec3(1.0, 1.0, 1.0)));
+
+  const nx00 = mix(n000, n100, fraction.x);
+  const nx10 = mix(n010, n110, fraction.x);
+  const nx01 = mix(n001, n101, fraction.x);
+  const nx11 = mix(n011, n111, fraction.x);
+
+  const nxy0 = mix(nx00, nx10, fraction.y);
+  const nxy1 = mix(nx01, nx11, fraction.y);
+
+  return mix(nxy0, nxy1, fraction.z);
+});
+
+function fbm3D(inputPosition) {
+  return noise3D(inputPosition)
+    .add(noise3D(inputPosition.mul(2.0)).mul(0.5))
+    .add(noise3D(inputPosition.mul(4.0)).mul(0.25))
+    .add(noise3D(inputPosition.mul(8.0)).mul(0.125))
+    .div(1.875);
+}
 
 export class Terrain {
   constructor(scene) {
@@ -88,166 +150,77 @@ export class Terrain {
   }
 
   _createRockMaterial() {
-    const mat = new THREE.MeshStandardMaterial({
+    const mat = new THREE.MeshStandardNodeMaterial({
       color: 0x888890,
       roughness: 0.55,
       metalness: 0.08,
     });
-    mat.onBeforeCompile = (shader) => {
-      shader.vertexShader = shader.vertexShader.replace(
-        '#include <common>',
-        `#include <common>
-        varying vec3 vWPos;`
-      );
-      shader.vertexShader = shader.vertexShader.replace(
-        '#include <begin_vertex>',
-        `#include <begin_vertex>
-        {
-          vec4 _wp = vec4(transformed, 1.0);
-          #ifdef USE_INSTANCING
-            _wp = instanceMatrix * _wp;
-          #endif
-          _wp = modelMatrix * _wp;
-          vWPos = _wp.xyz;
-        }`
-      );
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <common>',
-        `#include <common>
-        varying vec3 vWPos;
-        float _rh(vec3 p) {
-          p = fract(p * vec3(443.897, 441.423, 437.195));
-          p += dot(p, p.yzx + 19.19);
-          return fract((p.x + p.y) * p.z);
-        }
-        float _rn(vec3 p) {
-          vec3 i = floor(p); vec3 f = fract(p);
-          f = f * f * (3.0 - 2.0 * f);
-          return mix(
-            mix(mix(_rh(i), _rh(i+vec3(1,0,0)), f.x),
-                mix(_rh(i+vec3(0,1,0)), _rh(i+vec3(1,1,0)), f.x), f.y),
-            mix(mix(_rh(i+vec3(0,0,1)), _rh(i+vec3(1,0,1)), f.x),
-                mix(_rh(i+vec3(0,1,1)), _rh(i+vec3(1,1,1)), f.x), f.y), f.z);
-        }`
-      );
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <normal_fragment_maps>',
-        `#include <normal_fragment_maps>
-        {
-          float eps = 0.08, sc = 2.0;
-          float h0 = _rn(vWPos * sc);
-          float hx = _rn((vWPos + vec3(eps,0,0)) * sc);
-          float hz = _rn((vWPos + vec3(0,0,eps)) * sc);
-          vec3 grad = vec3((hx - h0) / eps, 0.0, (hz - h0) / eps);
-          normal = normalize(normal - grad * 0.4);
-        }`
-      );
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <roughnessmap_fragment>',
-        `#include <roughnessmap_fragment>
-        {
-          float depth = -vWPos.y;
-          float wetness = smoothstep(500.0, 60.0, depth);
-          roughnessFactor *= mix(1.0, 0.35, wetness);
-          roughnessFactor += _rn(vWPos * 8.0) * 0.08 - 0.04;
-          roughnessFactor = clamp(roughnessFactor, 0.1, 1.0);
-        }`
-      );
-    };
+    const worldPos = varying(positionWorld);
+    const depth = worldPos.y.negate();
+    const wetness = float(1.0).sub(smoothstep(60.0, 500.0, depth));
+    const eps = 0.08;
+    const scale = 2.0;
+    const h0 = noise3D(worldPos.mul(scale));
+    const hx = noise3D(worldPos.add(vec3(eps, 0.0, 0.0)).mul(scale));
+    const hz = noise3D(worldPos.add(vec3(0.0, 0.0, eps)).mul(scale));
+    const gradWorld = vec3(hx.sub(h0).div(eps), 0.0, hz.sub(h0).div(eps));
+    const gradView = cameraViewMatrix.transformDirection(gradWorld);
+
+    mat.normalNode = normalView.sub(gradView.mul(0.4)).normalize();
+    mat.roughnessNode = clamp(
+      materialRoughness
+        .mul(mix(1.0, 0.35, wetness))
+        .add(noise3D(worldPos.mul(8.0)).mul(0.08))
+        .sub(0.04),
+      0.1,
+      1.0,
+    );
+
     return mat;
   }
 
   _createTerrainMaterial() {
-    const mat = new THREE.MeshStandardMaterial({
-      vertexColors: true,
+    const mat = new THREE.MeshStandardNodeMaterial({
       roughness: 0.85,
       metalness: 0.05,
     });
-    mat.onBeforeCompile = (shader) => {
-      shader.vertexShader = shader.vertexShader.replace(
-        '#include <common>',
-        `#include <common>
-        varying vec3 vWPos;
-        varying float vSlope;`
-      );
-      shader.vertexShader = shader.vertexShader.replace(
-        '#include <begin_vertex>',
-        `#include <begin_vertex>
-        {
-          vec4 _wp = modelMatrix * vec4(transformed, 1.0);
-          vWPos = _wp.xyz;
-          vec3 wNrm = normalize(mat3(modelMatrix) * objectNormal);
-          vSlope = 1.0 - abs(wNrm.y);
-        }`
-      );
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <common>',
-        `#include <common>
-        varying vec3 vWPos;
-        varying float vSlope;
-        float _th(vec3 p) {
-          p = fract(p * vec3(443.897, 441.423, 437.195));
-          p += dot(p, p.yzx + 19.19);
-          return fract((p.x + p.y) * p.z);
-        }
-        float _tn(vec3 p) {
-          vec3 i = floor(p); vec3 f = fract(p);
-          f = f * f * (3.0 - 2.0 * f);
-          return mix(
-            mix(mix(_th(i), _th(i+vec3(1,0,0)), f.x),
-                mix(_th(i+vec3(0,1,0)), _th(i+vec3(1,1,0)), f.x), f.y),
-            mix(mix(_th(i+vec3(0,0,1)), _th(i+vec3(1,0,1)), f.x),
-                mix(_th(i+vec3(0,1,1)), _th(i+vec3(1,1,1)), f.x), f.y), f.z);
-        }
-        float _tfbm(vec3 p) {
-          float s = 0.0, a = 1.0, f = 1.0, m = 0.0;
-          for (int i = 0; i < 4; i++) {
-            s += _tn(p * f) * a; m += a; f *= 2.0; a *= 0.5;
-          }
-          return s / m;
-        }`
-      );
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <color_fragment>',
-        `#include <color_fragment>
-        {
-          float depth = -vWPos.y;
-          vec3 rockCol = vec3(0.25, 0.22, 0.2) + _tn(vWPos * 0.5) * 0.06;
-          vec3 siltCol = vec3(0.18, 0.15, 0.13) + _tn(vWPos * 0.3 + 100.0) * 0.04;
-          vec3 algaeCol = vec3(0.12, 0.2, 0.08) + _tn(vWPos * 0.8 + 200.0) * 0.05;
-          float algaeMask = smoothstep(200.0, 80.0, depth) * (1.0 - vSlope);
-          float rockMask = smoothstep(0.3, 0.7, vSlope);
-          float siltMask = max(1.0 - rockMask - algaeMask, 0.0);
-          vec3 layered = rockCol * rockMask + siltCol * siltMask + algaeCol * algaeMask;
-          diffuseColor.rgb = mix(layered, diffuseColor.rgb, 0.4);
-          diffuseColor.rgb *= 0.9 + _tfbm(vWPos * 4.0) * 0.2;
-        }`
-      );
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <normal_fragment_maps>',
-        `#include <normal_fragment_maps>
-        {
-          float eps = 0.1, sc = 1.5;
-          float h0 = _tfbm(vWPos * sc);
-          float hx = _tfbm((vWPos + vec3(eps,0,0)) * sc);
-          float hz = _tfbm((vWPos + vec3(0,0,eps)) * sc);
-          vec3 grad = vec3((hx - h0) / eps, 0.0, (hz - h0) / eps);
-          normal = normalize(normal - grad * 0.35);
-        }`
-      );
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <roughnessmap_fragment>',
-        `#include <roughnessmap_fragment>
-        {
-          float depth = -vWPos.y;
-          float wetness = smoothstep(500.0, 60.0, depth);
-          roughnessFactor *= mix(1.0, 0.45, wetness);
-          roughnessFactor += vSlope * 0.1;
-          roughnessFactor += _tn(vWPos * 6.0) * 0.1 - 0.05;
-          roughnessFactor = clamp(roughnessFactor, 0.15, 1.0);
-        }`
-      );
-    };
+    const worldPos = varying(positionWorld);
+    const vertexColor = varying(attribute('color', 'vec3'));
+    const depth = worldPos.y.negate();
+    const slope = float(1.0).sub(abs(normalWorldGeometry.y));
+    const rockColor = vec3(0.25, 0.22, 0.2).add(vec3(noise3D(worldPos.mul(0.5)).mul(0.06)));
+    const siltColor = vec3(0.18, 0.15, 0.13).add(vec3(noise3D(worldPos.mul(0.3).add(vec3(100.0))).mul(0.04)));
+    const algaeColor = vec3(0.12, 0.2, 0.08).add(vec3(noise3D(worldPos.mul(0.8).add(vec3(200.0))).mul(0.05)));
+    const algaeMask = float(1.0)
+      .sub(smoothstep(80.0, 200.0, depth))
+      .mul(float(1.0).sub(slope));
+    const rockMask = smoothstep(0.3, 0.7, slope);
+    const siltMask = max(float(1.0).sub(rockMask).sub(algaeMask), 0.0);
+    const layered = rockColor.mul(rockMask)
+      .add(siltColor.mul(siltMask))
+      .add(algaeColor.mul(algaeMask));
+    const detail = float(0.9).add(fbm3D(worldPos.mul(4.0)).mul(0.2));
+    const eps = 0.1;
+    const scale = 1.5;
+    const h0 = fbm3D(worldPos.mul(scale));
+    const hx = fbm3D(worldPos.add(vec3(eps, 0.0, 0.0)).mul(scale));
+    const hz = fbm3D(worldPos.add(vec3(0.0, 0.0, eps)).mul(scale));
+    const gradWorld = vec3(hx.sub(h0).div(eps), 0.0, hz.sub(h0).div(eps));
+    const gradView = cameraViewMatrix.transformDirection(gradWorld);
+    const wetness = float(1.0).sub(smoothstep(60.0, 500.0, depth));
+
+    mat.colorNode = mix(layered, vertexColor, 0.4).mul(detail);
+    mat.normalNode = normalView.sub(gradView.mul(0.35)).normalize();
+    mat.roughnessNode = clamp(
+      materialRoughness
+        .mul(mix(1.0, 0.45, wetness))
+        .add(slope.mul(0.1))
+        .add(noise3D(worldPos.mul(6.0)).mul(0.1))
+        .sub(0.05),
+      0.15,
+      1.0,
+    );
+
     return mat;
   }
 

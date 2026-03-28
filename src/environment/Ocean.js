@@ -1,5 +1,166 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
+import {
+  clamp,
+  dot,
+  exp,
+  float,
+  floor,
+  fract,
+  instancedBufferAttribute,
+  instancedDynamicBufferAttribute,
+  max,
+  mix,
+  modelViewMatrix,
+  positionWorld,
+  pow,
+  smoothstep,
+  sin,
+  step,
+  texture,
+  uniform,
+  uv,
+  varying,
+  vec2,
+  vec3,
+} from 'three/tsl';
 import { qualityManager } from '../QualityManager.js';
+
+function cloneUniformValue(value) {
+  return value?.clone ? value.clone() : value;
+}
+
+function attachUniforms(material, uniforms) {
+  material.uniforms = uniforms;
+  material.userData.uniforms = uniforms;
+  return material;
+}
+
+function createUniformMap(definitions) {
+  const uniforms = {};
+
+  for (const [key, value] of Object.entries(definitions)) {
+    uniforms[key] = uniform(cloneUniformValue(value));
+  }
+
+  return uniforms;
+}
+
+function hash2D(point) {
+  return fract(sin(dot(point, vec2(127.1, 311.7))).mul(43758.5453));
+}
+
+function noise2D(point) {
+  const cell = floor(point).toVar();
+  const fraction = fract(point).toVar();
+
+  fraction.assign(fraction.mul(fraction).mul(vec2(3.0).sub(fraction.mul(2.0))));
+
+  const a = hash2D(cell);
+  const b = hash2D(cell.add(vec2(1.0, 0.0)));
+  const c = hash2D(cell.add(vec2(0.0, 1.0)));
+  const d = hash2D(cell.add(vec2(1.0, 1.0)));
+
+  return mix(mix(a, b, fraction.x), mix(c, d, fraction.x), fraction.y);
+}
+
+function fbm2D(point) {
+  const octave0 = noise2D(point).mul(0.5);
+  const octave1Point = point.mul(2.0).add(vec2(100.0));
+  const octave1 = noise2D(octave1Point).mul(0.25);
+  const octave2Point = octave1Point.mul(2.0).add(vec2(100.0));
+  const octave2 = noise2D(octave2Point).mul(0.125);
+  const octave3Point = octave2Point.mul(2.0).add(vec2(100.0));
+  const octave3 = noise2D(octave3Point).mul(0.0625);
+  const octave4Point = octave3Point.mul(2.0).add(vec2(100.0));
+  const octave4 = noise2D(octave4Point).mul(0.03125);
+
+  return octave0.add(octave1).add(octave2).add(octave3).add(octave4);
+}
+
+function createParticleMaterial(geometry, snowTexture, baseSize, baseOpacity) {
+  const uniforms = createUniformMap({
+    time: 0,
+    baseSize,
+    baseOpacity,
+  });
+  const centerNode = instancedDynamicBufferAttribute(geometry.getAttribute('particleCenter'), 'vec3');
+  const sizeNode = instancedBufferAttribute(geometry.getAttribute('particleSize'), 'float');
+  const colorNode = instancedBufferAttribute(geometry.getAttribute('particleColor'), 'vec3');
+  const seedNode = instancedBufferAttribute(geometry.getAttribute('particleSeed'), 'float');
+  const phaseNode = instancedBufferAttribute(geometry.getAttribute('particlePhase'), 'float');
+  const material = new THREE.PointsNodeMaterial();
+  const driftedCenter = centerNode.add(vec3(
+    sin(uniforms.time.mul(0.1).add(seedNode).add(phaseNode)).mul(1.5),
+    sin(uniforms.time.mul(0.08).add(phaseNode)).mul(0.6),
+    uniforms.time.mul(0.1).add(seedNode).add(phaseNode).mul(0.7).cos().mul(1.5)
+  ));
+  const viewDist = varying(modelViewMatrix.mul(vec3(driftedCenter)).z.negate());
+  const bokeh = varying(step(0.95, fract(seedNode.mul(127.1).add(phaseNode.mul(311.7)))));
+  const focusDist = 30.0;
+  const coc = viewDist.sub(focusDist).abs().div(focusDist);
+  const dofScale = float(1.0).add(coc.mul(0.35));
+  const bokehScale = float(1.0).add(bokeh.mul(1.4));
+  const scatter = float(1.0).add(0.35.div(float(1.0).add(viewDist.mul(0.02))));
+  const bokehBright = float(1.0).add(bokeh.mul(2.0));
+  const distFade = smoothstep(3.0, 14.0, viewDist);
+
+  material.positionNode = driftedCenter;
+  material.sizeNode = clamp(
+    sizeNode
+      .mul(uniforms.baseSize)
+      .mul(dofScale)
+      .mul(bokehScale)
+      .mul(float(300.0).div(max(viewDist, 1.0))),
+    0.5,
+    16.0,
+  );
+  material.colorNode = varying(pow(colorNode, vec3(2.2))).mul(scatter).mul(bokehBright);
+  material.opacityNode = texture(snowTexture, uv()).a.mul(uniforms.baseOpacity).mul(distFade);
+  material.transparent = true;
+  material.blending = THREE.AdditiveBlending;
+  material.depthWrite = false;
+  material.fog = false;
+
+  return attachUniforms(material, uniforms);
+}
+
+function createGodRayMaterial(seedValue) {
+  const uniforms = createUniformMap({
+    time: 0,
+    opacity: 1,
+    seed: seedValue,
+  });
+  const material = new THREE.MeshBasicNodeMaterial();
+  const uvNode = varying(uv());
+  const worldPos = varying(positionWorld);
+  const axial = pow(uvNode.y, 0.35).mul(smoothstep(0.0, 0.05, uvNode.y));
+  const cx = uvNode.x.sub(0.5).mul(2.0);
+  const baseRadial = exp(cx.mul(cx).mul(-8.0));
+  const timeNode = uniforms.time.mul(0.06);
+  const edgeNoise = fbm2D(vec2(
+    worldPos.y.mul(0.03).add(uniforms.seed.mul(13.7)).add(timeNode),
+    worldPos.x.mul(0.02).add(uniforms.seed.mul(7.3))
+  )).mul(2.0).sub(1.0);
+  const radial = smoothstep(0.05, 0.55, baseRadial.add(edgeNoise.mul(0.3)));
+  const shimmer = fbm2D(vec2(
+    worldPos.x.mul(0.05).add(timeNode.mul(0.8)).add(uniforms.seed.mul(3.1)),
+    worldPos.y.mul(0.04).sub(timeNode.mul(0.5))
+  ));
+  const intensity = float(0.55).add(shimmer.mul(0.55));
+  const alpha = axial.mul(radial).mul(intensity).mul(uniforms.opacity);
+  const warm = pow(vec3(0.5, 0.7, 0.85), vec3(2.2));
+  const cool = pow(vec3(0.25, 0.45, 0.65), vec3(2.2));
+
+  material.colorNode = mix(cool, warm, radial.mul(axial));
+  material.opacityNode = alpha.mul(0.24);
+  material.transparent = true;
+  material.side = THREE.DoubleSide;
+  material.blending = THREE.AdditiveBlending;
+  material.depthWrite = false;
+  material.fog = false;
+
+  return attachUniforms(material, uniforms);
+}
 
 export class Ocean {
   constructor(scene) {
@@ -80,7 +241,7 @@ export class Ocean {
 
   _createParticles() {
     const count = 3000;
-    const geo = new THREE.BufferGeometry();
+    const geo = new THREE.PlaneGeometry(1, 1, 1, 1);
     const positions = new Float32Array(count * 3);
     const sizes = new Float32Array(count);
     const colors = new Float32Array(count * 3);
@@ -100,11 +261,13 @@ export class Ocean {
       colors[i * 3 + 2] = 0.8 + Math.random() * 0.2;
     }
 
-    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geo.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
-    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    geo.setAttribute('seed', new THREE.BufferAttribute(seeds, 1));
-    geo.setAttribute('phase', new THREE.BufferAttribute(phases, 1));
+    const centerAttr = new THREE.InstancedBufferAttribute(positions, 3);
+    centerAttr.setUsage(THREE.DynamicDrawUsage);
+    geo.setAttribute('particleCenter', centerAttr);
+    geo.setAttribute('particleSize', new THREE.InstancedBufferAttribute(sizes, 1));
+    geo.setAttribute('particleColor', new THREE.InstancedBufferAttribute(colors, 3));
+    geo.setAttribute('particleSeed', new THREE.InstancedBufferAttribute(seeds, 1));
+    geo.setAttribute('particlePhase', new THREE.InstancedBufferAttribute(phases, 1));
 
     // Soft circular particle texture
     const pSize = 32;
@@ -120,80 +283,19 @@ export class Ocean {
     ctx.fillRect(0, 0, pSize, pSize);
     const snowTexture = new THREE.CanvasTexture(canvas);
 
-    // GPU-driven ShaderMaterial: drift computed in vertex shader
-    const mat = new THREE.ShaderMaterial({
-      uniforms: {
-        time: { value: 0 },
-        baseSize: { value: this.particleBaseSize },
-        baseOpacity: { value: this.particleBaseOpacity },
-        map: { value: snowTexture },
-      },
-      vertexShader: /* glsl */ `
-        attribute float size;
-        attribute float seed;
-        attribute float phase;
-        attribute vec3 color;
-        uniform float time;
-        uniform float baseSize;
-        varying vec3 vColor;
-        varying float vViewDist;
-        varying float vBokeh;
+    this.particleCenters = positions;
+    this.particleSeeds = seeds;
+    this.particlePhases = phases;
 
-        void main() {
-          // sRGB-authored color attribute linearized for OutputPass (approx. pow 2.2)
-          vColor = pow(color, vec3(2.2));
-          // GPU-driven drift: oscillation around base position
-          vec3 pos = position;
-          float idx = seed + phase;
-          pos.x += sin(time * 0.1 + idx) * 1.5;
-          pos.y += sin(time * 0.08 + phase) * 0.6;
-          pos.z += cos(time * 0.1 + idx * 0.7) * 1.5;
+    const mat = createParticleMaterial(geo, snowTexture, this.particleBaseSize, this.particleBaseOpacity);
 
-          vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
-          float dist = -mvPosition.z;
-          vViewDist = dist;
-
-          // DOF circle-of-confusion: near/far particles enlarge slightly
-          float focusDist = 30.0;
-          float coc = abs(dist - focusDist) / focusDist;
-          float dofScale = 1.0 + coc * 0.35;
-
-          // Occasional bokeh highlights: ~5% of particles get extra size
-          vBokeh = step(0.95, fract(seed * 127.1 + phase * 311.7));
-          float bokehScale = 1.0 + vBokeh * 1.4;
-
-          gl_PointSize = size * baseSize * dofScale * bokehScale * (300.0 / max(dist, 1.0));
-          gl_Position = projectionMatrix * mvPosition;
-        }
-      `,
-      fragmentShader: /* glsl */ `
-        uniform sampler2D map;
-        uniform float baseOpacity;
-        varying vec3 vColor;
-        varying float vViewDist;
-        varying float vBokeh;
-
-        void main() {
-          vec4 texColor = texture2D(map, gl_PointCoord);
-
-          // Forward scatter: nearer particles catch more light
-          float scatter = 1.0 + 0.35 / (1.0 + vViewDist * 0.02);
-
-          // Bokeh highlights: occasional bright out-of-focus particles
-          float bokehBright = 1.0 + vBokeh * 2.0;
-
-          // Near particles fade slightly for DOF softness
-          float distFade = smoothstep(3.0, 14.0, vViewDist);
-
-          gl_FragColor = vec4(vColor * scatter * bokehBright, baseOpacity * distFade) * texColor;
-        }
-      `,
-      transparent: true,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
-
-    this.particleSystem = new THREE.Points(geo, mat);
+    this.particleSystem = new THREE.InstancedMesh(geo, mat, count);
+    this.particleSystem.frustumCulled = false;
+    const identity = new THREE.Matrix4();
+    for (let i = 0; i < count; i++) {
+      this.particleSystem.setMatrixAt(i, identity);
+    }
+    this.particleSystem.instanceMatrix.needsUpdate = true;
     this.scene.add(this.particleSystem);
   }
 
@@ -225,104 +327,11 @@ export class Ocean {
     this.godRays = [];
     const rayCount = 14;
 
-    const sharedMaterial = new THREE.ShaderMaterial({
-      uniforms: {
-        time: { value: 0 },
-        opacity: { value: 1.0 },
-        seed: { value: 0.0 },
-      },
-      vertexShader: /* glsl */ `
-        varying vec2 vUv;
-        varying vec3 vWorldPos;
-        void main() {
-          vUv = uv;
-          vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }
-      `,
-      fragmentShader: /* glsl */ `
-        uniform float time;
-        uniform float opacity;
-        uniform float seed;
-        varying vec2 vUv;
-        varying vec3 vWorldPos;
-
-        float hash(vec2 p) {
-          return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-        }
-        float noise(vec2 p) {
-          vec2 i = floor(p);
-          vec2 f = fract(p);
-          f = f * f * (3.0 - 2.0 * f);
-          float a = hash(i);
-          float b = hash(i + vec2(1.0, 0.0));
-          float c = hash(i + vec2(0.0, 1.0));
-          float d = hash(i + vec2(1.0, 1.0));
-          return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-        }
-        float fbm(vec2 p) {
-          float v = 0.0;
-          float a = 0.5;
-          for (int i = 0; i < 5; i++) {
-            v += a * noise(p);
-            p = p * 2.0 + vec2(100.0);
-            a *= 0.5;
-          }
-          return v;
-        }
-
-        void main() {
-          float u = vUv.x;
-          float v = vUv.y;
-
-          // Vertical extinction: bright at top (surface), exponential decay downward
-          float axial = pow(v, 0.35) * smoothstep(0.0, 0.05, v);
-
-          // Horizontal: very soft Gaussian — wide core, extremely soft edges
-          float cx = (u - 0.5) * 2.0; // -1..1
-          float radial = exp(-cx * cx * 8.0);
-
-          // Edge noise: wispy, organic boundary modulation
-          float t = time * 0.06;
-          vec2 np = vec2(
-            vWorldPos.y * 0.03 + seed * 13.7 + t,
-            vWorldPos.x * 0.02 + seed * 7.3
-          );
-          float edgeNoise = fbm(np) * 2.0 - 1.0;
-          // Noise pushes the edge threshold inward/outward
-          radial = smoothstep(0.05, 0.55, radial + edgeNoise * 0.3);
-
-          // Interior shimmer: slow caustic-like brightness variation
-          vec2 np2 = vec2(
-            vWorldPos.x * 0.05 + t * 0.8 + seed * 3.1,
-            vWorldPos.y * 0.04 - t * 0.5
-          );
-          float shimmer = fbm(np2);
-          float intensity = 0.55 + shimmer * 0.55;
-
-          float alpha = axial * radial * intensity * opacity;
-
-          // Subtle colour gradient: warmer core, cooler edges; bluer near bottom
-          // sRGB-authored colors linearized for OutputPass (approx. pow 2.2)
-          vec3 warm = pow(vec3(0.5, 0.7, 0.85), vec3(2.2));
-          vec3 cool = pow(vec3(0.25, 0.45, 0.65), vec3(2.2));
-          vec3 col = mix(cool, warm, radial * axial);
-
-          gl_FragColor = vec4(col, alpha * 0.24);
-        }
-      `,
-      transparent: true,
-      side: THREE.DoubleSide,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
-
     for (let i = 0; i < rayCount; i++) {
       const width = 8 + Math.random() * 16;
       const height = 65 + Math.random() * 55;
       const geo = new THREE.PlaneGeometry(width, height, 1, 1);
-      const mat = sharedMaterial.clone();
-      mat.uniforms.seed.value = i + Math.random();
+      const mat = createGodRayMaterial(i + Math.random());
       const mesh = new THREE.Mesh(geo, mat);
 
       // Spread rays around the player in a ring
@@ -370,9 +379,9 @@ export class Ocean {
     this.particleSystem.material.uniforms.time.value = this.time;
 
     // CPU respawn: only update particles that drift too far from the player
-    const ppos = this.particleSystem.geometry.attributes.position.array;
-    const seeds = this.particleSystem.geometry.attributes.seed.array;
-    const phases = this.particleSystem.geometry.attributes.phase.array;
+    const ppos = this.particleCenters;
+    const seeds = this.particleSeeds;
+    const phases = this.particlePhases;
     let respawned = false;
     for (let i = 0; i < ppos.length; i += 3) {
       const pi = i / 3;
@@ -399,7 +408,7 @@ export class Ocean {
       }
     }
     if (respawned) {
-      this.particleSystem.geometry.attributes.position.needsUpdate = true;
+      this.particleSystem.geometry.attributes.particleCenter.needsUpdate = true;
     }
 
     // Denser, slightly larger snow in mid/deep water, then tighten in abyss for readability.
@@ -427,8 +436,6 @@ export class Ocean {
       const depthFade = 1.0 - THREE.MathUtils.smoothstep(depth, 40, 80);
       this.godRayGroup.visible = true;
       this.godRayGroup.position.set(playerPos.x, 0, playerPos.z);
-      // Camera is at player position; in group-local space that's (0, playerY, 0)
-      const localCamY = playerPos.y;
       for (const ray of this.godRays) {
         ray.mat.uniforms.opacity.value = depthFade;
         ray.mat.uniforms.time.value = this.time;
