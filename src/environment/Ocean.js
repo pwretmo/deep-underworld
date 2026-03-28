@@ -11,10 +11,12 @@ export class Ocean {
     this.ambientLight = new THREE.AmbientLight(0x223344, 0.2);
     scene.add(this.ambientLight);
 
-    // Sun light from above (only visible near surface)
+    // Sun light from above (only visible near surface).
+    // Dynamic shadow-map compilation was causing multi-second startup stalls
+    // on the first interactive render, so keep the light shadowless.
     this.sunLight = new THREE.DirectionalLight(0x6699aa, 0.4);
     this.sunLight.position.set(50, 100, 30);
-    this.sunLight.castShadow = true;
+    this.sunLight.castShadow = false;
     const shadowSize = qualityManager.getSettings().shadowMapSize || 1024;
     this.sunLight.shadow.mapSize.set(shadowSize, shadowSize);
     this.sunLight.shadow.camera.near = 10;
@@ -402,11 +404,11 @@ export class Ocean {
       this.godRayGroup.visible = false;
     }
 
-    // Sun light follows player but fades with depth; disable shadows when too deep
+    // Sun light follows player but fades with depth.
     this.sunLight.position.set(playerPos.x + 50, 100, playerPos.z + 30);
     this.sunLight.target.position.set(playerPos.x, playerPos.y, playerPos.z);
     const sunFade = depth < 100 ? 0.6 * (1 - depth / 100) : 0;
     this.sunLight.intensity = sunFade;
-    this.sunLight.castShadow = depth < 120;
   }
 }
+

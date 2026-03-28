@@ -57,11 +57,14 @@ const RENDER_PIPELINE_TUNING = deepFreeze({
     bloomSuspendThresholdMs: 34,
     // Item 2: depth-based post-FX scale caps
     depthScaleCaps: {
-      surface: 1.0,
+      surface: 0.85,
       mid: 0.85,
       deep: 0.72,
       abyss: 0.6,
     },
+    startupStableThresholdMs: 24,
+    startupStableFrames: 18,
+    startupMaxHoldMs: 9000,
   },
 });
 
@@ -118,14 +121,17 @@ const UnderwaterShader = {
       float depthBlend = clamp(midBlend * 0.45 + deepBlend * 0.7 + abyssBlend * 0.35, 0.0, 1.0);
 
       // Keep aberration subtle: depth-aware, edge-weighted, and hard-capped.
-      float edgeDist = distance(uv, vec2(0.5));
-      float edgeMask = smoothstep(0.2, 0.74, edgeDist);
-      float caStr = (depthBlend * 0.00014 + abyssBlend * 0.00005) * edgeMask * (1.0 - reducedMode * 0.95);
-      caStr = min(caStr, 0.00022);
-      float r = texture2D(tDiffuse, uv + vec2(caStr, caStr * 0.3)).r;
-      float b = texture2D(tDiffuse, uv - vec2(caStr, caStr * 0.2)).b;
-      color.r = r;
-      color.b = b;
+      // Skip the extra texture taps entirely in reduced mode.
+      if (reducedMode < 0.5) {
+        float edgeDist = distance(uv, vec2(0.5));
+        float edgeMask = smoothstep(0.2, 0.74, edgeDist);
+        float caStr = (depthBlend * 0.00014 + abyssBlend * 0.00005) * edgeMask;
+        caStr = min(caStr, 0.00022);
+        float r = texture2D(tDiffuse, uv + vec2(caStr, caStr * 0.3)).r;
+        float b = texture2D(tDiffuse, uv - vec2(caStr, caStr * 0.2)).b;
+        color.r = r;
+        color.b = b;
+      }
 
       // Heavy vignette, but avoid crushing edge details into pure black.
       float vigBase = 0.28 + depthBlend * grading.y;
@@ -151,17 +157,23 @@ const UnderwaterShader = {
       // so require both the flashlight to be active and nearby pixels to share
       // similar brightness before relaxing the deep-water grading.
       float preTintLuma = max(max(color.r, color.g), color.b);
-      // Scale probe to zero when flashlight is off — avoids 4 redundant texture lookups (item 6).
-      vec2 lightProbe = max(vec2(1.0) / resolution, vec2(0.0005)) * flashlightActive;
-      float nearbyLuma = 0.25 * (
-        max(max(texture2D(tDiffuse, uv + vec2(lightProbe.x, 0.0)).r, texture2D(tDiffuse, uv + vec2(lightProbe.x, 0.0)).g), texture2D(tDiffuse, uv + vec2(lightProbe.x, 0.0)).b) +
-        max(max(texture2D(tDiffuse, uv - vec2(lightProbe.x, 0.0)).r, texture2D(tDiffuse, uv - vec2(lightProbe.x, 0.0)).g), texture2D(tDiffuse, uv - vec2(lightProbe.x, 0.0)).b) +
-        max(max(texture2D(tDiffuse, uv + vec2(0.0, lightProbe.y)).r, texture2D(tDiffuse, uv + vec2(0.0, lightProbe.y)).g), texture2D(tDiffuse, uv + vec2(0.0, lightProbe.y)).b) +
-        max(max(texture2D(tDiffuse, uv - vec2(0.0, lightProbe.y)).r, texture2D(tDiffuse, uv - vec2(0.0, lightProbe.y)).g), texture2D(tDiffuse, uv - vec2(0.0, lightProbe.y)).b)
-      );
-      float localSpread = 1.0 - smoothstep(0.08, 0.38, abs(preTintLuma - nearbyLuma));
-      float nearbyLight = smoothstep(0.03, 0.16, nearbyLuma);
-      float litAmount = flashlightActive * smoothstep(0.05, 0.18, preTintLuma) * nearbyLight * localSpread;
+      float litAmount = 0.0;
+      if (flashlightActive > 0.5) {
+        if (reducedMode > 0.5) {
+          litAmount = smoothstep(0.08, 0.22, preTintLuma) * 0.65;
+        } else {
+          vec2 lightProbe = max(vec2(1.0) / resolution, vec2(0.0005));
+          float nearbyLuma = 0.25 * (
+            max(max(texture2D(tDiffuse, uv + vec2(lightProbe.x, 0.0)).r, texture2D(tDiffuse, uv + vec2(lightProbe.x, 0.0)).g), texture2D(tDiffuse, uv + vec2(lightProbe.x, 0.0)).b) +
+            max(max(texture2D(tDiffuse, uv - vec2(lightProbe.x, 0.0)).r, texture2D(tDiffuse, uv - vec2(lightProbe.x, 0.0)).g), texture2D(tDiffuse, uv - vec2(lightProbe.x, 0.0)).b) +
+            max(max(texture2D(tDiffuse, uv + vec2(0.0, lightProbe.y)).r, texture2D(tDiffuse, uv + vec2(0.0, lightProbe.y)).g), texture2D(tDiffuse, uv + vec2(0.0, lightProbe.y)).b) +
+            max(max(texture2D(tDiffuse, uv - vec2(0.0, lightProbe.y)).r, texture2D(tDiffuse, uv - vec2(0.0, lightProbe.y)).g), texture2D(tDiffuse, uv - vec2(0.0, lightProbe.y)).b)
+          );
+          float localSpread = 1.0 - smoothstep(0.08, 0.38, abs(preTintLuma - nearbyLuma));
+          float nearbyLight = smoothstep(0.03, 0.16, nearbyLuma);
+          litAmount = smoothstep(0.05, 0.18, preTintLuma) * nearbyLight * localSpread;
+        }
+      }
       color.rgb *= mix(tint, vec3(1.0), litAmount);
 
       // Keep the deep-ocean depth darkening, but avoid crushing flashlight-lit
@@ -192,13 +204,16 @@ const UnderwaterShader = {
       // A single-sample highlight spill is much cheaper than sampling neighboring
       // texels for bloom, while still keeping bright bioluminescent accents lively.
       float highlight = max(max(color.r, color.g), color.b);
-      vec2 bloomProbe = max(vec2(1.0) / resolution, vec2(0.0006));
-      float neighborPeak = 0.25 * (
-        max(max(texture2D(tDiffuse, uv + vec2(bloomProbe.x, 0.0)).r, texture2D(tDiffuse, uv + vec2(bloomProbe.x, 0.0)).g), texture2D(tDiffuse, uv + vec2(bloomProbe.x, 0.0)).b) +
-        max(max(texture2D(tDiffuse, uv - vec2(bloomProbe.x, 0.0)).r, texture2D(tDiffuse, uv - vec2(bloomProbe.x, 0.0)).g), texture2D(tDiffuse, uv - vec2(bloomProbe.x, 0.0)).b) +
-        max(max(texture2D(tDiffuse, uv + vec2(0.0, bloomProbe.y)).r, texture2D(tDiffuse, uv + vec2(0.0, bloomProbe.y)).g), texture2D(tDiffuse, uv + vec2(0.0, bloomProbe.y)).b) +
-        max(max(texture2D(tDiffuse, uv - vec2(0.0, bloomProbe.y)).r, texture2D(tDiffuse, uv - vec2(0.0, bloomProbe.y)).g), texture2D(tDiffuse, uv - vec2(0.0, bloomProbe.y)).b)
-      );
+      float neighborPeak = highlight;
+      if (reducedMode < 0.5) {
+        vec2 bloomProbe = max(vec2(1.0) / resolution, vec2(0.0006));
+        neighborPeak = 0.25 * (
+          max(max(texture2D(tDiffuse, uv + vec2(bloomProbe.x, 0.0)).r, texture2D(tDiffuse, uv + vec2(bloomProbe.x, 0.0)).g), texture2D(tDiffuse, uv + vec2(bloomProbe.x, 0.0)).b) +
+          max(max(texture2D(tDiffuse, uv - vec2(bloomProbe.x, 0.0)).r, texture2D(tDiffuse, uv - vec2(bloomProbe.x, 0.0)).g), texture2D(tDiffuse, uv - vec2(bloomProbe.x, 0.0)).b) +
+          max(max(texture2D(tDiffuse, uv + vec2(0.0, bloomProbe.y)).r, texture2D(tDiffuse, uv + vec2(0.0, bloomProbe.y)).g), texture2D(tDiffuse, uv + vec2(0.0, bloomProbe.y)).b) +
+          max(max(texture2D(tDiffuse, uv - vec2(0.0, bloomProbe.y)).r, texture2D(tDiffuse, uv - vec2(0.0, bloomProbe.y)).g), texture2D(tDiffuse, uv - vec2(0.0, bloomProbe.y)).b)
+        );
+      }
       float sparkleIsolated =
         smoothstep(0.04, 0.2, highlight - neighborPeak) *
         (1.0 - smoothstep(0.08, 0.3, neighborPeak));
@@ -295,10 +310,20 @@ export class UnderwaterEffect {
     this._renderEmaMs = 16;
     this._qualityMaxScale = qualityManager.getSettings().postProcessScale;
     this._depthScaleCap = 1.0;
-    this._postProcessMaxScale = this._qualityMaxScale;
+    this._startupScaleCap = 1.0;
+    this._postProcessMaxScale = Math.min(
+      this._qualityMaxScale,
+      this._depthScaleCap,
+      this._startupScaleCap
+    );
     this._reducedShaderMode = false;
     this._isSoftwareRenderer = false;
     this._moderatePressureFrames = 0;
+    this._startupGuard = {
+      active: false,
+      stableFrames: 0,
+      endsAt: 0,
+    };
     // Item 4: cache quantized pass-state inputs to skip unnecessary bloom recomputation
     this._passStateCacheDepth = -9999;
     this._passStateCacheFlashlight = null;
@@ -312,9 +337,7 @@ export class UnderwaterEffect {
 
     window.addEventListener('qualitychange', (e) => {
       this._qualityMaxScale = e.detail.settings.postProcessScale;
-      this._postProcessMaxScale = Math.min(this._qualityMaxScale, this._depthScaleCap);
-      this._rebuildScaleLadder();
-      this._setScaleIndex(this._findScaleIndex(this._composerScale), { force: true, skipCooldown: true });
+      this._refreshScaleCap({ force: true, skipCooldown: true });
       this._setupBloom(e.detail.tier);
     });
   }
@@ -455,6 +478,67 @@ export class UnderwaterEffect {
     }
   }
 
+  _refreshScaleCap({ force = false, skipCooldown = false } = {}) {
+    const newMax = Math.min(
+      this._qualityMaxScale,
+      this._depthScaleCap,
+      this._startupScaleCap
+    );
+    if (!force && Math.abs(newMax - this._postProcessMaxScale) < 0.005) {
+      return;
+    }
+
+    this._postProcessMaxScale = newMax;
+    this._rebuildScaleLadder();
+    const clampedIndex = this._findScaleIndex(Math.min(this._composerScale, newMax));
+    this._setScaleIndex(clampedIndex, { force: true, skipCooldown });
+  }
+
+  beginStartupGuard() {
+    const now = performance.now();
+    const targetScale = qualityManager.tier === 'ultra' ? 0.6 : 0.72;
+    this._startupGuard.active = true;
+    this._startupGuard.stableFrames = 0;
+    this._startupGuard.endsAt = now + this.tuning.performance.startupMaxHoldMs;
+    this._startupScaleCap = Math.min(this._startupScaleCap, targetScale);
+    this._refreshScaleCap({ force: true, skipCooldown: true });
+    this._setScaleIndex(this._findScaleIndex(targetScale), { force: true, skipCooldown: true, holdRecovery: true, now });
+    this._stableRecoveryFrames = 0;
+    this._moderatePressureFrames = 0;
+    this._reducedShaderMode = true;
+    this.underwaterPass.uniforms.reducedMode.value = 1.0;
+    if (this._bloomPass && !this._bloomSuspended) {
+      this._setBloomSuspended(true, now);
+    }
+  }
+
+  isStartupResponsive() {
+    return !this._startupGuard.active ||
+      this._startupGuard.stableFrames >= this.tuning.performance.startupStableFrames;
+  }
+
+  _updateStartupGuard(renderMs, now) {
+    if (!this._startupGuard.active) return;
+
+    if (renderMs <= this.tuning.performance.startupStableThresholdMs) {
+      this._startupGuard.stableFrames++;
+    } else {
+      this._startupGuard.stableFrames = 0;
+    }
+
+    if (
+      this._startupGuard.stableFrames < this.tuning.performance.startupStableFrames &&
+      now < this._startupGuard.endsAt
+    ) {
+      return;
+    }
+
+    this._startupGuard.active = false;
+    this._startupGuard.stableFrames = 0;
+    this._startupScaleCap = 1.0;
+    this._refreshScaleCap({ force: true, skipCooldown: true });
+  }
+
   _applyComposerScale(force = false) {
     this._nativeComposerPixelRatio = Math.max(this.renderer.getPixelRatio(), 1);
     const nextScale = THREE.MathUtils.clamp(
@@ -564,6 +648,7 @@ export class UnderwaterEffect {
 
     // Software-renderer sessions hold their reduced profile permanently — never recover.
     if (!this._isSoftwareRenderer &&
+      !this._startupGuard.active &&
       this._bloomSuspended &&
       this._bloomPass &&
       now >= this._bloomSuspendedUntil &&
@@ -600,7 +685,10 @@ export class UnderwaterEffect {
       this._moderatePressureFrames >= this.tuning.performance.sustainedModeratePressureFrames;
 
     // Items 6/7: activate reduced shader mode under any tier of pressure
-    const shouldReduceShader = underPressure || sustainedModeratePressure;
+    const shouldReduceShader =
+      this._startupGuard.active ||
+      underPressure ||
+      sustainedModeratePressure;
     if (shouldReduceShader !== this._reducedShaderMode) {
       this._reducedShaderMode = shouldReduceShader;
       this.underwaterPass.uniforms.reducedMode.value = shouldReduceShader ? 1.0 : 0.0;
@@ -631,6 +719,7 @@ export class UnderwaterEffect {
       this._stableRecoveryFrames++;
       if (
         this._scaleIndex > 0 &&
+        !this._startupGuard.active &&
         now >= this._nextScaleChangeAt &&
         now >= this._recoveryAllowedAt &&
         this._stableRecoveryFrames >= this.tuning.performance.stableFramesForRecovery
@@ -641,6 +730,8 @@ export class UnderwaterEffect {
     } else {
       this._stableRecoveryFrames = 0;
     }
+
+    this._updateStartupGuard(renderMs, now);
   }
 
   getDiagnostics() {
@@ -696,14 +787,7 @@ export class UnderwaterEffect {
 
     if (Math.abs(cap - this._depthScaleCap) < 0.005) return;
     this._depthScaleCap = cap;
-    const newMax = Math.min(this._qualityMaxScale, cap);
-    if (Math.abs(newMax - this._postProcessMaxScale) < 0.005) return;
-    this._postProcessMaxScale = newMax;
-    this._rebuildScaleLadder();
-    const clampedIndex = this._findScaleIndex(Math.min(this._composerScale, newMax));
-    // force:true ensures the cap is always enforced even when the index matches the current value,
-    // preventing the composer from rendering above the depth-based scale ceiling.
-    this._setScaleIndex(clampedIndex, { force: true });
+    this._refreshScaleCap({ force: true, skipCooldown: true });
   }
 
   /**
@@ -748,3 +832,5 @@ export class UnderwaterEffect {
     this.composer.render();
   }
 }
+
+
