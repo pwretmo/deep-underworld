@@ -3,6 +3,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { qualityManager } from '../QualityManager.js';
 
 function deepFreeze(obj) {
@@ -364,6 +365,10 @@ export class UnderwaterEffect {
       this.tuning.bloom.radius * 2.4
     );
     this.composer.addPass(this.underwaterPass);
+
+    // OutputPass for correct sRGB conversion and tone mapping
+    this._outputPass = new OutputPass();
+    this.composer.addPass(this._outputPass);
 
     // UnrealBloomPass for ultra tier
     this._bloomPass = null;
