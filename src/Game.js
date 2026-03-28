@@ -1078,24 +1078,24 @@ export class Game {
     this._envColorA.set(0x004b70); // surface teal-blue
     this._envColorB.set(0x001b2b); // twilight blue-black
     this._envColorC.set(0x02060d); // dark zone indigo-black
-    this._envColorD.set(0x000205); // near-black abyss with faint blue for silhouettes
+    this._envColorD.set(0x010408); // near-black abyss with faint blue for silhouettes
 
     this._fogColor.copy(this._envColorA);
     this._fogColor.lerp(this._envColorB, twilight);
     this._fogColor.lerp(this._envColorC, darkZone);
     this._fogColor.lerp(this._envColorD, abyss);
 
-    const nearTwilight = THREE.MathUtils.lerp(5.0, 1.6, twilight);
-    const nearDark = THREE.MathUtils.lerp(nearTwilight, 0.45, darkZone);
-    let fogNear = THREE.MathUtils.lerp(nearDark, 0.18, abyss);
+    const nearTwilight = THREE.MathUtils.lerp(5.0, 2.0, twilight);
+    const nearDark = THREE.MathUtils.lerp(nearTwilight, 0.7, darkZone);
+    let fogNear = THREE.MathUtils.lerp(nearDark, 0.3, abyss);
 
-    const farTwilight = THREE.MathUtils.lerp(220, 90, twilight);
-    const farDark = THREE.MathUtils.lerp(farTwilight, 48, darkZone);
-    let fogFar = THREE.MathUtils.lerp(farDark, 42, abyss);
+    const farTwilight = THREE.MathUtils.lerp(220, 110, twilight);
+    const farDark = THREE.MathUtils.lerp(farTwilight, 58, darkZone);
+    let fogFar = THREE.MathUtils.lerp(farDark, 50, abyss);
 
     const ambientTwilight = THREE.MathUtils.lerp(0.24, 0.12, twilight);
-    const ambientDark = THREE.MathUtils.lerp(ambientTwilight, 0.045, darkZone);
-    const ambientIntensity = THREE.MathUtils.lerp(ambientDark, 0.038, abyss);
+    const ambientDark = THREE.MathUtils.lerp(ambientTwilight, 0.06, darkZone);
+    const ambientIntensity = THREE.MathUtils.lerp(ambientDark, 0.05, abyss);
 
     // When flashlight is on, push fog back so the beam can illuminate the scene.
     // The push is proportional to depth — stronger at deeper zones where fog is thickest.

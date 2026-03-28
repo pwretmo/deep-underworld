@@ -19,12 +19,24 @@ const RENDER_PIPELINE_TUNING = deepFreeze({
     deep: 340,
     abyss: 720,
   },
+  extinction: {
+    r: 0.38,
+    g: 0.065,
+    b: 0.018,
+  },
+  scatter: {
+    r: 0.015,
+    g: 0.055,
+    b: 0.085,
+    density: 0.0042,
+  },
   grading: {
     contrast: 1.2,
-    vignette: 0.88,
+    vignette: 0.42,
     grain: 0.018,
-    scanline: 0.24,
-    darkening: 0.55,
+    scanline: 0.0,
+    darkening: 0.0,
+    eyeAdapt: 0.15,
   },
   highlightRoll: {
     start: 0.62,
@@ -77,8 +89,12 @@ const UnderwaterShader = {
     flashlightActive: { value: 0 },
     resolution: { value: new THREE.Vector2() },
     depthThresholds: { value: new THREE.Vector3(130, 340, 720) },
-    grading: { value: new THREE.Vector4(1.2, 0.88, 0.018, 0.24) },
-    darkening: { value: 0.55 },
+    grading: { value: new THREE.Vector4(1.2, 0.42, 0.018, 0.0) },
+    darkening: { value: 0.0 },
+    extinction: { value: new THREE.Vector3(0.38, 0.065, 0.018) },
+    scatterColor: { value: new THREE.Vector3(0.015, 0.055, 0.085) },
+    scatterDensity: { value: 0.0042 },
+    eyeAdapt: { value: 0.15 },
     highlightRoll: { value: new THREE.Vector3(0.62, 0.34, 0.62) },
     bloomParams: { value: new THREE.Vector3(0.28, 0.78, 1.6) },
     reducedMode: { value: 0.0 },
@@ -100,6 +116,10 @@ const UnderwaterShader = {
     uniform vec3 depthThresholds;
     uniform vec4 grading;
     uniform float darkening;
+    uniform vec3 extinction;
+    uniform vec3 scatterColor;
+    uniform float scatterDensity;
+    uniform float eyeAdapt;
     uniform vec3 highlightRoll;
     uniform vec3 bloomParams;
     uniform float reducedMode;
@@ -133,26 +153,24 @@ const UnderwaterShader = {
         color.b = b;
       }
 
-      // Heavy vignette, but avoid crushing edge details into pure black.
-      float vigBase = 0.28 + depthBlend * grading.y;
-      float vigStr = min(vigBase, 0.9);
+      // Vignette — lighter to preserve edge detail at depth.
+      float vigBase = 0.12 + depthBlend * grading.y;
+      float vigStr = min(vigBase, 0.65);
       vec2 center = uv - 0.5;
       float vigDist = dot(center, center);
       float vignette = 1.0 - smoothstep(0.12, 0.42, vigDist) * vigStr;
       color.rgb *= max(vignette, 0.2);
 
-      // Water column absorption shifts ambient light toward blue with depth.
-      // Direct flashlight illumination travels a short path through water,
-      // so nearby lit surfaces keep their natural color.
-      float depthT = clamp(depth / (depthThresholds.z * 0.75), 0.0, 1.0);
-        vec3 shallowTint = vec3(0.65, 0.8, 1.0);
-        vec3 deepTint = vec3(0.12, 0.19, 0.27);
-        vec3 abyssTint = vec3(0.038, 0.068, 0.1);
-      vec3 tint = depthT < 0.5
-        ? mix(shallowTint, deepTint, depthT * 2.0)
-        : mix(deepTint, abyssTint, (depthT - 0.5) * 2.0);
+      // Physically-based water column attenuation (Beer-Lambert extinction).
+      // Red light absorbs first, then green, then blue — preserving relative
+      // contrast between nearby surfaces instead of crushing to uniform black.
+      vec3 transmittance = exp(-extinction * depth);
 
-      // Exempt flashlight-illuminated pixels from the depth tint.
+      // Forward scatter: blue-green ambient glow accumulated along the view path.
+      float scatterMix = 1.0 - exp(-scatterDensity * depth);
+      vec3 scatter = scatterColor * scatterMix;
+
+      // Exempt flashlight-illuminated pixels from attenuation.
       // Bright emissive pixels should not read as flashlight spill on their own,
       // so require both the flashlight to be active and nearby pixels to share
       // similar brightness before relaxing the deep-water grading.
@@ -174,21 +192,27 @@ const UnderwaterShader = {
           litAmount = smoothstep(0.05, 0.18, preTintLuma) * nearbyLight * localSpread;
         }
       }
-      color.rgb *= mix(tint, vec3(1.0), litAmount);
 
-      // Keep the deep-ocean depth darkening, but avoid crushing flashlight-lit
-      // nearby surfaces that should remain readable.
-      float depthDarkening = 1.0 - depthBlend * darkening;
-      float ambientDarkening = max(depthDarkening, 0.35);
-      color.rgb *= mix(vec3(ambientDarkening), vec3(1.0), litAmount);
+      // Apply extinction to ambient surfaces; flashlight-lit pixels keep natural color.
+      // Add forward scatter to simulate in-scattered ambient light.
+      color.rgb = color.rgb * mix(transmittance, vec3(1.0), litAmount)
+                + scatter * (1.0 - litAmount * 0.7);
 
       // Depth-aware contrast to strengthen separation in mid/deep zones.
       float contrast = mix(1.0, grading.x, depthBlend);
       color.rgb = (color.rgb - 0.18) * contrast + 0.18;
 
+      // Luminance-based eye adaptation: preserve local contrast at mid-depth
+      // without flattening the oppressive abyss.
+      float adaptLuma = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
+      float midtoneMask = smoothstep(0.005, 0.08, adaptLuma)
+                        * (1.0 - smoothstep(0.25, 0.6, adaptLuma));
+      float adaptAmount = midBlend * eyeAdapt * (1.0 - deepBlend * 0.5);
+      color.rgb += color.rgb * midtoneMask * adaptAmount;
+
       // Preserve faint hero silhouettes in abyss by gently lifting midtones.
       float luma = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
-      float silhouetteLift = smoothstep(0.04, 0.32, luma) * 0.022 * abyssBlend;
+      float silhouetteLift = smoothstep(0.02, 0.25, luma) * 0.028 * abyssBlend;
       color.rgb += silhouetteLift;
 
       // Film grain — heavier for oppressive atmosphere; reduced in low-cost mode (items 6/7)
@@ -289,6 +313,18 @@ export class UnderwaterEffect {
       this.tuning.grading.scanline
     );
     this.underwaterPass.uniforms.darkening.value = this.tuning.grading.darkening;
+    this.underwaterPass.uniforms.extinction.value.set(
+      this.tuning.extinction.r,
+      this.tuning.extinction.g,
+      this.tuning.extinction.b
+    );
+    this.underwaterPass.uniforms.scatterColor.value.set(
+      this.tuning.scatter.r,
+      this.tuning.scatter.g,
+      this.tuning.scatter.b
+    );
+    this.underwaterPass.uniforms.scatterDensity.value = this.tuning.scatter.density;
+    this.underwaterPass.uniforms.eyeAdapt.value = this.tuning.grading.eyeAdapt;
     this.underwaterPass.uniforms.highlightRoll.value.set(
       this.tuning.highlightRoll.start,
       this.tuning.highlightRoll.range,
