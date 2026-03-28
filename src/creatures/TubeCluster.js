@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { LOD_NEAR_DISTANCE, LOD_MEDIUM_DISTANCE, toStandardMaterial } from './lodUtils.js';
 import { qualityManager } from '../QualityManager.js';
 
@@ -246,6 +247,10 @@ export class TubeCluster {
     const tierGroup = new THREE.Group();
     const isFar = tierName === 'far';
 
+    if (isFar) {
+      return this._buildFarTier(profile, tierGroup);
+    }
+
     // ── Materials ─────────────────────────────────────────────────────────────
     // Fix: create temp MeshPhysicalMaterial, convert, then dispose it immediately
     // so the GPU resources for the intermediate material are not leaked.
@@ -458,6 +463,97 @@ export class TubeCluster {
              particles, base, profile };
   }
 
+  _buildFarTier(profile, tierGroup) {
+    const tubeMatSource = new THREE.MeshPhysicalMaterial({
+      color: 0x151522, roughness: 0.55, metalness: 0,
+      emissive: 0x1e2e40, emissiveIntensity: 0.2,
+    });
+    const farMat = toStandardMaterial(tubeMatSource);
+    tubeMatSource.dispose();
+
+    const geometries = [];
+
+    const baseGeo = new THREE.CylinderGeometry(1.5, 2, 0.8, profile.baseRadSegs, profile.baseHtSegs);
+    const basePos = baseGeo.attributes.position;
+    for (let v = 0; v < basePos.count; v++) {
+      const y = basePos.getY(v);
+      const angle = Math.atan2(basePos.getZ(v), basePos.getX(v));
+      const bump = Math.sin(angle * 5 + y * 3) * 0.05;
+      basePos.setX(v, basePos.getX(v) * (1 + bump * 0.25));
+      basePos.setZ(v, basePos.getZ(v) * (1 + bump * 0.25));
+    }
+    baseGeo.computeVertexNormals();
+    geometries.push(baseGeo);
+
+    const tubeCount = profile.tubeCountMin
+      + Math.floor(Math.random() * (profile.tubeCountMax - profile.tubeCountMin + 1));
+
+    for (let i = 0; i < tubeCount; i++) {
+      const height = 1.5 + Math.random() * 3.5;
+      const radius = 0.08 + Math.random() * 0.1;
+      const angle = (i / tubeCount) * TWO_PI + Math.random() * 0.3;
+      const clusterR = 0.3 + Math.random() * 0.7;
+      const posX = Math.cos(angle) * clusterR;
+      const posZ = Math.sin(angle) * clusterR;
+
+      const tubeGeo = new THREE.CylinderGeometry(
+        radius,
+        radius * 1.2,
+        height,
+        profile.tubeRadSegs,
+        profile.tubeHtSegs
+      );
+      tubeGeo.translate(posX, height * 0.5, posZ);
+      geometries.push(tubeGeo);
+    }
+
+    const mergedGeo = mergeGeometries(geometries, false);
+    mergedGeo.computeVertexNormals();
+    mergedGeo.computeBoundingSphere();
+
+    let farUniforms = null;
+    if (profile.animInterval < 9999) {
+      farUniforms = { uFarTime: { value: 0 } };
+      farMat.userData.shaderUniforms = farUniforms;
+      farMat.onBeforeCompile = (shader) => {
+        Object.assign(shader.uniforms, farUniforms);
+        shader.vertexShader = shader.vertexShader
+          .replace(
+            '#include <common>',
+            `#include <common>
+uniform float uFarTime;`
+          )
+          .replace(
+            '#include <begin_vertex>',
+            `#include <begin_vertex>
+float tcHeight = max(position.y, 0.0);
+float tcPulse = 1.0 + sin(uFarTime * 0.55) * 0.012;
+transformed.xz *= tcPulse;
+transformed.x += sin(uFarTime * 0.7 + position.y * 1.8 + position.z * 0.6) * 0.018 * tcHeight;
+transformed.z += cos(uFarTime * 0.5 + position.y * 1.6 + position.x * 0.6) * 0.018 * tcHeight;`
+          );
+        farMat.userData.shader = shader;
+      };
+      farMat.customProgramCacheKey = () => 'tc-far-ultra-v1';
+    }
+
+    const farMesh = new THREE.Mesh(mergedGeo, farMat);
+    tierGroup.add(farMesh);
+
+    return {
+      group: tierGroup,
+      tubeMesh: null,
+      openMesh: null,
+      tubeData: [],
+      frillMats: [],
+      fringeMeshes: [],
+      particles: null,
+      base: farMesh,
+      farUniforms,
+      profile,
+    };
+  }
+
   // ── Substrate particles — vertex-shader driven, no CPU buffer updates ─────
 
   _buildParticles() {
@@ -513,16 +609,18 @@ export class TubeCluster {
       uFrillTime:  { value: 0.0 },
       uFrillPhase: { value: tubeIdx * 1.7 },
     };
+    const baseEmissiveIntensity = 0.55;
 
     const mat = new THREE.MeshPhysicalMaterial({
       color: 0x181030, roughness: 0.2, metalness: 0,
       transparent: true, opacity: 0.72,
-      emissive: 0x50208a, emissiveIntensity: 0.55,
+      emissive: 0x50208a, emissiveIntensity: baseEmissiveIntensity,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
 
     mat.userData.shaderUniforms = uniforms;
+    mat.userData.baseEmissiveIntensity = baseEmissiveIntensity;
 
     mat.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, uniforms);
@@ -664,6 +762,7 @@ totalEmissiveRadiance += vec3(0.2, 0.6, 1.0) * tcFresnel * 0.55;`
     const extTip = pts[5].clone();
 
     return {
+      tubeIndex: index,
       mesh, tipMesh, tipMat, wormMat, pts, extTip,
       emergencePhase: 0.0,
       extendRate:   0.28 + Math.random() * 0.18,
@@ -721,12 +820,19 @@ totalEmissiveRadiance += vec3(0.2, 0.6, 1.0) * tcFresnel * 0.55;`
       }
     }
 
-    // Tube sway — damped spring + opening ring co-update
-    this._updateTubeSway(dt, tier, t);
+    // Far LOD stays merged and static except for Ultra, where the silhouette uses
+    // vertex-shader-only motion and the CPU only refreshes the time uniform.
+    if (tier.farUniforms) {
+      tier.farUniforms.uFarTime.value = t;
+    } else if (tier.tubeMesh && tier.tubeData.length > 0) {
+      // Tube sway — damped spring + opening ring co-update
+      this._updateTubeSway(dt, tier, t);
+    }
 
     if (tierName === 'near') {
       // Worm emergence/feeding/retraction
       if (this._wormData.length > 0) this._updateWorms(dt, t, nearPlayer);
+      this._updateFrillFeedingGlow(tier, t);
       // Fringe flutter
       this._updateFringe(t, tier);
       // Symbiotic interaction — occasional check
@@ -802,6 +908,26 @@ totalEmissiveRadiance += vec3(0.2, 0.6, 1.0) * tcFresnel * 0.55;`
       const flutter = Math.sin(t * 2.1 + fd.phase) * 0.15;
       fd.mesh.rotation.x = fd.baseRotX + flutter * Math.sin(fd.angle);
       fd.mesh.rotation.z = fd.baseRotZ + flutter * Math.cos(fd.angle);
+    }
+  }
+
+  _updateFrillFeedingGlow(tier, t) {
+    if (!tier.frillMats.length) return;
+
+    const glowByTube = new Array(tier.frillMats.length).fill(0);
+
+    for (const wd of this._wormData) {
+      if (wd.tubeIndex >= glowByTube.length || wd.state !== 'feeding') continue;
+
+      const glowPulse = 0.5 + 0.5 * Math.sin(wd.feedingPhase * 1.15 + t * 2.0);
+      const glow = wd.emergencePhase * (0.35 + glowPulse * 0.55);
+      glowByTube[wd.tubeIndex] = Math.max(glowByTube[wd.tubeIndex], glow);
+    }
+
+    for (let i = 0; i < tier.frillMats.length; i++) {
+      const frillMat = tier.frillMats[i];
+      const baseIntensity = frillMat.userData.baseEmissiveIntensity ?? 0.55;
+      frillMat.emissiveIntensity = baseIntensity + glowByTube[i];
     }
   }
 
