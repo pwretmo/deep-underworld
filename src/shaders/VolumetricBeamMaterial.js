@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from "three";
 
 /**
  * Volumetric beam shader for the flashlight cone.
@@ -343,7 +343,7 @@ export function createFallbackBeamMaterial() {
   return new THREE.MeshBasicMaterial({
     color: 0x8899bb,
     transparent: true,
-    opacity: 0.032,
+    opacity: 0.022,
     blending: THREE.AdditiveBlending,
     side: THREE.DoubleSide,
     depthWrite: false,
