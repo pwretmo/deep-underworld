@@ -14,7 +14,8 @@ import * as THREE from 'three';
 const VolumetricBeamShader = {
   uniforms: {
     time: { value: 0 },
-    beamColor: { value: new THREE.Color(0x8899bb) },
+    // Color authored as sRGB hex; convert to linear so OutputPass encodes correctly
+    beamColor: { value: new THREE.Color(0x8899bb).convertSRGBToLinear() },
     beamLength: { value: 50.0 },
     baseOpacity: { value: 0.035 },
     // Scattering anisotropy: 0 = isotropic, positive = forward-scatter
@@ -149,6 +150,7 @@ const VolumetricBeamShader = {
       vec3 finalColor = mix(beamColor, fogColor, fogFactor * 0.6);
       density *= (1.0 - fogFactor * 0.7);
 
+      // beamColor uniform is already in linear space; OutputPass handles sRGB encoding
       gl_FragColor = vec4(finalColor, clamp(density, 0.0, 0.15));
     }
   `,
@@ -173,7 +175,8 @@ export function createVolumetricBeamMaterial() {
 const AdvancedVolumetricBeamShader = {
   uniforms: {
     time: { value: 0 },
-    beamColor: { value: new THREE.Color(0x8eaad1) },
+    // Color authored as sRGB hex; convert to linear so OutputPass encodes correctly
+    beamColor: { value: new THREE.Color(0x8eaad1).convertSRGBToLinear() },
     beamLength: { value: 54.0 },
     baseOpacity: { value: 0.042 },
     anisotropy: { value: 0.63 },
@@ -310,6 +313,7 @@ const AdvancedVolumetricBeamShader = {
       vec3 finalColor = mix(depthTint, fogColor, fogFactor * 0.65);
       density *= (1.0 - fogFactor * 0.68);
 
+      // beamColor uniform is already in linear space; OutputPass handles sRGB encoding
       gl_FragColor = vec4(finalColor, clamp(density, 0.0, 0.10));
     }
   `,
@@ -422,9 +426,10 @@ const VolumetricDustShader = {
       float depthDim = mix(1.0, 0.3, vAxialT);
 
       // Slight color variation per particle
+      // sRGB-authored palette linearized for OutputPass (approx. pow 2.2)
       vec3 particleColor = mix(
-        vec3(0.6, 0.68, 0.8),
-        vec3(0.75, 0.82, 0.95),
+        pow(vec3(0.6, 0.68, 0.8), vec3(2.2)),
+        pow(vec3(0.75, 0.82, 0.95), vec3(2.2)),
         sin(vPhase * 3.14) * 0.5 + 0.5
       );
 

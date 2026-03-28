@@ -194,6 +194,7 @@ const sacFragmentPars = /* glsl */ `
 `;
 
 const sacFragmentMain = /* glsl */ `
+  // Color constants are linear-space emissive contributions; OutputPass handles sRGB encoding
   float fresnel = pow(1.0 - max(dot(vWorldNormal, vViewDir), 0.0), 3.0);
   gl_FragColor.rgb += vec3(0.18, 0.06, 0.12) * fresnel * 1.5;
   float veinGlow = sin(vSacUv.y * 12.0 + uTime * 3.0 + uHeartbeatPhase) * 0.5 + 0.5;

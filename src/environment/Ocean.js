@@ -140,7 +140,8 @@ export class Ocean {
         varying float vBokeh;
 
         void main() {
-          vColor = color;
+          // sRGB-authored color attribute linearized for OutputPass (approx. pow 2.2)
+          vColor = pow(color, vec3(2.2));
           // GPU-driven drift: oscillation around base position
           vec3 pos = position;
           float idx = seed + phase;
@@ -301,8 +302,9 @@ export class Ocean {
           float alpha = axial * radial * intensity * opacity;
 
           // Subtle colour gradient: warmer core, cooler edges; bluer near bottom
-          vec3 warm = vec3(0.5, 0.7, 0.85);
-          vec3 cool = vec3(0.25, 0.45, 0.65);
+          // sRGB-authored colors linearized for OutputPass (approx. pow 2.2)
+          vec3 warm = pow(vec3(0.5, 0.7, 0.85), vec3(2.2));
+          vec3 cool = pow(vec3(0.25, 0.45, 0.65), vec3(2.2));
           vec3 col = mix(cool, warm, radial * axial);
 
           gl_FragColor = vec4(col, alpha * 0.24);

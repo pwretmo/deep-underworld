@@ -288,6 +288,8 @@ const UnderwaterShader = {
 
       color.rgb = clamp(color.rgb, 0.0, 1.0);
 
+      // Output is linear; OutputPass at the end of the composer chain
+      // handles tone mapping and sRGB encoding for the final canvas output.
       gl_FragColor = color;
     }
   `,

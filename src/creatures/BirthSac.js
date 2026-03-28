@@ -157,6 +157,7 @@ const _sacFragPars = /* glsl */ `
 `;
 const _sacFragMain = /* glsl */ `
   // Fresnel rim-light — sac silhouette visible in dark abyss water
+  // Color constants are linear-space emissive contributions; OutputPass handles sRGB encoding
   float bsFres = pow(1.0 - max(dot(vBsWorldNormal, vBsViewDir), 0.0), 3.0);
   gl_FragColor.rgb += vec3(0.22, 0.07, 0.14) * bsFres * 1.8;
   // Heartbeat capillary glow through membrane

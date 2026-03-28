@@ -619,7 +619,8 @@ transformed.z += cos(uFarTime * 0.5 + position.y * 1.6 + position.x * 0.6) * 0.0
         void main() {
           float d = length(gl_PointCoord - 0.5);
           if (d > 0.5) discard;
-          gl_FragColor = vec4(0.4, 0.5, 0.6, 0.5 - d);
+          // sRGB-authored color linearized for OutputPass (approx. pow 2.2)
+          gl_FragColor = vec4(pow(vec3(0.4, 0.5, 0.6), vec3(2.2)), 0.5 - d);
         }
       `,
       transparent: true,
