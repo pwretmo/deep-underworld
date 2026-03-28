@@ -7,14 +7,14 @@ export class Ocean {
     this.particles = [];
     this.time = 0;
 
-    // Ambient light - dim for darker atmosphere
-    this.ambientLight = new THREE.AmbientLight(0x223344, 0.2);
+    // Ambient light — richer blue fill for underwater atmosphere
+    this.ambientLight = new THREE.AmbientLight(0x2a4466, 0.22);
     scene.add(this.ambientLight);
 
     // Sun light from above (only visible near surface).
     // Dynamic shadow-map compilation was causing multi-second startup stalls
     // on the first interactive render, so keep the light shadowless.
-    this.sunLight = new THREE.DirectionalLight(0x6699aa, 0.4);
+    this.sunLight = new THREE.DirectionalLight(0x7099bb, 0.45);
     this.sunLight.position.set(50, 100, 30);
     this.sunLight.castShadow = false;
     const shadowSize = qualityManager.getSettings().shadowMapSize || 1024;
