@@ -1,21 +1,31 @@
 import * as THREE from 'three';
 import { LOD_NEAR_DISTANCE, LOD_MEDIUM_DISTANCE, toStandardMaterial } from './lodUtils.js';
+import { qualityManager } from '../QualityManager.js';
 
 const TWO_PI = Math.PI * 2;
 
 // ── Physics / animation tuning constants ─────────────────────────────────────
-const TUBE_SWAY_STIFFNESS     = 2.2;   // spring stiffness for current-driven sway
-const TUBE_SWAY_DAMPING       = 0.85;  // damping ratio for sway spring
-const MAX_PHYSICS_DT          = 0.05;  // maximum physics timestep (s) to prevent large steps
-const MIN_REEMERGENCE_DELAY   = 0.5;   // minimum per-worm re-emergence delay after player leaves (s)
-const MAX_REEMERGENCE_DELAY   = 1.1;   // maximum additional random delay on top of minimum (s)
+const TUBE_SWAY_STIFFNESS    = 2.2;   // spring stiffness for current-driven sway
+const TUBE_SWAY_DAMPING      = 0.85;  // damping ratio for sway spring
+const MAX_PHYSICS_DT         = 0.05;  // maximum physics timestep (s) to prevent large steps
+const MIN_REEMERGENCE_DELAY  = 0.5;   // minimum per-worm re-emergence delay after player leaves (s)
+const MAX_REEMERGENCE_DELAY  = 1.1;   // maximum additional random delay on top of minimum (s)
+const SYMBIOTIC_PROXIMITY_SQ = 0.04;  // squared distance (0.2 m) for worm tip interaction
+const SYMBIOTIC_CHECK_EVERY  = 60;    // frames between symbiotic proximity checks
 
 // ── Pre-allocated temporaries — zero per-frame allocations ───────────────────
-const _mat4   = new THREE.Matrix4();
+const _mat4A  = new THREE.Matrix4();
+const _mat4B  = new THREE.Matrix4();  // second matrix for opening ring update
 const _vec3A  = new THREE.Vector3();
-const _quat   = new THREE.Quaternion();
-const _scaleV = new THREE.Vector3();
+const _vec3B  = new THREE.Vector3();  // second temp for symbiotic proximity checks
+const _quatA  = new THREE.Quaternion();
+const _quatB  = new THREE.Quaternion();  // second quaternion for opening ring
+const _scaleA = new THREE.Vector3();
+const _scaleB = new THREE.Vector3();     // second scale for opening ring
 const _euler  = new THREE.Euler();
+
+// ── LOD tier names — defines addLevel insertion order; must not be reordered ─
+const TIER_NAMES = ['near', 'medium', 'far'];
 
 // ── LOD tier profiles ─────────────────────────────────────────────────────────
 // Near (0-42m): full detail — all tubes, worms, frills, barnacles, full animation
@@ -26,32 +36,48 @@ const LOD_PROFILES = {
     tubeCountMin: 7, tubeCountMax: 10,
     tubeRadSegs: 18, tubeHtSegs: 12,
     baseRadSegs: 24, baseHtSegs: 8,
-    worms: true, frills: true, barnacles: true, fringe: true,
+    worms: true, frills: true, barnacles: true, fringe: true, particles: true,
     frillW: 12, frillH: 6,
     animInterval: 1,
+    noOpenings: false,
   },
   medium: {
     tubeCountMin: 4, tubeCountMax: 6,
     tubeRadSegs: 10, tubeHtSegs: 6,
     baseRadSegs: 14, baseHtSegs: 4,
-    worms: false, frills: true, barnacles: false, fringe: false,
+    worms: false, frills: true, barnacles: false, fringe: false, particles: false,
     frillW: 6, frillH: 3,
     animInterval: 3,
+    noOpenings: false,
   },
   far: {
     tubeCountMin: 3, tubeCountMax: 4,
     tubeRadSegs: 6, tubeHtSegs: 2,
     baseRadSegs: 8, baseHtSegs: 2,
-    worms: false, frills: false, barnacles: false, fringe: false,
+    worms: false, frills: false, barnacles: false, fringe: false, particles: false,
     frillW: 0, frillH: 0,
     animInterval: 9999,
+    noOpenings: false,
   },
+};
+
+// Reduced far LOD for Ultra quality tier: <100 triangles, update every 4th frame
+// 2 tubes × CylGeo(4,1)≈16 tri each + base CylGeo(4,1)≈16 tri = ~48 triangles total
+const FAR_ULTRA_PROFILE = {
+  tubeCountMin: 2, tubeCountMax: 2,
+  tubeRadSegs: 4, tubeHtSegs: 1,
+  baseRadSegs: 4, baseHtSegs: 1,
+  worms: false, frills: false, barnacles: false, fringe: false, particles: false,
+  frillW: 0, frillH: 0,
+  animInterval: 4,   // update every 4th frame on Ultra
+  noOpenings: true,  // skip torus rings to stay under 100 triangles
 };
 
 // ── Shared singleton canvas textures (created once, never disposed) ───────────
 
-let _growthRingTex = null;
-let _barnaclesTex  = null;
+let _growthRingTex  = null;
+let _barnaclesTex   = null;
+let _wormBristleTex = null;
 const _sharedTextures = new Set();
 
 function getGrowthRingTex() {
@@ -65,7 +91,6 @@ function getGrowthRingTex() {
   for (let y = 0; y < sz; y++) {
     for (let x = 0; x < sz; x++) {
       const u = x / (sz - 1), v = y / (sz - 1);
-      // Horizontal growth rings + light nodule bumps
       const ring = Math.sin(v * 32 * Math.PI) * 0.28;
       const nod  = Math.sin(u * TWO_PI * 10 + v * 5) * 0.05;
       const nx = THREE.MathUtils.clamp(0.5 + nod, 0, 1);
@@ -124,8 +149,42 @@ function getBarnaclesTex() {
   return tex;
 }
 
-// ── LOD tier names map (matches addLevel insertion order) ─────────────────────
-const TIER_NAMES = ['near', 'medium', 'far'];
+// Worm bristle normal map — fine diagonal setae (bristle-like detail)
+function getWormBristleTex() {
+  if (_wormBristleTex) return _wormBristleTex;
+  const sz = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = sz; canvas.height = sz;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(sz, sz);
+  const d = img.data;
+  for (let y = 0; y < sz; y++) {
+    for (let x = 0; x < sz; x++) {
+      const u = x / (sz - 1), v = y / (sz - 1);
+      // Fine diagonal bristle stripes (setae pattern)
+      const bristle = Math.sin((u - v) * 40 * Math.PI) * 0.18;
+      const spine   = Math.sin(v * 32 * Math.PI) * 0.07;
+      const micro   = Math.sin(u * 90 + v * 70) * 0.03;
+      const nx = THREE.MathUtils.clamp(0.5 + bristle + micro, 0, 1);
+      const ny = THREE.MathUtils.clamp(0.5 + spine + micro, 0, 1);
+      const nz = Math.sqrt(Math.max(0, 1 - (nx * 2 - 1) ** 2 - (ny * 2 - 1) ** 2)) * 0.5 + 0.5;
+      const i = (y * sz + x) * 4;
+      d[i]   = Math.round(nx * 255);
+      d[i+1] = Math.round(ny * 255);
+      d[i+2] = Math.round(nz * 255);
+      d[i+3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(2, 6);
+  tex.needsUpdate = true;
+  _wormBristleTex = tex;
+  _sharedTextures.add(tex);
+  return tex;
+}
 
 // ── TubeCluster ───────────────────────────────────────────────────────────────
 // Stationary deep-zone tube worm colony — organic worm cluster at 150m+ depth
@@ -136,12 +195,12 @@ export class TubeCluster {
     this.time   = Math.random() * 100;
     this.worms  = [];  // backward-compat: worm meshes from near tier
 
-    this._instanceId  = Math.floor(Math.random() * 1e9);
     this._frameCount  = 0;
     this._lastLodTier = 'near';
     this._playerNear  = false;
     this._wormData    = [];   // per-worm state (near tier)
     this.tiers        = {};
+    this._isUltra     = qualityManager.tier === 'ultra';
 
     this._buildModel();
     this.group.position.copy(position);
@@ -162,7 +221,12 @@ export class TubeCluster {
 
   _buildModel() {
     const lod = new THREE.LOD();
-    for (const [tierName, profile] of Object.entries(LOD_PROFILES)) {
+    // Iterate in explicit tier order so lod.levels[i] matches TIER_NAMES[i]
+    for (const tierName of TIER_NAMES) {
+      // Far LOD uses a minimal profile on Ultra to stay under 100 triangles
+      const profile = (tierName === 'far' && this._isUltra)
+        ? FAR_ULTRA_PROFILE
+        : LOD_PROFILES[tierName];
       const tier = this._buildTier(profile, tierName);
       this.tiers[tierName] = tier;
       const dist = tierName === 'near'   ? 0
@@ -182,31 +246,43 @@ export class TubeCluster {
     const tierGroup = new THREE.Group();
     const isFar = tierName === 'far';
 
-    // ── Materials ────────────────────────────────────────────────────────────
-    const tubeMat = isFar
-      ? toStandardMaterial(new THREE.MeshPhysicalMaterial({
-          color: 0x151522, roughness: 0.55, metalness: 0,
-          emissive: 0x1e2e40, emissiveIntensity: 0.2,
-        }))
-      : new THREE.MeshPhysicalMaterial({
-          color: 0x181826, roughness: 0.3, metalness: 0.04,
-          clearcoat: 0.6, clearcoatRoughness: 0.25,
-          emissive: 0x1e3050, emissiveIntensity: 0.25,
-          normalMap: getGrowthRingTex(),
-          normalScale: new THREE.Vector2(0.8, 0.8),
-        });
+    // ── Materials ─────────────────────────────────────────────────────────────
+    // Fix: create temp MeshPhysicalMaterial, convert, then dispose it immediately
+    // so the GPU resources for the intermediate material are not leaked.
+    let tubeMat;
+    if (isFar) {
+      const _tmp = new THREE.MeshPhysicalMaterial({
+        color: 0x151522, roughness: 0.55, metalness: 0,
+        emissive: 0x1e2e40, emissiveIntensity: 0.2,
+      });
+      tubeMat = toStandardMaterial(_tmp);
+      _tmp.dispose();
+    } else {
+      tubeMat = new THREE.MeshPhysicalMaterial({
+        color: 0x181826, roughness: 0.3, metalness: 0.04,
+        clearcoat: 0.6, clearcoatRoughness: 0.25,
+        emissive: 0x1e3050, emissiveIntensity: 0.25,
+        normalMap: getGrowthRingTex(),
+        normalScale: new THREE.Vector2(0.8, 0.8),
+      });
+    }
 
-    const baseMat = isFar
-      ? toStandardMaterial(new THREE.MeshPhysicalMaterial({
-          color: 0x10101a, roughness: 0.8, metalness: 0,
-          emissive: 0x101828, emissiveIntensity: 0.1,
-        }))
-      : new THREE.MeshPhysicalMaterial({
-          color: 0x141420, roughness: 0.72, metalness: 0.04,
-          emissive: 0x181832, emissiveIntensity: 0.14,
-          normalMap: getBarnaclesTex(),
-          normalScale: new THREE.Vector2(0.6, 0.6),
-        });
+    let baseMat;
+    if (isFar) {
+      const _tmp = new THREE.MeshPhysicalMaterial({
+        color: 0x10101a, roughness: 0.8, metalness: 0,
+        emissive: 0x101828, emissiveIntensity: 0.1,
+      });
+      baseMat = toStandardMaterial(_tmp);
+      _tmp.dispose();
+    } else {
+      baseMat = new THREE.MeshPhysicalMaterial({
+        color: 0x141420, roughness: 0.72, metalness: 0.04,
+        emissive: 0x181832, emissiveIntensity: 0.14,
+        normalMap: getBarnaclesTex(),
+        normalScale: new THREE.Vector2(0.6, 0.6),
+      });
+    }
 
     const openingMat = isFar ? baseMat : new THREE.MeshPhysicalMaterial({
       color: 0x201828, roughness: 0.18, metalness: 0,
@@ -247,14 +323,19 @@ export class TubeCluster {
       }
     }
 
+    // ── Substrate particles (near only) — vertex-shader driven drift ──────────
+    let particles = null;
+    if (profile.particles) {
+      particles = this._buildParticles();
+      tierGroup.add(particles.mesh);
+    }
+
     // ── Tubes (InstancedMesh — single draw call) ──────────────────────────────
     const tubeCount = profile.tubeCountMin
       + Math.floor(Math.random() * (profile.tubeCountMax - profile.tubeCountMin + 1));
 
-    // Normalized cylinder (radius=1, height=1); instances scale per-tube
     const instGeo = new THREE.CylinderGeometry(1, 1.2, 1, profile.tubeRadSegs, profile.tubeHtSegs);
 
-    // Growth ring displacement baked into geometry (near/medium)
     if (!isFar) {
       const tp = instGeo.attributes.position;
       for (let v = 0; v < tp.count; v++) {
@@ -273,38 +354,45 @@ export class TubeCluster {
     const tubeMesh = new THREE.InstancedMesh(instGeo, tubeMat, tubeCount);
     tubeMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 
-    // Opening rings — InstancedMesh
-    const openGeo  = new THREE.TorusGeometry(1.1, 0.15, 6, isFar ? 8 : 12);
-    const openMesh = new THREE.InstancedMesh(openGeo, openingMat, tubeCount);
+    // Opening rings — skip on Ultra far to stay under triangle budget
+    let openMesh = null;
+    if (!profile.noOpenings) {
+      const openGeo = new THREE.TorusGeometry(1.1, 0.15, 6, isFar ? 8 : 12);
+      openMesh = new THREE.InstancedMesh(openGeo, openingMat, tubeCount);
+      openMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    }
 
-    const tubeData  = [];
-    const frillMats = [];
-    const wormData  = [];
+    const tubeData    = [];
+    const frillMats   = [];
+    const fringeMeshes = [];  // for fringe flutter animation
+    const wormData    = [];
 
     for (let i = 0; i < tubeCount; i++) {
-      const height    = 1.5 + Math.random() * 3.5;
-      const radius    = 0.08 + Math.random() * 0.1;
-      const ang       = (i / tubeCount) * TWO_PI + Math.random() * 0.3;
-      const clusterR  = 0.3 + Math.random() * 0.7;
-      const posX      = Math.cos(ang) * clusterR;
-      const posZ      = Math.sin(ang) * clusterR;
-      const centerY   = height * 0.5;  // tube body centre
+      const height   = 1.5 + Math.random() * 3.5;
+      const radius   = 0.08 + Math.random() * 0.1;
+      const ang      = (i / tubeCount) * TWO_PI + Math.random() * 0.3;
+      const clusterR = 0.3 + Math.random() * 0.7;
+      const posX     = Math.cos(ang) * clusterR;
+      const posZ     = Math.sin(ang) * clusterR;
+      const centerY  = height * 0.5;
 
-      // Set initial tube instance matrix
-      _scaleV.set(radius, height, radius);
-      _quat.identity();
+      // Initial tube instance matrix
+      _scaleA.set(radius, height, radius);
+      _quatA.identity();
       _vec3A.set(posX, centerY, posZ);
-      _mat4.compose(_vec3A, _quat, _scaleV);
-      tubeMesh.setMatrixAt(i, _mat4);
+      _mat4A.compose(_vec3A, _quatA, _scaleA);
+      tubeMesh.setMatrixAt(i, _mat4A);
 
-      // Opening ring matrix (at tube top, rotated flat)
+      // Opening ring matrix
       const openY = centerY + height * 0.5;
-      _scaleV.set(radius, radius, radius);
-      _euler.set(Math.PI * 0.5, 0, 0);
-      _quat.setFromEuler(_euler);
-      _vec3A.set(posX, openY, posZ);
-      _mat4.compose(_vec3A, _quat, _scaleV);
-      openMesh.setMatrixAt(i, _mat4);
+      if (openMesh) {
+        _scaleA.set(radius, radius, radius);
+        _euler.set(Math.PI * 0.5, 0, 0);
+        _quatA.setFromEuler(_euler);
+        _vec3A.set(posX, openY, posZ);
+        _mat4A.compose(_vec3A, _quatA, _scaleA);
+        openMesh.setMatrixAt(i, _mat4A);
+      }
 
       tubeData.push({
         posX, posZ, centerY, openY,
@@ -318,8 +406,6 @@ export class TubeCluster {
       if (profile.frills) {
         const frillMat = this._createFrillMaterial(tierName, i);
         frillMats.push(frillMat);
-
-        // Two crossed planes for crown frill effect
         for (let crossIdx = 0; crossIdx < 2; crossIdx++) {
           const fg = new THREE.PlaneGeometry(radius * 3.5, 0.25, profile.frillW, profile.frillH);
           fg.rotateX(-Math.PI * 0.5);
@@ -330,27 +416,30 @@ export class TubeCluster {
         }
       }
 
-      // Tentacle fringe around tube opening (near only)
+      // Tentacle fringe around tube opening (near only) — stored for flutter animation
       if (profile.fringe) {
         for (let f = 0; f < 7; f++) {
-          const fa = (f / 7) * TWO_PI + Math.random() * 0.2;
+          const fa  = (f / 7) * TWO_PI + Math.random() * 0.2;
           const fg2 = new THREE.CylinderGeometry(
             radius * 0.11, radius * 0.055,
             0.14 + Math.random() * 0.1, 5
           );
           const fm2 = new THREE.Mesh(fg2, openingMat);
           const fr  = radius * 1.08;
+          const brX = Math.sin(fa) * 0.42;
+          const brZ = Math.cos(fa) * 0.42;
           fm2.position.set(posX + Math.cos(fa) * fr, openY + 0.09, posZ + Math.sin(fa) * fr);
-          fm2.rotation.z = Math.cos(fa) * 0.42;
-          fm2.rotation.x = Math.sin(fa) * 0.42;
+          fm2.rotation.z = brZ;
+          fm2.rotation.x = brX;
           tierGroup.add(fm2);
+          fringeMeshes.push({ mesh: fm2, baseRotX: brX, baseRotZ: brZ, angle: fa,
+            phase: Math.random() * TWO_PI });
         }
       }
 
       // Worms emerging from tube openings (near only)
       if (profile.worms && Math.random() > 0.35) {
-        const wd = this._buildWorm(radius, height, i,
-          posX, openY, posZ, tierGroup);
+        const wd = this._buildWorm(radius, i, posX, openY, posZ, tierGroup);
         if (wd) {
           this.worms.push(wd.mesh);  // backward-compat
           wormData.push(wd);
@@ -359,14 +448,62 @@ export class TubeCluster {
     }
 
     tubeMesh.instanceMatrix.needsUpdate = true;
-    openMesh.instanceMatrix.needsUpdate = true;
+    if (openMesh) openMesh.instanceMatrix.needsUpdate = true;
     tierGroup.add(tubeMesh);
-    tierGroup.add(openMesh);
+    if (openMesh) tierGroup.add(openMesh);
 
-    // Store per-worm data on near tier
     if (tierName === 'near') this._wormData = wormData;
 
-    return { group: tierGroup, tubeMesh, openMesh, tubeData, frillMats, base, profile };
+    return { group: tierGroup, tubeMesh, openMesh, tubeData, frillMats, fringeMeshes,
+             particles, base, profile };
+  }
+
+  // ── Substrate particles — vertex-shader driven, no CPU buffer updates ─────
+
+  _buildParticles() {
+    const count = 28;
+    const positions = new Float32Array(count * 3);
+    const phases    = new Float32Array(count);
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * TWO_PI;
+      const r = 0.4 + Math.random() * 1.6;
+      positions[i * 3]     = Math.cos(a) * r;
+      positions[i * 3 + 1] = -0.35 + Math.random() * 0.5;
+      positions[i * 3 + 2] = Math.sin(a) * r;
+      phases[i] = Math.random() * TWO_PI;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute('aPhase',   new THREE.BufferAttribute(phases, 1));
+
+    const uniforms = { uTime: { value: 0 } };
+    const mat = new THREE.ShaderMaterial({
+      uniforms,
+      vertexShader: /* glsl */`
+        uniform float uTime;
+        attribute float aPhase;
+        void main() {
+          vec3 pos = position;
+          pos.y += sin(uTime * 0.4  + aPhase) * 0.04;
+          pos.x += cos(uTime * 0.3  + aPhase * 1.3) * 0.03;
+          pos.z += sin(uTime * 0.25 + aPhase * 0.7) * 0.03;
+          vec4 mvPos = modelViewMatrix * vec4(pos, 1.0);
+          gl_PointSize = max(1.5, 2.5 / (-mvPos.z));
+          gl_Position = projectionMatrix * mvPos;
+        }
+      `,
+      fragmentShader: /* glsl */`
+        void main() {
+          float d = length(gl_PointCoord - 0.5);
+          if (d > 0.5) discard;
+          gl_FragColor = vec4(0.4, 0.5, 0.6, 0.5 - d);
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+    });
+
+    return { mesh: new THREE.Points(geo, mat), uniforms };
   }
 
   // ── Crown frill material with radial wave vertex shader ───────────────────
@@ -412,7 +549,7 @@ transformed.y += wave;`
 
   // ── Worm construction: TubeGeometry + CatmullRomCurve3 + emergence shader ──
 
-  _buildWorm(tubeRadius, tubeHeight, index, posX, openY, posZ, parent) {
+  _buildWorm(tubeRadius, index, posX, openY, posZ, parent) {
     const wormLen    = 0.55 + Math.random() * 0.35;
     const bendAmp    = 0.04 + Math.random() * 0.05;
     const wormSegs   = 14;
@@ -432,11 +569,10 @@ transformed.y += wave;`
     const curve   = new THREE.CatmullRomCurve3(pts);
     const wormGeo = new THREE.TubeGeometry(curve, wormSegs, tubeRadius * 0.58, wormRadial, false);
 
-    // Store extended positions (curve surface)
-    const posAttr    = wormGeo.attributes.position;
-    const extArr     = new Float32Array(posAttr.array);
+    const posAttr = wormGeo.attributes.position;
+    const extArr  = new Float32Array(posAttr.array);
 
-    // Retracted positions: all vertices collapse to a single point inside the tube
+    // Retracted positions: all vertices collapse inside the tube
     const retractDepth = 0.35;
     const retArr = new Float32Array(posAttr.count * 3);
     for (let v = 0; v < posAttr.count; v++) {
@@ -448,11 +584,10 @@ transformed.y += wave;`
     wormGeo.setAttribute('aExtPos', new THREE.BufferAttribute(extArr, 3));
     wormGeo.setAttribute('aRetPos', new THREE.BufferAttribute(retArr, 3));
 
-    // Worm material — translucent with subsurface, fresnel rim, animated emissive
     const wormUniforms = {
-      uWormPhase:     { value: 0.0 },
-      uFeedingPhase:  { value: 0.0 },
-      uWormLength:    { value: wormLen },
+      uWormPhase:    { value: 0.0 },
+      uFeedingPhase: { value: 0.0 },
+      uWormLength:   { value: wormLen },
     };
 
     const wormMat = new THREE.MeshPhysicalMaterial({
@@ -461,13 +596,16 @@ transformed.y += wave;`
       transparent: true, opacity: 0.88,
       transmission: 0.25, thickness: 0.3,
       emissive: 0x401860, emissiveIntensity: 0.5,
+      normalMap: getWormBristleTex(),
+      normalScale: new THREE.Vector2(0.4, 0.4),
     });
 
     wormMat.userData.shaderUniforms = wormUniforms;
 
-    const instId = this._instanceId;
     wormMat.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, wormUniforms);
+
+      // Vertex shader: emergence blending + figure-8 feeding sweep
       shader.vertexShader = shader.vertexShader
         .replace(
           '#include <common>',
@@ -488,36 +626,52 @@ transformed = mix(aRetPos, aExtPos,
   clamp(uWormPhase * (1.0 + tipFactor * 0.6), 0.0, 1.0));
 // Figure-8 feeding sweep concentrated at extended tip
 float sweep = tipFactor * tipFactor * uWormPhase;
-transformed.x += sin(uFeedingPhase)          * 0.09 * sweep;
-transformed.z += sin(uFeedingPhase * 2.0 + 1.0) * 0.06 * sweep;
-// Fresnel rim via varying (reuse built-in vViewPosition)`
+transformed.x += sin(uFeedingPhase)               * 0.09 * sweep;
+transformed.z += sin(uFeedingPhase * 2.0 + 1.0)   * 0.06 * sweep;`
         );
+
+      // Fragment shader: Fresnel rim-light (blue-teal silhouette in dark zone)
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <emissivemap_fragment>',
+          `#include <emissivemap_fragment>
+float tcFresnel = pow(1.0 - max(dot(normalize(normal), normalize(vViewPosition)), 0.0), 3.0);
+totalEmissiveRadiance += vec3(0.2, 0.6, 1.0) * tcFresnel * 0.55;`
+        );
+
       wormMat.userData.shader = shader;
     };
-    wormMat.customProgramCacheKey = () => `tc-worm-${instId}-${index}`;
+
+    // Shared cache key so all worms use the same compiled program
+    wormMat.customProgramCacheKey = () => 'tc-worm-v1';
 
     const mesh = new THREE.Mesh(wormGeo, wormMat);
     mesh.position.set(posX, openY, posZ);
     parent.add(mesh);
 
-    // Bioluminescent tip sphere
+    // Bioluminescent tip sphere — position tracks emergencePhase in _updateWorms
     const tipMat = new THREE.MeshStandardMaterial({
       color: 0x00ffcc, emissive: 0x00cc88, emissiveIntensity: 1.8,
       roughness: 0.4, metalness: 0,
     });
     const tipGeo  = new THREE.SphereGeometry(tubeRadius * 0.42, 7, 6);
     const tipMesh = new THREE.Mesh(tipGeo, tipMat);
-    tipMesh.position.set(pts[5].x, pts[5].y, pts[5].z);
+    tipMesh.position.copy(pts[0]);  // start at worm base; position updated each frame
     mesh.add(tipMesh);
 
+    // extTip: fully-extended tip offset in worm-local space (used for tip tracking
+    // and symbiotic interaction proximity tests)
+    const extTip = pts[5].clone();
+
     return {
-      mesh, tipMesh, tipMat, wormMat,
+      mesh, tipMesh, tipMat, wormMat, pts, extTip,
       emergencePhase: 0.0,
-      extendRate:  0.28 + Math.random() * 0.18,
-      retractRate: 1.4  + Math.random() * 0.6,
-      schedule:    Math.random() * TWO_PI,
-      reemergenceDelay: 0,
-      state: 'extending',   // 'extending'|'extended'|'feeding'|'retracting'|'retracted'
+      extendRate:   0.28 + Math.random() * 0.18,
+      retractRate:  1.4  + Math.random() * 0.6,
+      schedule:     Math.random() * TWO_PI,
+      reemergenceDelay:  0,
+      pendingRecoilDelay: 0,  // set before retracting; applied when retraction finishes
+      state: 'extending',     // 'extending'|'feeding'|'retracting'|'retracted'
       feedingPhase: Math.random() * TWO_PI,
     };
   }
@@ -544,13 +698,14 @@ transformed.z += sin(uFeedingPhase * 2.0 + 1.0) * 0.06 * sweep;
     const tierName = this._getVisibleTierName();
     this._lastLodTier = tierName;
     const tier    = this.tiers[tierName];
-    const profile = LOD_PROFILES[tierName];
+    // Use the actual profile stored in the tier (may be FAR_ULTRA_PROFILE)
+    const profile = tier.profile;
 
     if (!tier || this._frameCount % profile.animInterval !== 0) return;
 
     const t = this.time;
 
-    // Player proximity — trigger worm retraction/re-emergence
+    // Player proximity — trigger worm retraction; re-emergence uses staged delays
     const nearPlayer = dist < 9;
     if (nearPlayer && !this._playerNear) {
       this._playerNear = true;
@@ -559,18 +714,27 @@ transformed.z += sin(uFeedingPhase * 2.0 + 1.0) * 0.06 * sweep;
       this._playerNear = false;
       let delay = 0;
       for (const wd of this._wormData) {
-        wd.reemergenceDelay = delay;
-        wd.state = 'retracted';
+        // Let the worm retract smoothly; apply delay once retraction finishes
+        wd.pendingRecoilDelay = delay;
+        wd.state = 'retracting';
         delay += MIN_REEMERGENCE_DELAY + Math.random() * MAX_REEMERGENCE_DELAY;
       }
     }
 
-    // Tube sway — damped spring, InstancedMesh matrix updates
+    // Tube sway — damped spring + opening ring co-update
     this._updateTubeSway(dt, tier, t);
 
-    // Worm emergence/feeding/retraction (near tier)
-    if (tierName === 'near' && this._wormData.length > 0) {
-      this._updateWorms(dt, t, nearPlayer);
+    if (tierName === 'near') {
+      // Worm emergence/feeding/retraction
+      if (this._wormData.length > 0) this._updateWorms(dt, t, nearPlayer);
+      // Fringe flutter
+      this._updateFringe(t, tier);
+      // Symbiotic interaction — occasional check
+      if (this._frameCount % SYMBIOTIC_CHECK_EVERY === 0) {
+        this._checkSymbioticInteraction();
+      }
+      // Substrate particle time
+      if (tier.particles) tier.particles.uniforms.uTime.value = t;
     }
 
     // Crown frill wave — update uFrillTime for each frill material
@@ -583,36 +747,89 @@ transformed.z += sin(uFeedingPhase * 2.0 + 1.0) * 0.06 * sweep;
     tier.base.scale.set(breath, 1, breath);
   }
 
-  // ── Tube sway: damped spring, InstancedMesh matrix update ────────────────
+  // ── Tube sway: damped spring, co-updates openMesh to track tube tops ──────
 
   _updateTubeSway(dt, tier, t) {
-    const { tubeMesh, tubeData } = tier;
+    const { tubeMesh, openMesh, tubeData } = tier;
     const dtc = Math.min(dt, MAX_PHYSICS_DT);
 
     for (let i = 0; i < tubeData.length; i++) {
       const td = tubeData[i];
 
-      // Simulated water current perturbation
       const cx = Math.sin(t * 0.68 + td.phase * 2.1) * 0.055;
       const cz = Math.cos(t * 0.52 + td.phase * 3.3) * 0.055;
 
-      // Damped spring toward current target
       td.vx += (cx - td.rx) * TUBE_SWAY_STIFFNESS * dtc - td.vx * TUBE_SWAY_DAMPING * dtc;
       td.vz += (cz - td.rz) * TUBE_SWAY_STIFFNESS * dtc - td.vz * TUBE_SWAY_DAMPING * dtc;
       td.rx += td.vx * dtc;
       td.rz += td.vz * dtc;
 
-      // Growth rhythm pulse
       const pulse = 1 + Math.sin(t * 0.41 + td.phase) * 0.014;
 
+      // Tube body matrix
       _euler.set(td.rx, 0, td.rz);
-      _quat.setFromEuler(_euler);
-      _scaleV.set(td.radius * pulse, td.height, td.radius * pulse);
+      _quatA.setFromEuler(_euler);
+      _scaleA.set(td.radius * pulse, td.height, td.radius * pulse);
       _vec3A.set(td.posX, td.centerY, td.posZ);
-      _mat4.compose(_vec3A, _quat, _scaleV);
-      tubeMesh.setMatrixAt(i, _mat4);
+      _mat4A.compose(_vec3A, _quatA, _scaleA);
+      tubeMesh.setMatrixAt(i, _mat4A);
+
+      // Opening ring matrix — track the tilted tube top so rings stay attached
+      if (openMesh) {
+        const halfH  = td.height * 0.5;
+        const cosRx  = Math.cos(td.rx), sinRx = Math.sin(td.rx);
+        const cosRz  = Math.cos(td.rz), sinRz = Math.sin(td.rz);
+        const topX   = td.posX   + halfH * sinRz;
+        const topY   = td.centerY + halfH * cosRx * cosRz;
+        const topZ   = td.posZ   - halfH * sinRx;
+        _euler.set(Math.PI * 0.5 + td.rx, 0, td.rz);
+        _quatB.setFromEuler(_euler);
+        _scaleB.set(td.radius * pulse, td.radius * pulse, td.radius * pulse);
+        _vec3A.set(topX, topY, topZ);
+        _mat4B.compose(_vec3A, _quatB, _scaleB);
+        openMesh.setMatrixAt(i, _mat4B);
+      }
     }
+
     tubeMesh.instanceMatrix.needsUpdate = true;
+    if (openMesh) openMesh.instanceMatrix.needsUpdate = true;
+  }
+
+  // ── Fringe flutter: per-fin rotation driven by current simulation ─────────
+
+  _updateFringe(t, tier) {
+    for (const fd of tier.fringeMeshes) {
+      const flutter = Math.sin(t * 2.1 + fd.phase) * 0.15;
+      fd.mesh.rotation.x = fd.baseRotX + flutter * Math.sin(fd.angle);
+      fd.mesh.rotation.z = fd.baseRotZ + flutter * Math.cos(fd.angle);
+    }
+  }
+
+  // ── Symbiotic interaction: worm-tip proximity causes recoil ──────────────
+
+  _checkSymbioticInteraction() {
+    const worms = this._wormData;
+    for (let i = 0; i < worms.length; i++) {
+      const wa = worms[i];
+      if (wa.state !== 'feeding') continue;
+      const ax = wa.mesh.position.x + wa.extTip.x * wa.emergencePhase;
+      const ay = wa.mesh.position.y + wa.extTip.y * wa.emergencePhase;
+      const az = wa.mesh.position.z + wa.extTip.z * wa.emergencePhase;
+      for (let j = i + 1; j < worms.length; j++) {
+        const wb = worms[j];
+        if (wb.state !== 'feeding') continue;
+        const bx = wb.mesh.position.x + wb.extTip.x * wb.emergencePhase;
+        const by = wb.mesh.position.y + wb.extTip.y * wb.emergencePhase;
+        const bz = wb.mesh.position.z + wb.extTip.z * wb.emergencePhase;
+        const d2 = (ax - bx) ** 2 + (ay - by) ** 2 + (az - bz) ** 2;
+        if (d2 < SYMBIOTIC_PROXIMITY_SQ) {
+          // Recoil: the contacted worm retracts, then re-emerges after a short delay
+          wb.pendingRecoilDelay = MIN_REEMERGENCE_DELAY + Math.random() * 0.8;
+          wb.state = 'retracting';
+          break;
+        }
+      }
+    }
   }
 
   // ── Worm emergence state machine ──────────────────────────────────────────
@@ -644,7 +861,12 @@ transformed.z += sin(uFeedingPhase * 2.0 + 1.0) * 0.06 * sweep;
 
         case 'retracting':
           wd.emergencePhase = Math.max(0, wd.emergencePhase - dt * wd.retractRate);
-          if (wd.emergencePhase <= 0) wd.state = 'retracted';
+          if (wd.emergencePhase <= 0) {
+            wd.state = 'retracted';
+            // Apply any pending delay (from player proximity or symbiotic recoil)
+            wd.reemergenceDelay = wd.pendingRecoilDelay;
+            wd.pendingRecoilDelay = 0;
+          }
           break;
       }
 
@@ -655,12 +877,16 @@ transformed.z += sin(uFeedingPhase * 2.0 + 1.0) * 0.06 * sweep;
         u.uFeedingPhase.value = wd.feedingPhase;
       }
 
-      // Animate bioluminescent tip emissive
-      wd.tipMat.emissiveIntensity = 1.0 + wd.emergencePhase
-        * (0.8 + Math.sin(t * 3.1 + i) * 0.5);
-
-      // Hide tip when fully retracted to avoid z-fighting inside tube
+      // Animate bioluminescent tip: track along worm curve using emergencePhase
       wd.tipMesh.visible = wd.emergencePhase > 0.05;
+      if (wd.tipMesh.visible) {
+        // Interpolate from pts[0] (base) toward extTip (fully extended)
+        wd.tipMesh.position.lerpVectors(wd.pts[0], wd.extTip, wd.emergencePhase);
+        const s = wd.emergencePhase;
+        wd.tipMesh.scale.set(s, s, s);
+        wd.tipMat.emissiveIntensity = 1.0 + wd.emergencePhase
+          * (0.8 + Math.sin(t * 3.1 + i) * 0.5);
+      }
     }
   }
 
@@ -673,10 +899,9 @@ transformed.z += sin(uFeedingPhase * 2.0 + 1.0) * 0.06 * sweep;
     this.group.traverse(c => {
       if (c.geometry) c.geometry.dispose();
       if (c.material) {
-        // Skip module-level shared singleton textures
-        if (c.material.map        && !_sharedTextures.has(c.material.map))        c.material.map.dispose();
-        if (c.material.normalMap  && !_sharedTextures.has(c.material.normalMap))  c.material.normalMap.dispose();
-        if (c.material.emissiveMap&& !_sharedTextures.has(c.material.emissiveMap))c.material.emissiveMap.dispose();
+        if (c.material.map         && !_sharedTextures.has(c.material.map))        c.material.map.dispose();
+        if (c.material.normalMap   && !_sharedTextures.has(c.material.normalMap))  c.material.normalMap.dispose();
+        if (c.material.emissiveMap && !_sharedTextures.has(c.material.emissiveMap))c.material.emissiveMap.dispose();
         c.material.dispose();
       }
     });
