@@ -254,6 +254,23 @@ export class HUD {
     this._diagFlashUntil.clear();
   }
 
+  resetRuntimeState() {
+    this.closeLocator();
+    this.stopTracking();
+    this.closeDiagnostics();
+    this.warningTimer = 0;
+    this.warningText.textContent = '';
+    this.warningText.classList.remove('visible');
+    this.warningText.style.opacity = '';
+    this.sonarPings = [];
+    this.sonarAge = 0;
+    this.lastDepthZone = '';
+    this.depthDisplay.textContent = '0m';
+    this.depthZone.textContent = 'SURFACE';
+    this.depthZone.style.color = '#4488aa';
+    this.updateBackgroundLoading(false);
+  }
+
   updateDiagnostics(snapshot) {
     if (!this.diagnosticsVisible || !snapshot) return;
 
