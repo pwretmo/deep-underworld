@@ -300,7 +300,7 @@ runSubagent  agentName: "Reviewer"
   ..."
 ```
 
-If either the external review or local Reviewer requests changes, re-dispatch the worker with the combined feedback, then re-review. Max 3 rounds per PR.
+If either the external review or local Reviewer requests changes, re-dispatch the worker with the combined feedback, then re-review until approvals are achieved or a documented hard-stop condition applies.
 
 A PR is ready for merge only when it has **no outstanding `REQUEST_CHANGES` reviews** from any source.
 
