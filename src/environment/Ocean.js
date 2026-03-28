@@ -50,17 +50,20 @@ function hash2D(point) {
 }
 
 function noise2D(point) {
-  const cell = floor(point).toVar();
-  const fraction = fract(point).toVar();
-
-  fraction.assign(fraction.mul(fraction).mul(vec2(3.0).sub(fraction.mul(2.0))));
+  const cell = floor(point);
+  const fraction = fract(point);
+  const smoothedFraction = fraction.mul(fraction).mul(vec2(3.0).sub(fraction.mul(2.0)));
 
   const a = hash2D(cell);
   const b = hash2D(cell.add(vec2(1.0, 0.0)));
   const c = hash2D(cell.add(vec2(0.0, 1.0)));
   const d = hash2D(cell.add(vec2(1.0, 1.0)));
 
-  return mix(mix(a, b, fraction.x), mix(c, d, fraction.x), fraction.y);
+  return mix(
+    mix(a, b, smoothedFraction.x),
+    mix(c, d, smoothedFraction.x),
+    smoothedFraction.y,
+  );
 }
 
 function fbm2D(point) {
