@@ -7,6 +7,10 @@ const _v3A = new THREE.Vector3();
 const TWO_PI = Math.PI * 2;
 const RESPAWN_DISTANCE = 200;
 
+// -- Amalgam-specific LOD distances (abyss-zone fog far-plane ≈42m) -----------
+const AMALGAM_MEDIUM_DIST = Math.floor(LOD_NEAR_DISTANCE / 2); // ~21m
+const AMALGAM_FAR_DIST = LOD_NEAR_DISTANCE; // 42m — fog occludes beyond this
+
 // -- LOD tier profiles --------------------------------------------------------
 const AMALGAM_LOD = {
   near: {
@@ -42,20 +46,20 @@ const AMALGAM_LOD = {
     clawSegs: 8,
   },
   far: {
-    coreSegs: [10, 8],
-    skulls: 1,
+    coreSegs: [6, 5],   // ~48 triangles: lightweight silhouette beyond fog plane
+    skulls: 0,
     limbs: 2,
     claws: 0,
     ribs: 0,
-    spineSegs: 4,
+    spineSegs: 0,
     organs: 0,
     webs: 0,
     hasShaderAnim: false,
     hasJawAnim: false,
     hasEyeTracking: false,
     hasMicroDetail: false,
-    limbRadial: 6,
-    clawSegs: 6,
+    limbRadial: 3,
+    clawSegs: 3,
   },
 };
 
@@ -220,10 +224,7 @@ export class Amalgam {
     this.direction = new THREE.Vector3(Math.random() - 0.5, -0.05, Math.random() - 0.5).normalize();
 
     // Pre-allocated animation state
-    this._lodTier = 'near';
-    this._lastLodTier = 'near';
     this._breathPhase = Math.random() * TWO_PI;
-    this._pulsePhase = Math.random() * TWO_PI;
     this._twitchTimers = [];
     this._twitchNext = [];
     this._jawAngles = [];
@@ -246,7 +247,7 @@ export class Amalgam {
     for (const [tierName, profile] of Object.entries(AMALGAM_LOD)) {
       const tier = this._buildTier(profile, tierName);
       this.tiers[tierName] = tier;
-      const dist = tierName === 'near' ? 0 : tierName === 'medium' ? LOD_NEAR_DISTANCE : LOD_MEDIUM_DISTANCE;
+      const dist = tierName === 'near' ? 0 : tierName === 'medium' ? AMALGAM_MEDIUM_DIST : AMALGAM_FAR_DIST;
       lod.addLevel(tier.group, dist);
     }
     this.lod = lod;
@@ -262,7 +263,7 @@ export class Amalgam {
     for (let i = levels.length - 1; i >= 0; i--) {
       if (levels[i].object.visible) {
         if (levels[i].distance === 0) return 'near';
-        if (levels[i].distance === LOD_NEAR_DISTANCE) return 'medium';
+        if (levels[i].distance === AMALGAM_MEDIUM_DIST) return 'medium';
         return 'far';
       }
     }
@@ -334,11 +335,11 @@ export class Amalgam {
     });
 
     if (isFar) {
-      fleshMat = toStandardMaterial(fleshMat);
-      metalMat = toStandardMaterial(metalMat);
-      boneMat = toStandardMaterial(boneMat);
-      organMat = toStandardMaterial(organMat);
-      eyeMat = toStandardMaterial(eyeMat);
+      const origFlesh = fleshMat; fleshMat = toStandardMaterial(fleshMat); origFlesh.dispose();
+      const origMetal = metalMat; metalMat = toStandardMaterial(metalMat); origMetal.dispose();
+      const origBone = boneMat; boneMat = toStandardMaterial(boneMat); origBone.dispose();
+      const origOrgan = organMat; organMat = toStandardMaterial(organMat); origOrgan.dispose();
+      const origEye = eyeMat; eyeMat = toStandardMaterial(eyeMat); origEye.dispose();
     }
 
     // -- Core mass (48x32 min at near) ----------------------------------------
@@ -441,7 +442,7 @@ export class Amalgam {
     for (let li = 0; li < profile.limbs; li++) {
       const limbGroup = new THREE.Group();
       const len = 0.6 + Math.random() * 1.8;
-      const limbGeo = new THREE.CylinderGeometry(0.08, 0.04, len, profile.limbRadial, isNear ? 8 : 4);
+      const limbGeo = new THREE.CylinderGeometry(0.08, 0.04, len, profile.limbRadial, isNear ? 8 : isFar ? 1 : 4);
 
       // Muscle fiber surface detail
       if (isNear) {
@@ -517,6 +518,10 @@ export class Amalgam {
         claw.lookAt(0, 0, 0);
         tierGroup.add(claw);
       }
+      claw.userData.clawTimer = 0;
+      claw.userData.clawNext = 3 + Math.random() * 5;
+      claw.userData.clawBase = claw.rotation.x;
+      claw.userData.clawTarget = claw.rotation.x;
       claws.push(claw);
     }
 
@@ -529,7 +534,9 @@ export class Amalgam {
       rib.position.set(0, yOff, 0);
       rib.rotation.x = Math.PI * 0.5 + (Math.random() - 0.5) * 0.2;
       rib.rotation.y = (Math.random() - 0.5) * 0.15;
-      rib.scale.setScalar(0.7 + Math.random() * 0.3);
+      rib.userData.baseScale = 0.7;
+      rib.userData.breathRandom = Math.random() * 0.3;
+      rib.scale.setScalar(rib.userData.baseScale + rib.userData.breathRandom);
       ribs.push(rib);
       tierGroup.add(rib);
     }
@@ -619,6 +626,10 @@ export class Amalgam {
       tierGroup.add(organ);
     }
 
+    // Dispose base materials used only for .clone() calls — not assigned to any mesh
+    fleshMat.dispose();
+    metalMat.dispose();
+
     return {
       group: tierGroup,
       limbs,
@@ -631,7 +642,6 @@ export class Amalgam {
       webs,
       organs,
       coreMesh,
-      fleshMat,
       isNear,
       isFar,
     };
@@ -655,7 +665,6 @@ export class Amalgam {
   update(dt, playerPos) {
     this.time += dt;
     const tier = this._getVisibleTierName();
-    this._lodTier = tier;
 
     // -- Movement: slow agonized drift ----------------------------------------
     _v3A.copy(this.direction).multiplyScalar(this.speed * dt);
@@ -684,7 +693,7 @@ export class Amalgam {
     }
     if (this._spineWhipActive) {
       this._spineWhipPhase += dt * 8;
-      this._spineWhipDecay *= (1 - dt * 2);
+      this._spineWhipDecay = Math.max(0, this._spineWhipDecay - dt * 2);
       if (this._spineWhipDecay < 0.01) {
         this._spineWhipActive = false;
         this._spineWhipDecay = 0;
@@ -703,10 +712,14 @@ export class Amalgam {
       this._shaderUniforms.core.uProximity.value = this._proximityFactor;
     }
 
-    // Limb animation (all tiers)
-    this._animateLimbs(dt, nearTier, tier === 'near');
-    if (tier === 'medium') this._animateLimbsBasic(dt, medTier);
-    if (tier === 'far') this._animateLimbsBasic(dt, farTier);
+    // Limb animation — gate to visible tier only
+    if (tier === 'near') {
+      this._animateLimbs(dt, nearTier, true);
+    } else if (tier === 'medium') {
+      this._animateLimbsBasic(dt, medTier);
+    } else {
+      this._animateLimbsBasic(dt, farTier);
+    }
 
     // Skull jaw articulation (near only)
     if (tier === 'near' && nearTier.skullJaws.length > 0) {
@@ -732,13 +745,29 @@ export class Amalgam {
       }
     }
 
+    // Claw grasping articulation (near only)
+    if (tier === 'near' && nearTier.claws.length > 0) {
+      for (let i = 0; i < nearTier.claws.length; i++) {
+        const claw = nearTier.claws[i];
+        claw.userData.clawTimer += dt;
+        if (claw.userData.clawTimer >= claw.userData.clawNext) {
+          claw.userData.clawTimer = 0;
+          claw.userData.clawNext = 2 + Math.random() * 5;
+          const isOpen = claw.rotation.x > claw.userData.clawBase + 0.1;
+          claw.userData.clawTarget = isOpen ? claw.userData.clawBase : claw.userData.clawBase + 0.5;
+        }
+        claw.rotation.x += (claw.userData.clawTarget - claw.rotation.x) * Math.min(1, dt * 4);
+      }
+    }
+
     // Rib cage breathing (near+medium)
     if (tier !== 'far') {
       this._ribBreathPhase += dt * 1.0;
       const activeTier = tier === 'near' ? nearTier : medTier;
       for (let i = 0; i < activeTier.ribs.length; i++) {
+        const rib = activeTier.ribs[i];
         const ribBreath = Math.sin(this._ribBreathPhase + i * 0.4) * 0.04;
-        activeTier.ribs[i].scale.setScalar(0.7 + Math.random() * 0.3 + ribBreath);
+        rib.scale.setScalar(rib.userData.baseScale + rib.userData.breathRandom + ribBreath);
       }
     }
 
@@ -765,7 +794,6 @@ export class Amalgam {
       );
     }
 
-    this._lastLodTier = tier;
   }
 
   _animateLimbs(dt, tier, isNear) {
