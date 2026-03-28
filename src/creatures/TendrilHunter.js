@@ -252,6 +252,7 @@ export class TendrilHunter {
     this._rightMandible     = null;
     this._abdomenMesh       = null;
     this._nearEyeMat        = null; // shared eyeMat ref for animated emissive flicker
+    this._mandibleGlowMat   = null; // mandible inner-edge bioluminescence material
 
     // Medium-tier tendril refs for sinusoidal sway
     this._mediumTendrilData = []; // [{group, phase}]
@@ -340,14 +341,13 @@ export class TendrilHunter {
       const o4 = abdomenMat; abdomenMat = toStandardMaterial(abdomenMat); o4.dispose();
     }
 
-    // ── Far LOD: minimal geometry (<100 triangles total) ──────────────────────
+    // ── Far LOD: single elongated silhouette (<100 triangles) ──────────────────
+    // SphereGeometry(1, 8, 6) = 2×8×5 = 80 triangles — well within budget.
+    // Merged body+abdomen into one stretched ellipsoid for minimal draw calls.
     if (isFar) {
       const fBody = new THREE.SphereGeometry(1, 8, 6);
-      fBody.scale(1.6, 0.85, 0.75);
+      fBody.scale(2.2, 0.85, 0.7);
       g.add(new THREE.Mesh(fBody, bodyMat));
-      const fAbd = new THREE.Mesh(new THREE.SphereGeometry(0.55, 6, 4), abdomenMat);
-      fAbd.position.set(-1.5, 0, 0);
-      g.add(fAbd);
       return g;
     }
 
@@ -368,6 +368,16 @@ export class TendrilHunter {
     g.add(headMesh);
 
     // ── Mandibles — serrated bilateral claws ──────────────────────────────────
+    // Near tier: inner-edge spines use dedicated bioluminescent material (Issue #80).
+    let mandibleGlowMat = null;
+    if (isNear) {
+      mandibleGlowMat = new THREE.MeshPhysicalMaterial({
+        color: 0x102848, roughness: 0.15, metalness: 0.8,
+        clearcoat: 0.9,
+        emissive: 0x2088cc, emissiveIntensity: 1.0,
+      });
+      this._mandibleGlowMat = mandibleGlowMat;
+    }
     if (profile.mandibleSegs > 0) {
       for (const side of [-1, 1]) {
         const mg = new THREE.Group();
@@ -386,10 +396,10 @@ export class TendrilHunter {
         mand.rotation.z = side * 0.3;
         mg.add(mand);
 
-        // Inner-edge serration spines
+        // Inner-edge serration spines — bioluminescent material on near tier
         for (let s = 0; s < 5; s++) {
           const sp = new THREE.Mesh(
-            new THREE.ConeGeometry(0.007, 0.06, 4), metalMat
+            new THREE.ConeGeometry(0.007, 0.06, 4), mandibleGlowMat || metalMat
           );
           sp.position.set(side * 0.05, -0.28 + s * 0.12, 0);
           sp.rotation.z = side * (Math.PI * 0.5 + s * 0.08);
@@ -520,6 +530,7 @@ export class TendrilHunter {
       }
 
       // Hydraulic piston lines alongside first 3 segments (near only)
+      const pistons = [];
       if (isNear && profile.pistonSegs > 0) {
         for (let s = 0; s < Math.min(segCount - 1, 3); s++) {
           const piston = new THREE.Mesh(
@@ -528,6 +539,7 @@ export class TendrilHunter {
           );
           piston.position.set(0.07, 0, 0);
           segments[s].add(piston);
+          pistons.push(piston);
         }
       }
 
@@ -552,6 +564,7 @@ export class TendrilHunter {
         segments,
         jointMeshes,
         hook,
+        pistons,
         phase:       (i / profile.tendrilCount) * TWO_PI,
         segCount,
       };
@@ -757,6 +770,15 @@ export class TendrilHunter {
         : 0.3 + Math.sin(t * 0.8) * 0.15;
     }
 
+    // ── Mandible inner-edge bioluminescence (Issue #80) ───────────────────────
+    // Hunting: intense rapid pulse. Idle: slow ambient glow.
+    if (this._mandibleGlowMat) {
+      const hunting = (this._state === S_STALK || this._state === S_STRIKE);
+      this._mandibleGlowMat.emissiveIntensity = hunting
+        ? 1.5 + Math.sin(t * 6) * 0.5
+        : 0.6 + Math.sin(t * 1.2) * 0.3;
+    }
+
     // ── Abdomen breathing pulse + secondary sway ──────────────────────────────
     if (this._abdomenMesh) {
       const breathe = 1 + Math.sin(t * 1.4 + this._abdomenPhase) * 0.04;
@@ -834,6 +856,21 @@ export class TendrilHunter {
           td.jointMeshes[s].position.x += (Math.random() - 0.5) * PISTON_RATTLE;
           td.jointMeshes[s].position.z += (Math.random() - 0.5) * PISTON_RATTLE;
         }
+      }
+
+      // ── Hydraulic piston extend/compress matching joint angles ─────────────
+      // Dot product of adjacent segment directions → scale.y.
+      // Uses inline scalars to avoid overwriting shared _v3B (player-local pos).
+      for (let p = 0; p < td.pistons.length; p++) {
+        const j0 = td.joints[p], j1 = td.joints[p + 1], j2 = td.joints[p + 2];
+        const ax = j1.x - j0.x, ay = j1.y - j0.y, az = j1.z - j0.z;
+        const bx = j2.x - j1.x, by = j2.y - j1.y, bz = j2.z - j1.z;
+        const la = Math.sqrt(ax * ax + ay * ay + az * az);
+        const lb = Math.sqrt(bx * bx + by * by + bz * bz);
+        const dot = (la > 0.001 && lb > 0.001)
+          ? (ax * bx + ay * by + az * bz) / (la * lb)
+          : 1;
+        td.pistons[p].scale.y = 0.9 + dot * 0.3;
       }
 
       // ── Hook tip orientation ───────────────────────────────────────────────
