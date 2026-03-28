@@ -517,6 +517,17 @@ export class UnderwaterEffect {
       this._startupGuard.stableFrames >= this.tuning.performance.startupStableFrames;
   }
 
+  getStartupGuardStatus() {
+    return {
+      active: this._startupGuard.active,
+      stableFrames: this._startupGuard.stableFrames,
+      requiredFrames: this.tuning.performance.startupStableFrames,
+      remainingMs: this._startupGuard.active
+        ? Math.max(0, this._startupGuard.endsAt - performance.now())
+        : 0,
+    };
+  }
+
   _updateStartupGuard(renderMs, now) {
     if (!this._startupGuard.active) return;
 

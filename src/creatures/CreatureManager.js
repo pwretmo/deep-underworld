@@ -360,6 +360,38 @@ export class CreatureManager {
     return { loaded: this._spawnedCount, total: this._spawnTotal };
   }
 
+  getPrimeLoadProgress(maxDepth) {
+    if (!Number.isFinite(maxDepth)) {
+      return this.getLoadProgress();
+    }
+
+    return {
+      loaded: this._spawnedCount,
+      total: this._spawnedCount + this._simulatePrimeDrainCount(maxDepth),
+    };
+  }
+
+  _simulatePrimeDrainCount(maxDepth) {
+    const queue = this._spawnQueue
+      .filter((entry) => entry.countsTowardLoad !== false)
+      .map((entry) => ({ depthMin: entry.depthMin }));
+    let drained = 0;
+
+    while (queue.some((entry) => entry.depthMin <= maxDepth)) {
+      const entryIndex = queue.findIndex(
+        (entry) => entry.depthMin <= maxDepth + SPAWN_LOOKAHEAD_DEPTH,
+      );
+      if (entryIndex === -1) {
+        break;
+      }
+
+      queue.splice(entryIndex, 1);
+      drained++;
+    }
+
+    return drained;
+  }
+
   _resolveVisibleCreatureBudget(depth) {
     for (const band of CREATURE_VISIBILITY_DEPTH_BUDGETS) {
       if (depth < band.depth) {

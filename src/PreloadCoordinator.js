@@ -151,14 +151,17 @@ export class PreloadCoordinator {
     await this._warmGpuOnceAsync(token);
 
     let _phase = 'loading';
+    let _finalization = null;
     const deadline = performance.now() + START_PRIME_TIMEOUT_MS;
     const reportProgress = () => {
       onProgress?.({
         phase: _phase,
         creatures: this.creatures.getLoadProgress(),
+        primeCreatures: this.creatures.getPrimeLoadProgress(START_PRIME_DEPTH),
         queuedThroughDepth: this.creatures.getSpawnQueueLengthUpToDepth(START_PRIME_DEPTH),
         terrainPending: this.terrain.getPendingCount(),
         floraPending: this.flora.getPendingCount(),
+        finalization: _finalization,
       });
     };
 
@@ -199,11 +202,57 @@ export class PreloadCoordinator {
     // has been hanging on some scene/material combinations. The opening-band warm
     // renders above are cheaper and keep startup responsive.
     _phase = 'finalizing';
+    _finalization = {
+      label: 'Finishing nearby spawns',
+      stepIndex: 1,
+      stepTotal: 4,
+      current: 0,
+      total: 0,
+      unit: 'creatures',
+    };
     reportProgress();
-    await this._finishCreaturePrime(START_PRIME_DEPTH);
-    await this._warmDepthBandRenders();
-    await this._warmCreatureShowcaseRenders(START_PRIME_DEPTH);
+    await this._finishCreaturePrime(START_PRIME_DEPTH, 2500, (progress) => {
+      _finalization = {
+        ...progress,
+        stepIndex: 1,
+        stepTotal: 4,
+      };
+      reportProgress();
+    });
+    await this._warmDepthBandRenders((progress) => {
+      _finalization = {
+        ...progress,
+        stepIndex: 2,
+        stepTotal: 4,
+      };
+      reportProgress();
+    });
+    await this._warmCreatureShowcaseRenders(START_PRIME_DEPTH, (progress) => {
+      _finalization = {
+        ...progress,
+        stepIndex: 3,
+        stepTotal: 4,
+      };
+      reportProgress();
+    });
+    _finalization = {
+      label: 'Handing off to live render',
+      stepIndex: 4,
+      stepTotal: 4,
+      current: 0,
+      total: 1,
+      unit: 'frames',
+    };
+    reportProgress();
     await new Promise(resolve => window.requestAnimationFrame(() => resolve()));
+    _finalization = {
+      label: 'Handing off to live render',
+      stepIndex: 4,
+      stepTotal: 4,
+      current: 1,
+      total: 1,
+      unit: 'frames',
+    };
 
     reportProgress();
 
@@ -482,10 +531,26 @@ export class PreloadCoordinator {
       this.flora.getPendingCount() > 0;
   }
 
-  async _finishCreaturePrime(maxDepth, maxExtraMs = 2500) {
+  async _finishCreaturePrime(maxDepth, maxExtraMs = 2500, onProgress) {
+    const remainingAtStart = this.creatures.getSpawnQueueLengthUpToDepth(maxDepth);
+    let drainedTotal = 0;
+    onProgress?.({
+      label: 'Finishing nearby spawns',
+      current: 0,
+      total: remainingAtStart,
+      unit: 'creatures',
+    });
+
     const deadline = performance.now() + maxExtraMs;
     while (this.creatures.hasQueuedSpawnsUpToDepth(maxDepth) && performance.now() < deadline) {
       const drained = this.creatures.preloadDrain(1, undefined, maxDepth);
+      drainedTotal += Math.max(0, drained);
+      onProgress?.({
+        label: 'Finishing nearby spawns',
+        current: drainedTotal,
+        total: remainingAtStart,
+        unit: 'creatures',
+      });
       await new Promise(resolve => window.requestAnimationFrame(() => resolve()));
       if (drained <= 0) {
         await new Promise(resolve => window.requestAnimationFrame(() => resolve()));
@@ -493,7 +558,7 @@ export class PreloadCoordinator {
     }
   }
 
-  async _warmDepthBandRenders() {
+  async _warmDepthBandRenders(onProgress) {
     if (!this.prepareDepthState) return;
 
     // Warm representative view/depth bands behind the descent overlay so the
@@ -510,6 +575,15 @@ export class PreloadCoordinator {
       originalEuler.y + Math.PI,
       originalEuler.y + Math.PI * 1.5,
     ];
+    const totalViews = sampleDepths.length * sampleYawAngles.length;
+    let completedViews = 0;
+
+    onProgress?.({
+      label: 'Warming representative views',
+      current: completedViews,
+      total: totalViews,
+      unit: 'views',
+    });
 
     for (const depth of sampleDepths) {
       this.player.position.copy(originalPosition);
@@ -524,6 +598,13 @@ export class PreloadCoordinator {
           flashlightOn: false,
           exposure: this.renderer.toneMappingExposure,
         });
+        completedViews++;
+        onProgress?.({
+          label: 'Warming representative views',
+          current: completedViews,
+          total: totalViews,
+          unit: 'views',
+        });
         await new Promise(resolve => window.requestAnimationFrame(() => resolve()));
       }
     }
@@ -535,12 +616,13 @@ export class PreloadCoordinator {
     this.prepareDepthState(Math.max(0, -this.player.position.y));
   }
 
-  async _warmCreatureShowcaseRenders(maxDepth = START_PRIME_DEPTH) {
+  async _warmCreatureShowcaseRenders(maxDepth = START_PRIME_DEPTH, onProgress) {
     const originalPosition = this.player.position.clone();
     const originalQuaternion = this.player.camera.quaternion.clone();
     const originalEuler = this.player.euler.clone();
     const originalDepth = this.player.depth;
     const seenTypes = new Set();
+    const showcaseTargets = [];
 
     for (const creature of this.creatures.creatures) {
       if (creature.depthMin > maxDepth || seenTypes.has(creature.type)) {
@@ -554,6 +636,19 @@ export class PreloadCoordinator {
       }
 
       seenTypes.add(creature.type);
+      showcaseTargets.push({ pos });
+    }
+
+    let completedShowcases = 0;
+    onProgress?.({
+      label: 'Showcasing creature shaders',
+      current: completedShowcases,
+      total: showcaseTargets.length,
+      unit: 'types',
+    });
+
+    for (const target of showcaseTargets) {
+      const { pos } = target;
       this.player.position.set(pos.x, pos.y + 2, pos.z + 18);
       this.player.depth = Math.max(0, -this.player.position.y);
       this.prepareDepthState(this.player.depth);
@@ -562,6 +657,13 @@ export class PreloadCoordinator {
       this.underwaterEffect.warmRender(this.player.depth, {
         flashlightOn: false,
         exposure: this.renderer.toneMappingExposure,
+      });
+      completedShowcases++;
+      onProgress?.({
+        label: 'Showcasing creature shaders',
+        current: completedShowcases,
+        total: showcaseTargets.length,
+        unit: 'types',
       });
       await new Promise(resolve => window.requestAnimationFrame(() => resolve()));
     }
