@@ -49,6 +49,33 @@ function _getBodyNormalTexture() {
   return _bodyNormalTex;
 }
 
+let _bodyDispTex = null;
+function _getBodyDisplacementTexture() {
+  if (_bodyDispTex) return _bodyDispTex;
+  const W = 256, H = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(W, H);
+  const d = img.data;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const u = x / W, v = y / H;
+      const band  = Math.sin(u * 64.0) * 0.35 + 0.5;
+      const ridge = Math.sin(v * 96.0 + u * 16.0) * 0.15 + 0.5;
+      const val = Math.round(THREE.MathUtils.clamp(band * ridge, 0, 1) * 255);
+      const i = (y * W + x) * 4;
+      d[i] = val; d[i+1] = val; d[i+2] = val; d[i+3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  _bodyDispTex = new THREE.CanvasTexture(canvas);
+  _bodyDispTex.wrapS = THREE.RepeatWrapping;
+  _bodyDispTex.wrapT = THREE.RepeatWrapping;
+  _bodyDispTex.needsUpdate = true;
+  return _bodyDispTex;
+}
+
 // ─── geometry helpers ─────────────────────────────────────────────────────────
 
 /** Spine curve: head at x = 0, tail at x = −BODY_LENGTH */
@@ -87,40 +114,44 @@ function _buildBodyTube(tubularSegs, radialSegs) {
 
 /**
  * Build the body tube material.
- * Non-far tiers receive a vertex-shader anguilliform wave and a Fresnel rim-light.
- * Returns { mat, shaderUniforms } — shaderUniforms is null for the far tier.
+ * All tiers receive a vertex-shader anguilliform wave + peristaltic bulge.
+ * Non-far tiers also receive a Fresnel rim-light fragment shader.
+ * Near tier (useDisplacement=true) receives displacement mapping.
+ * Returns { mat, shaderUniforms, isFar }.
  */
-function _buildBodyMat(useFarMat) {
-  if (useFarMat) {
-    return {
-      mat: new THREE.MeshStandardMaterial({
-        color: 0x0c0a08, roughness: 0.15, metalness: 0.8,
-        emissive: 0x502040, emissiveIntensity: 0.5,
-      }),
-      shaderUniforms: null,
-    };
-  }
-
-  // Per-instance uniform objects — each Lamprey instance gets its own set
+function _buildBodyMat(useFarMat, useDisplacement) {
+  // Per-instance uniform objects — each tier gets its own set
   const shaderUniforms = {
     uWavePhase:  { value: 0.0 },
     uWaveNumber: { value: 2.5 },
     uAmplitude:  { value: 0.18 },
   };
 
-  const mat = new THREE.MeshPhysicalMaterial({
-    color: 0x0c0a08, roughness: 0.12, metalness: 0.85,
-    clearcoat: 1.0, clearcoatRoughness: 0.05,
-    emissive: 0x502040, emissiveIntensity: 0.5,
-    normalMap: _getBodyNormalTexture(),
-    normalScale: new THREE.Vector2(0.5, 0.5),
-  });
+  let mat;
+  if (useFarMat) {
+    mat = new THREE.MeshStandardMaterial({
+      color: 0x0c0a08, roughness: 0.15, metalness: 0.8,
+      emissive: 0x502040, emissiveIntensity: 0.5,
+    });
+  } else {
+    const props = {
+      color: 0x0c0a08, roughness: 0.12, metalness: 0.85,
+      clearcoat: 1.0, clearcoatRoughness: 0.05,
+      emissive: 0x502040, emissiveIntensity: 0.5,
+      normalMap: _getBodyNormalTexture(),
+      normalScale: new THREE.Vector2(0.5, 0.5),
+    };
+    if (useDisplacement) {
+      props.displacementMap = _getBodyDisplacementTexture();
+      props.displacementScale = 0.03;
+    }
+    mat = new THREE.MeshPhysicalMaterial(props);
+  }
 
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, shaderUniforms);
 
-    // Vertex shader: GPU anguilliform body wave
-    // uv.x: 0 = head, 1 = tail; lateral displacement grows toward tail
+    // Vertex shader: GPU anguilliform body wave + peristaltic bulge (all tiers)
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -133,28 +164,32 @@ uniform float uAmplitude;`
         '#include <begin_vertex>',
         `#include <begin_vertex>
 float _bodyT = uv.x;
-float _wave  = sin(uWavePhase - _bodyT * uWaveNumber * 6.2832) * uAmplitude * _bodyT;
+float _bulge = sin(uWavePhase * 2.0 - _bodyT * 8.0) * 0.08;
+transformed.y *= 1.0 + _bulge;
+float _wave = sin(uWavePhase - _bodyT * uWaveNumber * 6.2832) * uAmplitude * _bodyT;
 transformed.z += _wave;`
       );
 
-    // Fragment shader: Fresnel rim-light for deep-zone silhouette visibility
-    shader.fragmentShader = shader.fragmentShader
-      .replace(
-        '#include <emissivemap_fragment>',
-        `#include <emissivemap_fragment>
+    // Fragment shader: Fresnel rim-light (non-far tiers only)
+    if (!useFarMat) {
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <emissivemap_fragment>',
+          `#include <emissivemap_fragment>
 float _fresnel = pow(1.0 - abs(dot(normalize(vViewPosition), normal)), 3.0);
 totalEmissiveRadiance += vec3(0.25, 0.10, 0.35) * _fresnel * 0.55;`
-      );
+        );
+    }
   };
 
-  return { mat, shaderUniforms };
+  return { mat, shaderUniforms, isFar: useFarMat };
 }
 
 // ─── LOD tier profiles ────────────────────────────────────────────────────────
 const _LAMPREY_TIERS = [
   { name: 'near',   tubularSegs: 80, radialSegs: 16, mouthDetail: true,  gillDetail: true,  dist: 0                  },
   { name: 'medium', tubularSegs: 40, radialSegs: 8,  mouthDetail: true,  gillDetail: false, dist: LOD_NEAR_DISTANCE   },
-  { name: 'far',    tubularSegs: 16, radialSegs: 6,  mouthDetail: false, gillDetail: false, dist: LOD_MEDIUM_DISTANCE },
+  { name: 'far',    tubularSegs: 6,  radialSegs: 3,  mouthDetail: false, gillDetail: false, dist: LOD_MEDIUM_DISTANCE },
 ];
 
 // ─── Lamprey class ─────────────────────────────────────────────────────────────
@@ -177,13 +212,19 @@ export class Lamprey {
 
     // Body shader uniform refs (updated each frame, zero alloc)
     this._bodyShaderUniforms = [];
+    this._farShaderUniforms  = [];
+    this._frameCount = 0;
+
+    // Weight & inertia tracking
+    this._prevPos  = position.clone();
+    this._trailRotX = 0;
+    this._trailRotZ = 0;
 
     // Near-tier animated mesh refs
     this._outerRing  = null;   // outer tooth ring — forward rotation
     this._innerRing  = null;   // inner tooth ring — counter-rotation
     this._lipMesh    = null;   // torus lip for dilation pulsation
     this._gillMeshes = [];     // gill slit planes for breathing animation
-    this._mouthLight = null;
 
     this._buildModel();
     this.group.position.copy(position);
@@ -193,22 +234,15 @@ export class Lamprey {
   // ── build ───────────────────────────────────────────────────────────────────
   _buildModel() {
     const lod = new THREE.LOD();
-    let nearGroup = null;
 
     for (const cfg of _LAMPREY_TIERS) {
       const useFar = (cfg.name === 'far');
       const isNear = (cfg.name === 'near');
       const tierGroup = this._buildTier(cfg, useFar, isNear);
-      if (isNear) nearGroup = tierGroup;
       lod.addLevel(tierGroup, cfg.dist);
     }
 
     this.group.add(lod);
-
-    // Mouth glow light — attached to near tier only (inside LOD)
-    this._mouthLight = new THREE.PointLight(0xff2200, 0.8, 12);
-    this._mouthLight.position.set(0.42, 0, 0);
-    if (nearGroup) nearGroup.add(this._mouthLight);
 
     this.group.scale.setScalar(2 + Math.random() * 2);
   }
@@ -218,8 +252,12 @@ export class Lamprey {
 
     // ── continuous body tube ───────────────────────────────────────────────
     const tubeGeo = _buildBodyTube(cfg.tubularSegs, cfg.radialSegs);
-    const { mat: bodyMat, shaderUniforms } = _buildBodyMat(useFarMat);
-    if (shaderUniforms) this._bodyShaderUniforms.push(shaderUniforms);
+    const { mat: bodyMat, shaderUniforms, isFar } = _buildBodyMat(useFarMat, isNear);
+    if (isFar) {
+      this._farShaderUniforms.push(shaderUniforms);
+    } else {
+      this._bodyShaderUniforms.push(shaderUniforms);
+    }
     g.add(new THREE.Mesh(tubeGeo, bodyMat));
 
     // ── gill openings (near tier only) ────────────────────────────────────
@@ -288,8 +326,8 @@ export class Lamprey {
         }
       }
 
-      // Rasping tongue geometry inside mouth
-      if (!useFarMat) {
+      // Rasping tongue geometry inside mouth (near tier only)
+      if (isNear) {
         const tongueMat = new THREE.MeshPhysicalMaterial({
           color: 0x3a1018, roughness: 0.5, metalness: 0, clearcoat: 0.4,
           emissive: 0x601020, emissiveIntensity: 0.6,
@@ -312,10 +350,13 @@ export class Lamprey {
         : new THREE.MeshPhysicalMaterial({
             color: 0x1a1020, roughness: 0.35, metalness: 0,
             clearcoat: 0.8, clearcoatRoughness: 0.1,
-            emissive: 0x802050, emissiveIntensity: 0.9,
+            emissive: 0x802050, emissiveIntensity: 1.2,
             transmission: 0.12,    // SSS-like fleshy translucency
           });
-      const lip = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.04, 16, 32), lipMat);
+      const lipGeo = isNear
+        ? new THREE.TorusGeometry(0.24, 0.04, 48, 32)
+        : new THREE.TorusGeometry(0.24, 0.04, 16, 32);
+      const lip = new THREE.Mesh(lipGeo, lipMat);
       lip.rotation.y = Math.PI / 2;
       mouthGrp.add(lip);
 
@@ -324,7 +365,7 @@ export class Lamprey {
         const eyeAng = (ei / 4) * Math.PI * 2;
         const eyeGeo = new THREE.SphereGeometry(0.022, 10, 10);
         const eyeMat = new THREE.MeshPhysicalMaterial({
-          color: 0xff4400, emissive: 0xff2200, emissiveIntensity: 2.5, roughness: 0,
+          color: 0xff4400, emissive: 0xff2200, emissiveIntensity: 3.0, roughness: 0,
         });
         const eye = new THREE.Mesh(eyeGeo, eyeMat);
         eye.position.set(0.10, Math.cos(eyeAng) * 0.28, Math.sin(eyeAng) * 0.28);
@@ -340,11 +381,12 @@ export class Lamprey {
         this._lipMesh   = lip;
       }
     } else {
-      // Far tier: minimal mouth silhouette
+      // Far tier: minimal emissive billboard quad (~2 tris)
       const simpleMouth = new THREE.Mesh(
-        new THREE.TorusGeometry(0.20, 0.03, 6, 12),
+        new THREE.PlaneGeometry(0.12, 0.12),
         new THREE.MeshStandardMaterial({
           color: 0x1a1020, emissive: 0x602040, emissiveIntensity: 0.5,
+          side: THREE.DoubleSide,
         })
       );
       simpleMouth.position.set(0.34, 0, 0);
@@ -357,7 +399,10 @@ export class Lamprey {
     const tailMat   = useFarMat
       ? new THREE.MeshStandardMaterial(tailProps)
       : new THREE.MeshPhysicalMaterial({ ...tailProps, clearcoat: 0.6 });
-    const tail = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 0.35, 2, 4), tailMat);
+    const tailGeo = useFarMat
+      ? new THREE.PlaneGeometry(0.12, 0.35, 1, 1)
+      : new THREE.PlaneGeometry(0.12, 0.35, 2, 4);
+    const tail = new THREE.Mesh(tailGeo, tailMat);
     tail.position.set(-BODY_LENGTH - 0.06, 0, 0);
     tail.rotation.y = Math.PI / 2;
     g.add(tail);
@@ -397,11 +442,32 @@ export class Lamprey {
     const pursuitFactor = scaledDist < PURSUIT_ACTIVE_DIST ? (1.0 - scaledDist / PURSUIT_ACTIVE_DIST) : 0;
     this.group.rotation.x = Math.sin(this.time * (0.5 + pursuitFactor)) * (0.06 + pursuitFactor * 0.08);
 
+    // ── Weight & inertia: tail trails head with fluid-drag ──
+    const dx = this.group.position.x - this._prevPos.x;
+    const dy = this.group.position.y - this._prevPos.y;
+    const dz = this.group.position.z - this._prevPos.z;
+    this._prevPos.copy(this.group.position);
+
+    const trailStrength = 0.15;
+    const trailDamping = 3.0;
+    this._trailRotX = THREE.MathUtils.lerp(this._trailRotX, -dy * trailStrength, dt * trailDamping);
+    this._trailRotZ = THREE.MathUtils.lerp(this._trailRotZ, -dx * trailStrength, dt * trailDamping);
+    this.group.rotation.x += this._trailRotX;
+    this.group.rotation.z += this._trailRotZ;
+
     // ── GPU body wave: update shader uniforms (breathing amplitude variation) ──
+    this._frameCount++;
     const breathAmp = 0.18 + Math.sin(this.time * 0.3) * 0.03;
     for (const su of this._bodyShaderUniforms) {
       su.uWavePhase.value = this._wavePhase;
       su.uAmplitude.value = breathAmp;
+    }
+    // Far tier: throttled update (every 4th frame)
+    if (this._frameCount % 4 === 0) {
+      for (const su of this._farShaderUniforms) {
+        su.uWavePhase.value = this._wavePhase;
+        su.uAmplitude.value = breathAmp;
+      }
     }
 
     // ── near-tier mouth animations ──
@@ -417,11 +483,6 @@ export class Lamprey {
       const reactivity = pursuitFactor > 0 ? 1.0 + pursuitFactor * 1.5 : 1.0;
       const dil = 1.0 + Math.sin(this._mouthPhase) * 0.07 * reactivity;
       this._lipMesh.scale.set(dil, dil, 1);
-    }
-
-    // Mouth light pulsing (keyed to dilation cycle)
-    if (this._mouthLight) {
-      this._mouthLight.intensity = 0.6 + Math.sin(this._mouthPhase * 1.5) * 0.3;
     }
 
     // Gill flap pulse (secondary breathing motion)
