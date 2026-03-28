@@ -65,11 +65,21 @@ Use `#prompt:ship-it` to run the entire pipeline — implement, review, fix, and
 - *`#prompt:ship-it` Add bioluminescent particles that trail behind the player*
 - *`#prompt:ship-it` Fix the camera clipping through terrain*
 
+#### Ship an epic (multi-issue workflow)
+
+Use `#prompt:ship-epic` to process an entire epic's sub-issues in dependency order:
+
+- *`#prompt:ship-epic` 53*
+
 #### UX test the game
 
 - *"Play-test the game and find UX issues. Do a full sweep."*
 - *"Play-test the creature encounters — swim deep and check for visual glitches and performance drops."*
 - *"Run a UX test focused on the HUD readability and accessibility."*
+
+#### Pre-flight check for UX testing
+
+Use `#prompt:ux-tester-readiness` to verify infrastructure, game runtime, and agent dependencies before dispatching the UX Tester.
 
 ### How It Works
 
@@ -82,25 +92,51 @@ Use `#prompt:ship-it` to run the entire pipeline — implement, review, fix, and
 
 The **UX Tester** combines steps 1–3 automatically: it plays the game, finds issues, and dispatches workers for each one.
 
-### Agent Configuration
+### Custom Agents
 
-Agent definitions and skills live in `.github/`:
+Agent definitions live in `.github/agents/`. All agents are orchestrator-dispatched (not user-invocable directly).
+
+| Agent | File | Description |
+| --- | --- | --- |
+| **Local Worker** | `.github/agents/local-worker.agent.md` | Implements code changes in a git worktree branch. Handles feature development, bug fixes, and review fix-ups. Pushes commits and creates PRs via MCP. |
+| **Reviewer** | `.github/agents/reviewer.agent.md` | Expert code reviewer for Three.js game code. Reads PR diffs via GitHub MCP, posts inline review comments, manages `agent-reviewed` and `agent-approved` labels. |
+| **Merger** | `.github/agents/merger.agent.md` | Squash-merges `agent-approved` PRs into `main` one at a time. Verifies builds after each merge and cleans up worktrees. |
+| **UX Tester** | `.github/agents/ux-tester.agent.md` | Video game UX orchestrator. Launches the game with `?autoplay` in a browser, plays it to find visual, performance, accessibility, and usability issues. Dispatches Local Workers, Reviewers, and Mergers to fix, review, and merge each issue. Closes all browser windows when done. |
+
+### Skills
+
+Skills provide domain-specific procedural knowledge that agents reference during execution. They live in `.github/skills/`.
+
+| Skill | File | Description |
+| --- | --- | --- |
+| **Worktree Workflow** | `.github/skills/worktree-workflow/SKILL.md` | Git worktree creation, branch management, pushing, PR creation via MCP, and cleanup for isolated local agent work. |
+| **Review Workflow** | `.github/skills/review-workflow/SKILL.md` | Pull request code review using GitHub MCP tools — reading diffs, posting reviews with inline comments, managing labels. |
+| **Merge Workflow** | `.github/skills/merge-workflow/SKILL.md` | Squash-merge approved PRs using GitHub MCP tools — finding `agent-approved` PRs, merging, post-merge build verification, worktree cleanup. |
+| **UX Testing** | `.github/skills/ux-testing/SKILL.md` | Browser-based UX testing for Three.js games using Chrome DevTools MCP — screenshots, keyboard input, console monitoring, performance tracing, memory analysis, and dispatching fix workers. |
+
+### Prompt Files
+
+Reusable prompt templates live in `.github/prompts/`. Reference them in chat with `#prompt:<name>`.
+
+| Prompt | File | Description |
+| --- | --- | --- |
+| **ship-it** | `.github/prompts/ship-it.prompt.md` | Full end-to-end workflow: implement in a worktree, review the PR, fix any review issues, and squash-merge into `main`. Use when you want a single prompt to go from idea to merged code. |
+| **ship-epic** | `.github/prompts/ship-epic.prompt.md` | Run the full ship-it workflow for an epic and all sub-issues in dependency order, one-by-one, from implementation through merge and build verification. |
+| **ux-tester-readiness** | `.github/prompts/ux-tester-readiness.prompt.md` | Pre-flight checklist to verify infrastructure, game runtime, agent dependencies, and skills before dispatching the UX Tester agent. |
+
+### Instructions
+
+Auto-loaded instruction files in `.github/instructions/` provide context-specific rules when editing certain file types.
+
+| Instruction | File | Applies To |
+| --- | --- | --- |
+| **Agent Files** | `.github/instructions/agent-files.instructions.md` | `*.agent.md`, `SKILL.md`, `copilot-instructions.md`, `*.instructions.md`, `*.prompt.md` |
+
+### Configuration
 
 ```text
 .github/
   copilot-instructions.md          # Repo-wide conventions and dispatch templates
-  agents/
-    local-worker.agent.md          # Local Worker agent
-    reviewer.agent.md              # Reviewer agent
-    merger.agent.md                # Merger agent
-    ux-tester.agent.md             # UX Tester agent
-  instructions/
-    agent-files.instructions.md    # Auto-loaded when editing agent/skill files
-  skills/
-    worktree-workflow/SKILL.md     # Git worktree lifecycle
-    review-workflow/SKILL.md       # PR review via GitHub MCP
-    merge-workflow/SKILL.md        # Squash-merge pipeline
-    ux-testing/SKILL.md            # Browser-based game testing
 .vscode/
   mcp.json                         # MCP server declarations for agents
 ```

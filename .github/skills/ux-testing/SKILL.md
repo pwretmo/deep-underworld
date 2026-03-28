@@ -121,11 +121,9 @@ Use the built-in `lighthouse-mcp` tool (if available) or run via npx:
 npx lighthouse http://localhost:5173?autoplay --view
 ```
 
-# Open menu
+### Open menu
 
 Use canonical `press_key` with `Escape`.
-
-````
 
 ### Querying game state via JavaScript
 
@@ -141,22 +139,24 @@ The `Game` instance is exposed on `window.game`. Key properties:
 - `game.autoplay` — true when in autoplay mode
 
 ```text
-evaluate_script
-function: () => {
-  const game = window.game;
-  if (!game) return { error: 'game not found on window' };
-  return {
-    playerPos: game.player?.position,
-    depth: game.depth,
-    fps: game.fps,
-    creatureCount: game.creatureManager?.creatures?.length,
-    oxygen: game.oxygen,
-    battery: game.battery,
-    running: game.running,
-    gameOver: game.gameOver,
-  };
-}
-````
+Tool: evaluate_script (canonical chrome-devtools-mcp)
+Parameters:
+  pageId: <current page ID>
+  function: () => {
+    const game = window.game;
+    if (!game) return { error: 'game not found on window' };
+    return {
+      playerPos: game.player?.position,
+      depth: game.depth,
+      fps: game.fps,
+      creatureCount: game.creatureManager?.creatures?.length,
+      oxygen: game.oxygen,
+      battery: game.battery,
+      running: game.running,
+      gameOver: game.gameOver,
+    };
+  }
+```
 
 > **Tip**: If `window.game` isn't responding, check that the page has
 > finished loading. In autoplay mode the game starts immediately.
@@ -180,9 +180,10 @@ Use canonical `take_memory_snapshot`.
 ### Lighthouse audit
 
 ```text
-lighthouse_audit
-mode: navigation
-device: desktop
+Tool: lighthouse_audit (host-exposed performance audit tool)
+Parameters:
+  mode: navigation
+  device: desktop
 ```
 
 ## What to Look For
@@ -236,15 +237,17 @@ git worktree add -b agent/ux-fix-2 F:\repos\deep-underworld-worktrees\ux-fix-2 o
 # ... one command per issue, run sequentially (shares .git state)
 ```
 
-### Dispatch workers
+### Dispatch workers in parallel batches
 
-Subagent calls are blocking, so dispatch workers one at a time. Include in each prompt:
+After all worktrees are created, dispatch Local Worker subagents in parallel for independent issues. Each worker has an isolated worktree and branch, so these calls have no data dependency. Include in each prompt:
 
 1. Worktree path and branch name
 2. Task description with `[UX Fix]` prefix
 3. Evidence (screenshot description or console error text)
 4. Affected file path
 5. Suggested fix
+
+Use one parallel batch for the initial issue set, then additional parallel batches for re-dispatched worker fixes that target different worktrees.
 
 Fix ALL issues — critical, major, AND minor. Never defer issues as "known issues" or "lower priority". If an issue requires significant refactoring, break it into the smallest meaningful first step a single worker can implement. Every issue found MUST result in a dispatched worker.
 
@@ -297,7 +300,7 @@ runSubagent  agentName: "Reviewer"
   ..."
 ```
 
-If either the external review or local Reviewer requests changes, re-dispatch the worker with the combined feedback, then re-review. Max 3 rounds per PR.
+If either the external review or local Reviewer requests changes, re-dispatch the worker with the combined feedback, then re-review until approvals are achieved or a documented hard-stop condition applies.
 
 A PR is ready for merge only when it has **no outstanding `REQUEST_CHANGES` reviews** from any source.
 
@@ -327,25 +330,24 @@ After merges are done:
 
 ## Cleanup: Closing Browser Windows
 
-Cleanup is mandatory on every exit path. When testing is complete, or if you abort early because tooling/server setup fails, close all browser tabs and windows opened during the session:
+Cleanup is mandatory on every exit path. When testing is complete, or if you abort early because tooling/server setup fails, close every page you opened during the session.
 
-```javascript
-// Close the current page
-async (page) => {
-  await page.close();
-  return "Browser page closed";
-};
+### Step 1 — List open pages
+
+```
+Tool: list_pages (canonical chrome-devtools-mcp)
 ```
 
-Or close the entire browser context if multiple tabs were opened for different test phases:
+### Step 2 — Close each tracked page
 
-```javascript
-// Close browser context (all tabs/windows)
-async (page) => {
-  const browser = page.context().browser();
-  await browser.close();
-  return "Browser closed";
-};
+For each page ID in your tracked list:
+
+```
+Tool: close_page (canonical chrome-devtools-mcp)
+Parameters:
+  pageId: <page ID>
 ```
 
-This cleanup ensures Chrome DevTools MCP doesn't leave orphaned browser processes. Always perform cleanup before final `task_complete` call.
+Call `close_page` once per page opened. After closing all pages, confirm with `list_pages` that no tracked pages remain.
+
+This ensures Chrome DevTools MCP doesn't leave orphaned browser processes. Always perform cleanup before the final `task_complete` call.
