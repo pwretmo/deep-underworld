@@ -40,10 +40,10 @@ export const DEPTH_ZONE_PROFILES = Object.freeze({
   }),
   exposure: Object.freeze({
     surface: 0.76,
-    mid: 0.68,
-    deep: 0.6,
-    abyss: 0.56,
-    flashlightBoost: 0.16,
+    mid: 0.70,
+    deep: 0.65,
+    abyss: 0.62,
+    flashlightBoost: 0.12,
     easing: 0.08,
   }),
   flashlightFogPush: Object.freeze({
