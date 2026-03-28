@@ -491,7 +491,13 @@ export class Game {
       this._resumeAudio();
     }
     this.clock.start();
-    await this._warmOpeningFrames();
+    await this._warmOpeningFrames({
+      onProgress: (data) => {
+        if (startupToken === this._startupToken) {
+          this._updateDescentProgress(data);
+        }
+      },
+    });
     if (startupToken !== this._startupToken) return;
 
     // Dismiss descent overlay only after the first live gameplay frames have
@@ -508,20 +514,44 @@ export class Game {
     console.log(`[deep-underworld] ${logMessage}`, primeSummary);
   }
 
-  async _warmOpeningFrames() {
+  async _warmOpeningFrames({ onProgress } = {}) {
+    const requiredResponsiveFrames = 6;
     let responsiveFrames = 0;
     for (let i = 0; i < 180; i++) {
       await new Promise((resolve) =>
         window.requestAnimationFrame(() => resolve()),
       );
+      const startupGuard = this.underwaterEffect.getStartupGuardStatus();
       if (this.underwaterEffect.isStartupResponsive()) {
         responsiveFrames++;
-        if (responsiveFrames >= 6) {
+        if (responsiveFrames >= requiredResponsiveFrames) {
+          onProgress?.({
+            phase: 'opening',
+            openingFrames: {
+              responsiveFrames,
+              requiredResponsiveFrames,
+              guardActive: startupGuard.active,
+              guardStableFrames: startupGuard.stableFrames,
+              guardRequiredFrames: startupGuard.requiredFrames,
+              guardRemainingMs: startupGuard.remainingMs,
+            },
+          });
           break;
         }
       } else {
         responsiveFrames = 0;
       }
+      onProgress?.({
+        phase: 'opening',
+        openingFrames: {
+          responsiveFrames,
+          requiredResponsiveFrames,
+          guardActive: startupGuard.active,
+          guardStableFrames: startupGuard.stableFrames,
+          guardRequiredFrames: startupGuard.requiredFrames,
+          guardRemainingMs: startupGuard.remainingMs,
+        },
+      });
     }
   }
 
@@ -530,25 +560,73 @@ export class Game {
     if (data && data.phase) {
       if (data.phase === 'loading') this._descentPhase = 'loading';
       else if (data.phase === 'finalizing') this._descentPhase = 'finalizing';
+      else if (data.phase === 'opening') this._descentPhase = 'opening';
     }
 
-    // Composite progress: physics 5%, shaders 10%, creatures 45%, terrain 20%, flora 20%
-    const creatures = this.creatures.getLoadProgress();
+    // Composite progress spans the full startup pipeline so the bar does not
+    // look complete before render warmup and live-render stabilization finish.
+    const creatures = data?.primeCreatures || this.creatures.getLoadProgress();
     const terrainPending = this.terrain.getPendingCount();
     const terrainLoaded = this.terrain.getChunkCount();
     const terrainTotal = terrainLoaded + terrainPending;
     const floraPending = this.flora.getPendingCount();
     const floraLoaded = this.flora.getChunkCount();
     const floraTotal = floraLoaded + floraPending;
+    const finalization = data?.finalization || null;
+    const opening = data?.openingFrames || null;
 
     const phase = this._descentPhase;
     const physicsDone = phase !== "physics";
     const shadersDone = phase !== "physics" && phase !== "shaders";
+    const finalizationDone = phase === "opening" || !this._descentActive;
+    const openingDone = !this._descentActive;
 
     const creaturePct =
       creatures.total > 0 ? creatures.loaded / creatures.total : 1;
     const terrainPct = terrainTotal > 0 ? terrainLoaded / terrainTotal : 1;
     const floraPct = floraTotal > 0 ? floraLoaded / floraTotal : 1;
+    const finalizationStepTotal = Math.max(1, finalization?.stepTotal || 4);
+    const finalizationStepIndex =
+      phase === "finalizing"
+        ? Math.max(
+            1,
+            Math.min(finalization?.stepIndex || 1, finalizationStepTotal),
+          )
+        : finalizationDone
+          ? finalizationStepTotal
+          : 0;
+    const finalizationStepPct =
+      phase === "finalizing"
+        ? finalization?.total > 0
+          ? Math.max(
+              0,
+              Math.min(1, (finalization?.current || 0) / finalization.total),
+            )
+          : Math.max(0, Math.min(1, finalization?.current || 0))
+        : finalizationDone
+          ? 1
+          : 0;
+    const finalizationPct =
+      finalizationStepIndex > 0
+        ? Math.min(
+            1,
+            ((finalizationStepIndex - 1) + finalizationStepPct) /
+              finalizationStepTotal,
+          )
+        : 0;
+    const openingPct =
+      phase === "opening"
+        ? Math.max(
+            0,
+            Math.min(
+              1,
+              (opening?.responsiveFrames || 0) /
+                Math.max(1, opening?.requiredResponsiveFrames || 0),
+            ),
+          )
+        : openingDone
+          ? 1
+          : 0;
 
     const physicsPct = physicsDone ? 1 : 0;
     const shaderPct = shadersDone ? 1 : phase === "shaders" ? 0.5 : 0;
@@ -557,15 +635,38 @@ export class Game {
       100,
       (physicsPct * 0.05 +
         shaderPct * 0.1 +
-        creaturePct * 0.45 +
-        terrainPct * 0.2 +
-        floraPct * 0.2) *
+        creaturePct * 0.2 +
+        terrainPct * 0.12 +
+        floraPct * 0.08 +
+        finalizationPct * 0.3 +
+        openingPct * 0.15) *
         100,
     );
     this.descentProgressBar.style.width = pct + "%";
 
-    // Update itemized status lines
-    const allDone = phase === "finalizing" || !this._descentActive;
+    const formatProgressLabel = (label, current, total, unit) => {
+      if (total <= 0) return `${label}...`;
+      return `${label}... ${current}/${total}${unit ? ` ${unit}` : ""}`;
+    };
+    const finalizationStepOneActive =
+      phase === "finalizing" && finalizationStepIndex === 1;
+    const finalizationStepTwoActive =
+      phase === "finalizing" && finalizationStepIndex === 2;
+    const finalizationStepThreeActive =
+      phase === "finalizing" && finalizationStepIndex === 3;
+    const finalizationStepFourActive =
+      phase === "finalizing" && finalizationStepIndex === 4;
+    let openingLabel = "Stabilizing live render...";
+    if (phase === "opening" && opening) {
+      openingLabel =
+        `Stabilizing live render... ${opening.responsiveFrames}/${opening.requiredResponsiveFrames} stable frames`;
+      if (opening.guardActive) {
+        openingLabel += ` (${Math.ceil(opening.guardRemainingMs)}ms guard)`;
+      }
+    }
+
+    // Keep every startup stage visible from the beginning so the player can
+    // see that shader/terrain/flora loading is only part of the startup work.
     const items = [
       {
         id: "physics",
@@ -581,17 +682,17 @@ export class Game {
       },
       {
         id: "creatures",
-        done: allDone && creaturePct >= 1,
-        active: !allDone && shadersDone,
+        done: shadersDone && creaturePct >= 1,
+        active: phase === "loading" && shadersDone && creaturePct < 1,
         label:
           creatures.total > 0
-            ? `Spawning creatures... ${creatures.loaded}/${creatures.total}`
-            : "Spawning creatures...",
+            ? `Spawning nearby creatures... ${creatures.loaded}/${creatures.total}`
+            : "Spawning nearby creatures...",
       },
       {
         id: "terrain",
-        done: allDone && terrainPct >= 1,
-        active: !allDone && shadersDone,
+        done: shadersDone && terrainPct >= 1,
+        active: phase === "loading" && shadersDone && terrainPct < 1,
         label:
           terrainTotal > 0
             ? `Generating terrain... ${terrainLoaded}/${terrainTotal} chunks`
@@ -599,12 +700,70 @@ export class Game {
       },
       {
         id: "flora",
-        done: allDone && floraPct >= 1,
-        active: !allDone && shadersDone,
+        done: shadersDone && floraPct >= 1,
+        active: phase === "loading" && shadersDone && floraPct < 1,
         label:
           floraTotal > 0
             ? `Growing flora... ${floraLoaded}/${floraTotal} chunks`
             : "Growing flora...",
+      },
+      {
+        id: "finish-nearby",
+        label: finalizationStepOneActive
+          ? formatProgressLabel(
+              "Finishing nearby spawns",
+              finalization?.current || 0,
+              finalization?.total || 0,
+              finalization?.unit || "creatures",
+            )
+          : "Finishing nearby spawns...",
+        done: finalizationDone || finalizationStepIndex > 1,
+        active: finalizationStepOneActive,
+      },
+      {
+        id: "warm-views",
+        label: finalizationStepTwoActive
+          ? formatProgressLabel(
+              "Warming representative views",
+              finalization?.current || 0,
+              finalization?.total || 0,
+              finalization?.unit || "views",
+            )
+          : "Warming representative views...",
+        done: finalizationDone || finalizationStepIndex > 2,
+        active: finalizationStepTwoActive,
+      },
+      {
+        id: "showcase-creatures",
+        label: finalizationStepThreeActive
+          ? formatProgressLabel(
+              "Showcasing creature shaders",
+              finalization?.current || 0,
+              finalization?.total || 0,
+              finalization?.unit || "types",
+            )
+          : "Showcasing creature shaders...",
+        done: finalizationDone || finalizationStepIndex > 3,
+        active: finalizationStepThreeActive,
+      },
+      {
+        id: "handoff",
+        label: finalizationStepFourActive
+          ? formatProgressLabel(
+              "Handing off to live render",
+              finalization?.current || 0,
+              finalization?.total || 0,
+              finalization?.unit || "frames",
+            )
+          : "Handing off to live render...",
+        done: finalizationDone,
+        active: finalizationStepFourActive,
+      },
+      {
+        id: "opening",
+        label: openingLabel,
+        done: openingDone,
+        active: phase === "opening" && this._descentActive,
       },
     ];
 
