@@ -1,6 +1,6 @@
 import { Game } from './Game.js';
 
-const game = new Game();
+const game = new Game(await Game.resolveRendererOptions());
 await game.init();
 
 // Expose game instance globally for automated testing (UX Tester / Chrome DevTools)
