@@ -203,6 +203,12 @@ The dispatch prompt must restate the non-negotiable parts of the workflow when t
 
 If this repository defines an explicit agent workflow for a task, do not substitute alternate PR or review flows just because another path is available in the tool environment. Follow the repository workflow unless the user explicitly asks to override it.
 
+### Ship-It Interpretation
+
+When the user asks to `ship-it` an existing PR or names a specific PR number, interpret that as an end-to-end request to shepherd the PR through the remaining workflow steps, not as a merge-only readiness check. Inspect the PR state first. If it is missing `agent-approved`, has an outstanding `REQUEST_CHANGES`, or has blocking review comments or threads, return to the fix loop on the existing PR branch and continue Worker -> Reviewer -> Merger in that order. Only dispatch the Merger after the PR is actually merge-ready.
+
+For existing `agent/` PRs, use the Local Worker re-dispatch template and current worktree. For existing `copilot/` PRs, update the existing PR branch in place rather than forcing the local worktree template onto a cloud branch.
+
 The main conversation agent acts as orchestrator. Example dispatch prompts:
 
 ### Dispatch a Local Worker
@@ -247,6 +253,8 @@ If GitHub blocks formal review actions on a self-authored PR, still return the c
 ```
 
 ### Re-dispatch Worker with Review Fixes
+
+This template applies to local `agent/` branches. For an existing `copilot/` PR, keep the same fix-loop intent but update the existing cloud branch in place instead of recreating a local worktree.
 
 Before dispatching, verify the worktree still exists and recreate if missing:
 

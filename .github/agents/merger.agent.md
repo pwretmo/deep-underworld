@@ -32,6 +32,7 @@ The merge-workflow skill is the authoritative procedure for discovery, merge exe
 
 - Never merge a PR without the `agent-approved` label.
 - Before merging, confirm there are no outstanding `REQUEST_CHANGES` reviews and no unaddressed blocking review feedback.
+- If asked to act on a specific PR that fails these gates, report the blocker and direct the orchestrator back to the Worker -> Reviewer fix loop on the existing PR branch instead of treating the request as complete.
 - If already-addressed blocking review conversations are still open, handle them through the review-thread-resolution skill and use its `gh api graphql` path first before any fallback reply.
 - Always squash merge.
 - Always verify the build after each merge before continuing.
