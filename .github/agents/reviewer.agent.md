@@ -26,11 +26,7 @@ You review **all PRs equally** — both local worker PRs (`agent/` branches) and
 
 ## Available Tools
 
-You have access to local dev tools pre-installed in the repo:
-
-- **eslint** — run `npx eslint src/` to check code style before reviewing
-- **typescript** — run `npx tsc --noEmit` to check for type errors
-- **lighthouse** — run `npx lighthouse http://localhost:5173` to catch performance issues (if game is running)
+Use GitHub MCP review data and repository diffs as your primary evidence source for review decisions.
 
 ## Workflow
 
@@ -73,9 +69,11 @@ Use the review-workflow skill's procedures for posting reviews and managing labe
 
 #### If Issues Found
 
-1. Post a `REQUEST_CHANGES` review with inline comments on specific lines
-2. Add label `agent-reviewed`
-3. **Return** to the orchestrator:
+1. Post a `REQUEST_CHANGES` review
+2. If inline line comments are supported in this session, include them
+3. If inline line comments are unavailable, include `path:line` references in the review body
+4. Add label `agent-reviewed`
+5. **Return** to the orchestrator:
 
    ```
    REVIEW RESULT: REQUEST_CHANGES
@@ -86,6 +84,8 @@ Use the review-workflow skill's procedures for posting reviews and managing labe
    2. <file>:<line> — <description of issue>
    ...
    ```
+
+6. End the turn with an immediate `task_complete` call after your summary
 
 #### If Approved
 
@@ -101,6 +101,8 @@ Use the review-workflow skill's procedures for posting reviews and managing labe
    Summary: <what the PR does and why it's good>
    ```
 
+4. End the turn with an immediate `task_complete` call after your summary
+
 ## Rules
 
 - **Never** modify code yourself — you only review and comment
@@ -110,3 +112,12 @@ Use the review-workflow skill's procedures for posting reviews and managing labe
 - Always add the `agent-reviewed` label after posting any review.
 - Only add `agent-approved` when you are genuinely satisfied with the code.
 - **BLOCKING: Reject any PR that removes, disables, or downgrades existing functionality to fix a bug.** This is not a style preference — it is a mandatory engineering rule. The fix must preserve the feature and address the root cause. See the Engineering Quality Standards in `copilot-instructions.md`.
+
+## Completion Contract
+
+Every successful run must end with:
+
+1. A short, plain-language summary of the review result
+2. An immediate `task_complete` call in the same turn
+
+Do not end with only normal chat text.

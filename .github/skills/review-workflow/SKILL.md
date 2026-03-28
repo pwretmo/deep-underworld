@@ -109,7 +109,12 @@ Issue #42 completeness: All requirements verified. ✅
 
 ### Request Changes
 
-When issues are found:
+When issues are found, use capability-gated behavior:
+
+- If inline line comments are supported in this session, include them.
+- If inline comments are unavailable, put explicit `path:line` references in the review body.
+
+Example with inline comments:
 
 ```
 Tool: mcp_io_github_git_pull_request_review_write
@@ -128,6 +133,18 @@ Parameters:
       body: "Missing null check — player could be undefined here."
 ```
 
+Fallback example when inline comments are not supported:
+
+```
+Tool: mcp_io_github_git_pull_request_review_write
+Parameters:
+  owner: "pwretmo"
+  repo: "deep-underworld"
+  pullNumber: <number>
+  event: "REQUEST_CHANGES"
+  body: "Summary of issues found:\n\n1. src/environment/Ocean.js:42 — This texture is never disposed.\n2. src/creatures/Anglerfish.js:15 — Missing null check."
+```
+
 ### Approve
 
 When the code looks good:
@@ -144,7 +161,20 @@ Parameters:
 
 ## Managing Labels
 
-After posting any review, add the `agent-reviewed` label:
+After posting any review, add the `agent-reviewed` label using read-merge-write reconciliation:
+
+1. Read current labels:
+
+```
+Tool: mcp_io_github_git_issue_read
+Parameters:
+  owner: "pwretmo"
+  repo: "deep-underworld"
+  issue_number: <PR number>
+```
+
+2. Merge existing labels with `agent-reviewed` (de-duplicate).
+3. Write merged labels:
 
 ```
 Tool: mcp_io_github_git_issue_write
@@ -152,11 +182,15 @@ Parameters:
   owner: "pwretmo"
   repo: "deep-underworld"
   issue_number: <PR number>
-  labels: ["agent-reviewed"]
+  labels: [<existing labels...>, "agent-reviewed"]
   method: "update"
 ```
 
-After approving, add both labels:
+After approving, add both `agent-reviewed` and `agent-approved` using read-merge-write:
+
+1. Read current labels.
+2. Merge existing labels with both required labels (de-duplicate).
+3. Write merged labels:
 
 ```
 Tool: mcp_io_github_git_issue_write
@@ -164,7 +198,7 @@ Parameters:
   owner: "pwretmo"
   repo: "deep-underworld"
   issue_number: <PR number>
-  labels: ["agent-reviewed", "agent-approved"]
+  labels: [<existing labels...>, "agent-reviewed", "agent-approved"]
   method: "update"
 ```
 

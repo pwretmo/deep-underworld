@@ -121,11 +121,9 @@ Use the built-in `lighthouse-mcp` tool (if available) or run via npx:
 npx lighthouse http://localhost:5173?autoplay --view
 ```
 
-# Open menu
+### Open menu
 
 Use canonical `press_key` with `Escape`.
-
-````
 
 ### Querying game state via JavaScript
 
@@ -156,7 +154,7 @@ function: () => {
     gameOver: game.gameOver,
   };
 }
-````
+```
 
 > **Tip**: If `window.game` isn't responding, check that the page has
 > finished loading. In autoplay mode the game starts immediately.
@@ -236,15 +234,17 @@ git worktree add -b agent/ux-fix-2 F:\repos\deep-underworld-worktrees\ux-fix-2 o
 # ... one command per issue, run sequentially (shares .git state)
 ```
 
-### Dispatch workers
+### Dispatch workers in parallel batches
 
-Subagent calls are blocking, so dispatch workers one at a time. Include in each prompt:
+After all worktrees are created, dispatch Local Worker subagents in parallel for independent issues. Each worker has an isolated worktree and branch, so these calls have no data dependency. Include in each prompt:
 
 1. Worktree path and branch name
 2. Task description with `[UX Fix]` prefix
 3. Evidence (screenshot description or console error text)
 4. Affected file path
 5. Suggested fix
+
+Use one parallel batch for the initial issue set, then additional parallel batches for re-dispatched worker fixes that target different worktrees.
 
 Fix ALL issues — critical, major, AND minor. Never defer issues as "known issues" or "lower priority". If an issue requires significant refactoring, break it into the smallest meaningful first step a single worker can implement. Every issue found MUST result in a dispatched worker.
 

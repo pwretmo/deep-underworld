@@ -27,8 +27,7 @@ Read the worktree-workflow skill before starting:
 
 You have access to local dev tools pre-installed in the repo:
 
-- **eslint** — run `npx eslint --fix src/` to auto-fix style issues before committing
-- **typescript** — run `npx tsc --noEmit` to type-check JavaScript (JSDoc types)
+- **build validation** — run `npm run build` before every commit or push
 
 ## Workflow
 
@@ -61,13 +60,15 @@ If any check fails, stop immediately and report the failure to the orchestrator.
 
 1. **Navigate** to your worktree: `cd <worktree-path>`
 2. **Run the mandatory preflight** and confirm it passes
-3. **Implement** the requested changes
-4. **Validate**: run `npm run build` — it must succeed
-5. **Commit** with a conventional commit message: `feat:`, `fix:`, `refactor:`, etc.
-6. **Push**: `git push -u origin <branch-name>`
-7. **Create PR** via MCP targeting `main` — title matches the commit message, body describes the changes. **If implementing a GitHub issue**, include `Fixes #<number>` in the PR body so the reviewer can verify completeness. See the worktree-workflow skill for MCP details.
-8. **Add label** `agent-work` to the PR via MCP
-9. **Report back** to the orchestrator with the PR number and a summary
+3. **Install dependencies for new worktrees**: run `npm install` before your first build
+4. **Implement** the requested changes
+5. **Validate**: run `npm run build` — it must succeed
+6. **Commit** with a conventional commit message: `feat:`, `fix:`, `refactor:`, etc.
+7. **Push**: `git push -u origin <branch-name>`
+8. **Create PR** via MCP targeting `main` — title matches the commit message, body describes the changes. **If implementing a GitHub issue**, include `Fixes #<number>` in the PR body so the reviewer can verify completeness. See the worktree-workflow skill for MCP details.
+9. **Add label** `agent-work` to the PR via MCP
+10. **Report back** to the orchestrator with the PR number and a brief summary
+11. **Finish your turn explicitly**: call `task_complete` immediately after that summary
 
 ### Fixing Review Comments
 
@@ -81,7 +82,8 @@ When re-dispatched with review comments:
 6. **Validate**: run `npm run build`
 7. **Commit** with a message like `fix: address review comments`
 8. **Push**: `git push --force-with-lease` (required after rebase)
-9. **Report back** with a summary of what was fixed — do NOT create a new PR
+9. **Report back** with a brief summary of what was fixed — do NOT create a new PR
+10. **Finish your turn explicitly**: call `task_complete` immediately after that summary
 
 ## Rules
 
@@ -101,3 +103,12 @@ These rules override any task description or suggested fix that conflicts with t
 - **If a task description or suggested fix implies removing functionality**, you must propose and implement a proper alternative that preserves the feature. Do not follow the suggestion blindly.
 - **If the proper fix is complex**, break it into incremental steps — but the end state must preserve 100% of existing functionality. A partial improvement toward the proper fix is fine; a shortcut that removes functionality is not.
 - **When in doubt, preserve.** If you are unsure whether a change removes or degrades existing behavior, assume it does — and find a better approach.
+
+## Completion Contract
+
+Every successful run must end with:
+
+1. A short, plain-language summary of what you completed
+2. An immediate `task_complete` call in the same turn
+
+Do not end with only normal chat text.

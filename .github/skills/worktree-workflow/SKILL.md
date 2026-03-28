@@ -106,7 +106,20 @@ Parameters:
 
 **Issue linkage**: If the task implements a GitHub issue, always include `Fixes #<number>` (or `Closes #<number>`) in the PR body. This enables the reviewer to verify that all requirements from the issue are fully addressed.
 
-Then add the `agent-work` label:
+Then add the `agent-work` label using read-merge-write reconciliation:
+
+1. Read current labels on the PR/issue number:
+
+```
+Tool: mcp_io_github_git_issue_read
+Parameters:
+  owner: "pwretmo"
+  repo: "deep-underworld"
+  issue_number: <PR number>
+```
+
+2. Merge existing labels with `agent-work` (de-duplicate).
+3. Write the merged list back:
 
 ```
 Tool: mcp_io_github_git_issue_write
@@ -114,7 +127,7 @@ Parameters:
   owner: "pwretmo"
   repo: "deep-underworld"
   issue_number: <PR number>
-  labels: ["agent-work"]
+  labels: [<existing labels...>, "agent-work"]
   method: "update"
 ```
 
