@@ -431,6 +431,7 @@ export class Anglerfish {
     let lureLight = null;
     if (isNear) {
       lureLight = new THREE.PointLight(0x46ffb0, 2.8, 24);
+      lureLight.userData.duwCategory = 'creature_bio';
       lureLight.position.copy(lureBulb.position);
       lurePivot.add(lureLight);
     }

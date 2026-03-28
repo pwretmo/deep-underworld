@@ -381,6 +381,7 @@ export class GhostShark {
 
     // ── Glow: dim fill light — emissive materials carry the primary glow ─
     const glow = new THREE.PointLight(0x66ffaa, isFar ? 0.08 : 0.12, 10);
+    glow.userData.duwCategory = 'creature_bio';
     group.add(glow);
 
     return {

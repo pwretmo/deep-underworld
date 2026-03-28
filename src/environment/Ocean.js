@@ -201,6 +201,7 @@ export class Ocean {
     this.causticLights = [];
     for (let i = 0; i < 10; i++) {
       const light = new THREE.PointLight(0x88ccff, 0.5, 70);
+      light.userData.duwCategory = 'flora_decor';
       light.position.set(
         (Math.random() - 0.5) * 50,
         -3 - Math.random() * 18,

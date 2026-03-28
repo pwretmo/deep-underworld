@@ -88,6 +88,7 @@ export class Husk {
 
     // Residual energy leak from cracked shell
     this.glow = new THREE.PointLight(0x1a0828, 0.6, 10);
+    this.glow.userData.duwCategory = 'creature_bio';
     this.glow.position.set(0, 0, 0);
     this.group.add(this.glow);
 

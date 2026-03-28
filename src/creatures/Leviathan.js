@@ -39,6 +39,7 @@ export class Leviathan {
 
     // Eye light only on near tier
     this.eyeLight = new THREE.PointLight(0xff2200, 2, 30);
+    this.eyeLight.userData.duwCategory = 'creature_bio';
     this.eyeLight.position.set(3, 1.2, 0);
     this.tiers.near.group.add(this.eyeLight);
 

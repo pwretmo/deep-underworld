@@ -57,6 +57,7 @@ export class Sentinel {
     this.group.add(pupil);
 
     this.eyeLight = new THREE.PointLight(0xffcc00, 2, 20);
+    this.eyeLight.userData.duwCategory = 'creature_bio';
     this.eyeLight.position.set(0.3, 6, 0);
     this.group.add(this.eyeLight);
 

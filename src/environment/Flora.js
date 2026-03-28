@@ -141,6 +141,7 @@ export class Flora {
 
     for (const lightData of payload.orbLights) {
       const light = new THREE.PointLight(lightData.color, lightData.intensity, lightData.distance);
+      light.userData.duwCategory = 'flora_decor';
       light.position.set(lightData.x, lightData.y, lightData.z);
       group.add(light);
     }

@@ -336,6 +336,7 @@ export class BirthSac {
     g.add(new THREE.Mesh(silGeo, silMat));
 
     const glow = new THREE.PointLight(0x660022, 0.6, 8);
+    glow.userData.duwCategory = 'creature_bio';
     g.add(glow);
 
     return { group: g, sacMat: silMat, sacs: [], glow, connTissues: [] };
@@ -490,6 +491,7 @@ export class BirthSac {
 
     // Single point light per tier — emissive glow (no per-sac lights)
     const glow = new THREE.PointLight(0x660022, 0.8, 8);
+    glow.userData.duwCategory = 'creature_bio';
     tierGroup.add(glow);
 
     return { group: tierGroup, core, sacMat, sacs, glow, connTissues, profile };

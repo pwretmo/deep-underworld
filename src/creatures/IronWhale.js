@@ -35,6 +35,7 @@ export class IronWhale {
 
     // Eye light on near tier only
     this.eyeLight = new THREE.PointLight(0x2244aa, 1.5, 25);
+    this.eyeLight.userData.duwCategory = 'creature_bio';
     this.eyeLight.position.set(5, 0.5, 0);
     lod.levels[0].object.add(this.eyeLight);
 
