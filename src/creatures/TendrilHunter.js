@@ -639,11 +639,6 @@ export class TendrilHunter {
     // ── Strike state machine ──────────────────────────────────────────────────
     this._updateStrikeState(adt, distToPlayer);
 
-    // ── Animated emissive eye glow (replaces removed PointLight) ─────────────
-    if (this._nearEyeMat) {
-      this._nearEyeMat.emissiveIntensity = 1.8 + Math.sin(this.time * 8) * 0.2;
-    }
-
     // ── Tier animation ────────────────────────────────────────────────────────
     if (this._lodTierName === 'near') {
       this._animateNear(adt, playerPos, distToPlayer);
@@ -750,6 +745,16 @@ export class TendrilHunter {
         this.group.position.z - Math.sin(this.group.rotation.y) * 10 + Math.cos(t * 0.5) * 3
       );
       this._eyeGroups[3].lookAt(_v3C);
+    }
+
+    // ── Compound eye emissive glow — state-aware (Issue #80: no PointLights) ────
+    // STALK/STRIKE: fast flickering hunting glow per spec.
+    // IDLE/RETRACT:  slow ambient pulse.
+    if (this._nearEyeMat) {
+      const hunting = (this._state === S_STALK || this._state === S_STRIKE);
+      this._nearEyeMat.emissiveIntensity = hunting
+        ? 0.8 + Math.sin(t * 4.0) * 0.3
+        : 0.3 + Math.sin(t * 0.8) * 0.15;
     }
 
     // ── Abdomen breathing pulse + secondary sway ──────────────────────────────
