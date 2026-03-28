@@ -286,44 +286,22 @@ export class TubeCluster {
     }
 
     // ── Materials ─────────────────────────────────────────────────────────────
-    // Fix: create temp MeshPhysicalMaterial, convert, then dispose it immediately
-    // so the GPU resources for the intermediate material are not leaked.
-    let tubeMat;
-    if (isFar) {
-      const _tmp = new THREE.MeshPhysicalMaterial({
-        color: 0x151522, roughness: 0.55, metalness: 0,
-        emissive: 0x1e2e40, emissiveIntensity: 0.2,
-      });
-      tubeMat = toStandardMaterial(_tmp);
-      _tmp.dispose();
-    } else {
-      tubeMat = new THREE.MeshPhysicalMaterial({
-        color: 0x181826, roughness: 0.3, metalness: 0.04,
-        clearcoat: 0.6, clearcoatRoughness: 0.25,
-        emissive: 0x1e3050, emissiveIntensity: 0.25,
-        normalMap: getGrowthRingTex(),
-        normalScale: new THREE.Vector2(0.8, 0.8),
-      });
-    }
+    const tubeMat = new THREE.MeshPhysicalMaterial({
+      color: 0x181826, roughness: 0.3, metalness: 0.04,
+      clearcoat: 0.6, clearcoatRoughness: 0.25,
+      emissive: 0x1e3050, emissiveIntensity: 0.25,
+      normalMap: getGrowthRingTex(),
+      normalScale: new THREE.Vector2(0.8, 0.8),
+    });
 
-    let baseMat;
-    if (isFar) {
-      const _tmp = new THREE.MeshPhysicalMaterial({
-        color: 0x10101a, roughness: 0.8, metalness: 0,
-        emissive: 0x101828, emissiveIntensity: 0.1,
-      });
-      baseMat = toStandardMaterial(_tmp);
-      _tmp.dispose();
-    } else {
-      baseMat = new THREE.MeshPhysicalMaterial({
-        color: 0x141420, roughness: 0.72, metalness: 0.04,
-        emissive: 0x181832, emissiveIntensity: 0.14,
-        normalMap: getBarnaclesTex(),
-        normalScale: new THREE.Vector2(0.6, 0.6),
-      });
-    }
+    const baseMat = new THREE.MeshPhysicalMaterial({
+      color: 0x141420, roughness: 0.72, metalness: 0.04,
+      emissive: 0x181832, emissiveIntensity: 0.14,
+      normalMap: getBarnaclesTex(),
+      normalScale: new THREE.Vector2(0.6, 0.6),
+    });
 
-    const openingMat = isFar ? baseMat : new THREE.MeshPhysicalMaterial({
+    const openingMat = new THREE.MeshPhysicalMaterial({
       color: 0x201828, roughness: 0.18, metalness: 0,
       clearcoat: 1.0, clearcoatRoughness: 0.08,
       emissive: 0x401858, emissiveIntensity: 0.45,
@@ -375,31 +353,27 @@ export class TubeCluster {
 
     const instGeo = new THREE.CylinderGeometry(1, 1.2, 1, profile.tubeRadSegs, profile.tubeHtSegs);
 
-    if (!isFar) {
-      const tp = instGeo.attributes.position;
-      for (let v = 0; v < tp.count; v++) {
-        const y  = tp.getY(v);
-        const ax = Math.atan2(tp.getZ(v), tp.getX(v));
-        const r  = Math.sqrt(tp.getX(v) ** 2 + tp.getZ(v) ** 2);
-        if (r > 0.05) {
-          const scale = 1 + Math.sin(y * 10 + ax * 0.5) * 0.022;
-          tp.setX(v, tp.getX(v) * scale);
-          tp.setZ(v, tp.getZ(v) * scale);
-        }
+    // Growth ring displacement baked into geometry
+    const tp = instGeo.attributes.position;
+    for (let v = 0; v < tp.count; v++) {
+      const y  = tp.getY(v);
+      const ax = Math.atan2(tp.getZ(v), tp.getX(v));
+      const r  = Math.sqrt(tp.getX(v) ** 2 + tp.getZ(v) ** 2);
+      if (r > 0.05) {
+        const scale = 1 + Math.sin(y * 10 + ax * 0.5) * 0.022;
+        tp.setX(v, tp.getX(v) * scale);
+        tp.setZ(v, tp.getZ(v) * scale);
       }
-      instGeo.computeVertexNormals();
     }
+    instGeo.computeVertexNormals();
 
     const tubeMesh = new THREE.InstancedMesh(instGeo, tubeMat, tubeCount);
     tubeMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 
-    // Opening rings — skip on Ultra far to stay under triangle budget
-    let openMesh = null;
-    if (!profile.noOpenings) {
-      const openGeo = new THREE.TorusGeometry(1.1, 0.15, 6, isFar ? 8 : 12);
-      openMesh = new THREE.InstancedMesh(openGeo, openingMat, tubeCount);
-      openMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    }
+    // Opening rings (always present for near/medium tiers)
+    const openGeo = new THREE.TorusGeometry(1.1, 0.15, 6, 12);
+    const openMesh = new THREE.InstancedMesh(openGeo, openingMat, tubeCount);
+    openMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 
     const tubeData    = [];
     const frillMats   = [];
@@ -425,14 +399,12 @@ export class TubeCluster {
 
       // Opening ring matrix
       const openY = centerY + height * 0.5;
-      if (openMesh) {
-        _scaleA.set(radius, radius, radius);
-        _euler.set(Math.PI * 0.5, 0, 0);
-        _quatA.setFromEuler(_euler);
-        _vec3A.set(posX, openY, posZ);
-        _mat4A.compose(_vec3A, _quatA, _scaleA);
-        openMesh.setMatrixAt(i, _mat4A);
-      }
+      _scaleA.set(radius, radius, radius);
+      _euler.set(Math.PI * 0.5, 0, 0);
+      _quatA.setFromEuler(_euler);
+      _vec3A.set(posX, openY, posZ);
+      _mat4A.compose(_vec3A, _quatA, _scaleA);
+      openMesh.setMatrixAt(i, _mat4A);
 
       tubeData.push({
         posX, posZ, centerY, openY,
@@ -488,9 +460,9 @@ export class TubeCluster {
     }
 
     tubeMesh.instanceMatrix.needsUpdate = true;
-    if (openMesh) openMesh.instanceMatrix.needsUpdate = true;
+    openMesh.instanceMatrix.needsUpdate = true;
     tierGroup.add(tubeMesh);
-    if (openMesh) tierGroup.add(openMesh);
+    tierGroup.add(openMesh);
 
     if (tierName === 'near') this._wormData = wormData;
 
@@ -569,6 +541,7 @@ transformed.z += cos(uFarTime * 0.5 + position.y * 1.6 + position.x * 0.6) * 0.0
           );
         farMat.userData.shader = shader;
       };
+      // Increment version suffix whenever the injected shader code above changes
       farMat.customProgramCacheKey = () => 'tc-far-ultra-v1';
     }
 
@@ -856,7 +829,7 @@ totalEmissiveRadiance += vec3(0.2, 0.6, 1.0) * tcFresnel * 0.55;`
     }
 
     if (this._wormData.length > 0) {
-      this._updateWorms(dt, t, nearPlayer, tierName === 'near');
+      this._updateWorms(dt, t, nearPlayer);
     }
 
     if (!tier || this._frameCount % profile.animInterval !== 0) return;
@@ -923,19 +896,17 @@ totalEmissiveRadiance += vec3(0.2, 0.6, 1.0) * tcFresnel * 0.55;`
       tubeMesh.setMatrixAt(i, _mat4A);
 
       // Opening ring matrix — track the tilted tube top so rings stay attached
-      if (openMesh) {
-        _vec3B.set(0, td.height * 0.5, 0).applyQuaternion(_quatA).add(_vec3A);
-        _euler.set(Math.PI * 0.5, 0, 0);
-        _quatB.setFromEuler(_euler);
-        _quatB.premultiply(_quatA);
-        _scaleB.set(td.radius * pulse, td.radius * pulse, td.radius * pulse);
-        _mat4B.compose(_vec3B, _quatB, _scaleB);
-        openMesh.setMatrixAt(i, _mat4B);
-      }
+      _vec3B.set(0, td.height * 0.5, 0).applyQuaternion(_quatA).add(_vec3A);
+      _euler.set(Math.PI * 0.5, 0, 0);
+      _quatB.setFromEuler(_euler);
+      _quatB.premultiply(_quatA);
+      _scaleB.set(td.radius * pulse, td.radius * pulse, td.radius * pulse);
+      _mat4B.compose(_vec3B, _quatB, _scaleB);
+      openMesh.setMatrixAt(i, _mat4B);
     }
 
     tubeMesh.instanceMatrix.needsUpdate = true;
-    if (openMesh) openMesh.instanceMatrix.needsUpdate = true;
+    openMesh.instanceMatrix.needsUpdate = true;
   }
 
   // ── Fringe flutter: per-fin rotation driven by current simulation ─────────
