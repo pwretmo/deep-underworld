@@ -106,6 +106,8 @@ function createTerrainPayload({ cx, cz, chunkSize, resolution }) {
   const rockCount = 8 + Math.floor(Math.random() * 8);
   const rockTransforms = new Float32Array(rockCount * 9);
   const rockColliders = new Float32Array(rockCount * 4);
+  const rockTypes = new Uint8Array(rockCount);
+  const rockColors = new Float32Array(rockCount * 3);
 
   for (let i = 0; i < rockCount; i++) {
     const localX = (Math.random() - 0.5) * chunkSize * 0.8;
@@ -137,6 +139,25 @@ function createTerrainPayload({ cx, cz, chunkSize, resolution }) {
     rockColliders[colliderIdx + 1] = localY;
     rockColliders[colliderIdx + 2] = worldZ;
     rockColliders[colliderIdx + 3] = radius;
+
+    rockTypes[i] = Math.floor(Math.random() * 4);
+
+    const rockDepth = -localY;
+    const ci = i * 3;
+    const rv = Math.random() * 0.08;
+    if (rockDepth < 100) {
+      rockColors[ci] = 0.35 + rv;
+      rockColors[ci + 1] = 0.32 + rv * 0.8;
+      rockColors[ci + 2] = 0.28 + rv * 0.5;
+    } else if (rockDepth < 300) {
+      rockColors[ci] = 0.25 + rv;
+      rockColors[ci + 1] = 0.22 + rv * 0.7;
+      rockColors[ci + 2] = 0.22 + rv;
+    } else {
+      rockColors[ci] = 0.15 + rv;
+      rockColors[ci + 1] = 0.12 + rv * 0.5;
+      rockColors[ci + 2] = 0.16 + rv;
+    }
   }
 
   return {
@@ -146,6 +167,8 @@ function createTerrainPayload({ cx, cz, chunkSize, resolution }) {
     colliderVertices,
     rockTransforms,
     rockColliders,
+    rockTypes,
+    rockColors,
   };
 }
 
