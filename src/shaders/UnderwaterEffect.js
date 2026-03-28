@@ -1,9 +1,6 @@
-import * as THREE from 'three';
-import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
-import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import * as THREE from 'three/webgpu';
+import { pass } from 'three/tsl';
+import { bloom as createBloomNode } from 'three/addons/tsl/display/BloomNode.js';
 import { qualityManager } from '../QualityManager.js';
 import { DEPTH_THRESHOLDS } from '../lighting/LightingPolicy.js';
 
@@ -13,6 +10,18 @@ function deepFreeze(obj) {
     if (v && typeof v === 'object' && !Object.isFrozen(v)) deepFreeze(v);
   });
   return obj;
+}
+
+function cloneUniformValue(value) {
+  return value && typeof value.clone === 'function' ? value.clone() : value;
+}
+
+function cloneUniforms(uniforms) {
+  const next = {};
+  for (const [name, entry] of Object.entries(uniforms)) {
+    next[name] = { value: cloneUniformValue(entry.value) };
+  }
+  return next;
 }
 
 const RENDER_PIPELINE_TUNING = deepFreeze({
@@ -299,12 +308,21 @@ export class UnderwaterEffect {
     this.camera = camera;
     this.time = 0;
 
-    // Composer
-    this.composer = new EffectComposer(renderer);
+    // Phase 2b keeps the existing wrapper boundary intact while routing the
+    // scene through RenderPipeline. The underwater shader port lands in Phase 2c.
+    this._renderPipeline = new THREE.RenderPipeline(renderer);
+    this._scenePass = pass(scene, camera);
+    this._sceneColorNode = this._scenePass.getTextureNode('output');
+    this._activeOutputNode = null;
+    this._bloomRenderNode = null;
+    this._rendererSize = new THREE.Vector2();
+    this._drawingBufferSize = new THREE.Vector2();
+
     this.tuning = RENDER_PIPELINE_TUNING;
     this._nativeComposerPixelRatio = Math.max(renderer.getPixelRatio(), 1);
     this._composerScale = this.tuning.performance.baseScale;
     this._appliedComposerScale = 0;
+    this._appliedComposerPixelRatio = 0;
     this._appliedComposerWidth = 0;
     this._appliedComposerHeight = 0;
     this._scaleLadder = [];
@@ -322,12 +340,9 @@ export class UnderwaterEffect {
     this._lastRenderMs = 0;
     this._consecutiveEmergencyFrames = 0;
 
-    // Render pass
-    const renderPass = new RenderPass(scene, camera);
-    this.composer.addPass(renderPass);
+    this._setOutputNode(this._sceneColorNode, true);
 
-    // Underwater shader
-    this.underwaterPass = new ShaderPass(UnderwaterShader);
+    this.underwaterPass = { uniforms: cloneUniforms(UnderwaterShader.uniforms) };
     this.underwaterPass.uniforms.resolution.value.set(window.innerWidth, window.innerHeight);
     this.underwaterPass.uniforms.depthThresholds.value.set(
       this.tuning.depthThresholds.mid,
@@ -363,13 +378,8 @@ export class UnderwaterEffect {
       this.tuning.bloom.surfaceThreshold,
       this.tuning.bloom.radius * 2.4
     );
-    this.composer.addPass(this.underwaterPass);
 
-    // OutputPass for correct sRGB conversion and tone mapping
-    this._outputPass = new OutputPass();
-    this.composer.addPass(this._outputPass);
-
-    // UnrealBloomPass for ultra tier
+    // Bloom node for ultra tier
     this._bloomPass = null;
     this._setupBloom(qualityManager.tier);
 
@@ -413,29 +423,71 @@ export class UnderwaterEffect {
     });
   }
 
+  _getRendererSize() {
+    this.renderer.getSize(this._rendererSize);
+    return this._rendererSize;
+  }
+
+  _getDrawingBufferSize() {
+    this.renderer.getDrawingBufferSize(this._drawingBufferSize);
+    return this._drawingBufferSize;
+  }
+
+  _setOutputNode(node, force = false) {
+    if (!force && this._activeOutputNode === node) {
+      return;
+    }
+
+    this._activeOutputNode = node;
+    this._renderPipeline.outputNode = node;
+    this._renderPipeline.needsUpdate = true;
+  }
+
+  _syncOutputNode(force = false) {
+    const nextNode = this._bloomPass && !this._bloomSuspended
+      ? this._bloomRenderNode
+      : this._sceneColorNode;
+    this._setOutputNode(nextNode, force);
+  }
+
+  _updateBloomNodeSize() {
+    if (!this._bloomPass) {
+      return;
+    }
+
+    const size = this._getDrawingBufferSize();
+    this._bloomPass.setSize(size.width, size.height);
+  }
+
   /**
-   * Add or remove the UnrealBloomPass based on quality tier.
-   * Ultra tier gets a real multi-pass bloom; other tiers use the
-   * cheaper single-sample bloom baked into the underwater shader.
+   * Add or remove the bloom node based on quality tier.
+   * Ultra tier gets multi-pass bloom; other tiers stay pass-through in phase 2b.
    */
   _setupBloom(tier) {
     if (tier === 'ultra' && !this._bloomPass) {
-      const res = new THREE.Vector2(window.innerWidth, window.innerHeight);
-      this._bloomPass = new UnrealBloomPass(res, 0.4, 0.6, 0.78);
-      // Insert bloom pass before the underwater shader pass
-      const idx = this.composer.passes.indexOf(this.underwaterPass);
-      this.composer.insertPass(this._bloomPass, idx);
+      this._bloomPass = createBloomNode(
+        this._sceneColorNode,
+        this.tuning.bloom.surfaceStrength,
+        this.tuning.bloom.radius,
+        this.tuning.bloom.surfaceThreshold
+      );
+      this._bloomRenderNode = this._sceneColorNode.add(this._bloomPass);
     } else if (tier !== 'ultra' && this._bloomPass) {
-      this.composer.removePass(this._bloomPass);
       this._bloomPass.dispose();
       this._bloomPass = null;
+      this._bloomRenderNode = null;
       this._bloomSuspended = false;
       this._bloomSuspendedUntil = 0;
     }
 
     if (this._bloomPass) {
-      this._bloomPass.enabled = !this._bloomSuspended;
+      this._bloomPass.strength.value = this.tuning.bloom.surfaceStrength;
+      this._bloomPass.radius.value = this.tuning.bloom.radius;
+      this._bloomPass.threshold.value = this.tuning.bloom.surfaceThreshold;
+      this._updateBloomNodeSize();
     }
+
+    this._syncOutputNode(true);
   }
 
   resize() {
@@ -459,7 +511,7 @@ export class UnderwaterEffect {
       this._composerScale = this._scaleLadder[i];
       this._applyComposerScale(true);
       this._updatePassState(depth, flashlightOn, exposure);
-      this.composer.render();
+      this._renderPipeline.render();
     }
 
     this._scaleIndex = originalIndex;
@@ -544,9 +596,7 @@ export class UnderwaterEffect {
       this._bloomSuspendedUntil = now + this.tuning.performance.emergencyHoldMs;
     }
 
-    if (this._bloomPass) {
-      this._bloomPass.enabled = !suspended;
-    }
+    this._syncOutputNode(true);
   }
 
   _refreshScaleCap({ force = false, skipCooldown = false } = {}) {
@@ -628,25 +678,30 @@ export class UnderwaterEffect {
       this.tuning.performance.minScale,
       this._postProcessMaxScale
     );
-    const width = window.innerWidth;
-    const height = window.innerHeight;
-    const pixelRatio = this._nativeComposerPixelRatio * nextScale;
+    const size = this._getRendererSize();
+    const width = size.width;
+    const height = size.height;
+    const pixelRatio = this._nativeComposerPixelRatio;
 
     if (!force &&
       Math.abs(nextScale - this._appliedComposerScale) < 0.01 &&
+      Math.abs(pixelRatio - this._appliedComposerPixelRatio) < 0.01 &&
       width === this._appliedComposerWidth &&
       height === this._appliedComposerHeight) {
       return;
     }
 
     this._appliedComposerScale = nextScale;
+    this._appliedComposerPixelRatio = pixelRatio;
     this._appliedComposerWidth = width;
     this._appliedComposerHeight = height;
-    this.composer.setPixelRatio(pixelRatio);
-    this.composer.setSize(width, height);
+    this._scenePass.setResolutionScale(nextScale);
+    this._scenePass.setPixelRatio(pixelRatio);
+    this._scenePass.setSize(width, height);
+    this._updateBloomNodeSize();
     this.underwaterPass.uniforms.resolution.value.set(
-      width * pixelRatio,
-      height * pixelRatio
+      width * pixelRatio * nextScale,
+      height * pixelRatio * nextScale
     );
   }
 
@@ -708,14 +763,19 @@ export class UnderwaterEffect {
     bloomParams.z = THREE.MathUtils.lerp(bloomParams.z, this._bloomTargetRadius, 0.09);
 
     if (this._bloomPass && !this._bloomSuspended) {
-      this._bloomPass.strength = THREE.MathUtils.lerp(
-        this._bloomPass.strength,
+      this._bloomPass.strength.value = THREE.MathUtils.lerp(
+        this._bloomPass.strength.value,
         this._bloomTargetStrength,
         0.09
       );
-      this._bloomPass.threshold = THREE.MathUtils.lerp(
-        this._bloomPass.threshold,
+      this._bloomPass.threshold.value = THREE.MathUtils.lerp(
+        this._bloomPass.threshold.value,
         this._bloomTargetThreshold,
+        0.09
+      );
+      this._bloomPass.radius.value = THREE.MathUtils.lerp(
+        this._bloomPass.radius.value,
+        this.tuning.bloom.radius,
         0.09
       );
     }
@@ -724,7 +784,7 @@ export class UnderwaterEffect {
   render(depth, { flashlightOn = false, exposure = 0.76 } = {}) {
     const frameStart = performance.now();
     this._updatePassState(depth, flashlightOn, exposure);
-    this.composer.render();
+    this._renderPipeline.render();
 
     const now = performance.now();
     const renderMs = now - frameStart;
@@ -874,13 +934,14 @@ export class UnderwaterEffect {
         mix: scatterMix,
       },
       bloom: {
-        mode: this._bloomPass ? 'unreal' : 'shader',
+        mode: this._bloomPass ? 'pipeline' : 'none',
         passEnabled: !!this._bloomPass && !this._bloomSuspended,
         shaderStrength: bloomParams.x,
         shaderThreshold: bloomParams.y,
         shaderRadius: bloomParams.z,
-        passStrength: this._bloomPass?.strength ?? null,
-        passThreshold: this._bloomPass?.threshold ?? null,
+        passStrength: this._bloomPass?.strength?.value ?? null,
+        passThreshold: this._bloomPass?.threshold?.value ?? null,
+        passRadius: this._bloomPass?.radius?.value ?? null,
       },
       emaPressure,
       lastRenderPressure,
@@ -937,12 +998,12 @@ export class UnderwaterEffect {
     const wasSuspended = this._bloomSuspended;
     if (!wasSuspended) {
       this._bloomSuspended = true;
-      this._bloomPass.enabled = false;
+      this._syncOutputNode(true);
     }
     this.warmPerformanceFallbacks({ depth, flashlightOn, exposure });
     if (!wasSuspended) {
       this._bloomSuspended = false;
-      this._bloomPass.enabled = true;
+      this._syncOutputNode(true);
     }
   }
 
@@ -953,7 +1014,7 @@ export class UnderwaterEffect {
    */
   warmRender(depth = 0, { flashlightOn = false, exposure = 0.76 } = {}) {
     this._updatePassState(depth, flashlightOn, exposure);
-    this.composer.render();
+    this._renderPipeline.render();
   }
 }
 
