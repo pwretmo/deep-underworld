@@ -1,4 +1,4 @@
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import { Player } from "./player/Player.js";
 import { Ocean } from "./environment/Ocean.js";
 import { Terrain } from "./environment/Terrain.js";
@@ -24,7 +24,7 @@ export class Game {
     this._streamingFrameParity = 0;
 
     // Renderer
-    this.renderer = new THREE.WebGLRenderer({
+    this.renderer = new THREE.WebGPURenderer({
       antialias: true,
       powerPreference: "high-performance",
     });
@@ -76,18 +76,8 @@ export class Game {
     this.abyssEncounter = new AbyssEncounter();
     this.physicsWorld = null; // initialized async in _primeAndEnterGameplay
 
-    // Detect high-end GPU for potential ultra tier auto-select
-    qualityManager.detectGPU(this.renderer);
-    // If GPU detection switched to ultra, apply renderer settings now
-    if (qualityManager.tier === "ultra") {
-      this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-      this.renderer.setPixelRatio(window.devicePixelRatio);
-    }
-    this.graphicsDiagnostics = this._detectGraphicsDiagnostics();
-    // Item 9: start software/fallback renderers in a reduced post-process profile.
-    if (this.graphicsDiagnostics.hardwareAccelerated === false) {
-      this.underwaterEffect.applySoftwareRendererPolicy();
-    }
+    // GPU detection and graphics diagnostics are deferred to async init()
+    // because WebGPURenderer requires await renderer.init() before backend access.
 
     this.lightingPolicy = new LightingPolicy();
     this._pointLightBudget = {
@@ -183,8 +173,32 @@ export class Game {
     });
     this.preload.startMenuIdleWarmup();
 
-    this._initEnvironmentColors();
     this._setupEvents();
+    // _initEnvironmentColors() and _animate() are deferred to async init()
+    // because PMREMGenerator and the render loop require renderer.init().
+  }
+
+  /**
+   * Async initialization — must be called after construction.
+   * WebGPURenderer requires `await renderer.init()` before first use.
+   */
+  async init() {
+    await this.renderer.init();
+
+    // Detect high-end GPU for potential ultra tier auto-select
+    qualityManager.detectGPU(this.renderer);
+    // If GPU detection switched to ultra, apply renderer settings now
+    if (qualityManager.tier === "ultra") {
+      this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      this.renderer.setPixelRatio(window.devicePixelRatio);
+    }
+    this.graphicsDiagnostics = this._detectGraphicsDiagnostics();
+    // Item 9: start software/fallback renderers in a reduced post-process profile.
+    if (this.graphicsDiagnostics.hardwareAccelerated === false) {
+      this.underwaterEffect.applySoftwareRendererPolicy();
+    }
+
+    this._initEnvironmentColors();
     this._animate();
   }
 
@@ -989,51 +1003,65 @@ export class Game {
 
   _detectGraphicsDiagnostics() {
     try {
-      const gl = this.renderer.getContext();
-      if (!gl) {
+      const backend = this.renderer.backend;
+      const isWebGL = backend && backend.isWebGLBackend;
+
+      if (isWebGL) {
+        // WebGL fallback mode — use traditional GL context
+        const gl = backend.gl;
+        if (!gl) {
+          return {
+            context: "webgl",
+            vendor: "Unknown",
+            renderer: "Unavailable",
+            hardwareAccelerated: null,
+            hardwareAcceleratedLabel: "Unknown",
+          };
+        }
+        const context =
+          typeof WebGL2RenderingContext !== "undefined" &&
+          gl instanceof WebGL2RenderingContext
+            ? "webgl2"
+            : "webgl1";
+        const ext = gl.getExtension?.("WEBGL_debug_renderer_info");
+        const vendor = ext
+          ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL)
+          : gl.getParameter(gl.VENDOR);
+        const renderer = ext
+          ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)
+          : gl.getParameter(gl.RENDERER);
+        const normalized = `${vendor ?? ""} ${renderer ?? ""}`.toLowerCase();
+        const softwareRenderer = [
+          "swiftshader",
+          "llvmpipe",
+          "software",
+          "softpipe",
+          "mesa offscreen",
+        ].some((token) => normalized.includes(token));
+        const hardwareAccelerated = !softwareRenderer;
+
         return {
-          context: "webgl",
-          vendor: "Unknown",
-          renderer: "Unavailable",
-          hardwareAccelerated: null,
-          hardwareAcceleratedLabel: "Unknown",
+          context,
+          vendor: vendor || "Unknown",
+          renderer: renderer || "Unavailable",
+          hardwareAccelerated,
+          hardwareAcceleratedLabel: hardwareAccelerated
+            ? "Hardware accelerated"
+            : "Software / fallback",
         };
       }
 
-      const context =
-        typeof WebGL2RenderingContext !== "undefined" &&
-        gl instanceof WebGL2RenderingContext
-          ? "webgl2"
-          : "webgl1";
-      const ext = gl.getExtension?.("WEBGL_debug_renderer_info");
-      const vendor = ext
-        ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL)
-        : gl.getParameter(gl.VENDOR);
-      const renderer = ext
-        ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)
-        : gl.getParameter(gl.RENDERER);
-      const normalized = `${vendor ?? ""} ${renderer ?? ""}`.toLowerCase();
-      const softwareRenderer = [
-        "swiftshader",
-        "llvmpipe",
-        "software",
-        "softpipe",
-        "mesa offscreen",
-      ].some((token) => normalized.includes(token));
-      const hardwareAccelerated = !softwareRenderer;
-
+      // WebGPU backend
       return {
-        context,
-        vendor: vendor || "Unknown",
-        renderer: renderer || "Unavailable",
-        hardwareAccelerated,
-        hardwareAcceleratedLabel: hardwareAccelerated
-          ? "Hardware accelerated"
-          : "Software / fallback",
+        context: "webgpu",
+        vendor: "WebGPU",
+        renderer: "WebGPU Backend",
+        hardwareAccelerated: true,
+        hardwareAcceleratedLabel: "Yes (WebGPU)",
       };
-    } catch {
+    } catch (_) {
       return {
-        context: "webgl",
+        context: "unknown",
         vendor: "Unknown",
         renderer: "Unavailable",
         hardwareAccelerated: null,

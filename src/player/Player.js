@@ -7,12 +7,14 @@ import { ExternalLightingSystem } from './ExternalLightingSystem.js';
  */
 function canUseVolumetricBeam(renderer) {
   if (!renderer) return false;
-  const gl = renderer.getContext();
+  // Before renderer.init() or on WebGPU backend, capabilities are universally available
+  const backend = renderer.backend;
+  if (!backend || !backend.isWebGLBackend) return true;
+  // WebGL fallback — check capabilities on the raw GL context
+  const gl = backend.gl;
   if (!gl) return false;
-  // Require at least 8 texture units and standard derivatives
   const maxTexUnits = gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS);
   if (maxTexUnits < 8) return false;
-  // WebGL2 always supports derivatives; for WebGL1, check extension
   if (!gl.getExtension || gl instanceof WebGL2RenderingContext) return true;
   return !!gl.getExtension('OES_standard_derivatives');
 }

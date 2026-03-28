@@ -111,11 +111,19 @@ class QualityManager {
   detectGPU(renderer) {
     if (!this._autoQuality) return;
     try {
-      const gl = renderer.getContext();
-      const ext = gl.getExtension('WEBGL_debug_renderer_info');
-      if (!ext) return;
-      const gpuRenderer = gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) || '';
-      this._highEndGpuDetected = HIGH_END_GPU_PATTERNS.some((p) => p.test(gpuRenderer));
+      const backend = renderer.backend;
+      const isWebGL = backend && backend.isWebGLBackend;
+
+      if (isWebGL) {
+        const gl = backend.gl;
+        const ext = gl?.getExtension('WEBGL_debug_renderer_info');
+        if (!ext) return;
+        const gpuRenderer = gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) || '';
+        this._highEndGpuDetected = HIGH_END_GPU_PATTERNS.some((p) => p.test(gpuRenderer));
+      } else {
+        // WebGPU backend — assume high-end GPU since WebGPU requires modern hardware
+        this._highEndGpuDetected = true;
+      }
     } catch (_) { /* GPU detection not available */ }
   }
 
