@@ -923,9 +923,10 @@ totalEmissiveRadiance += vec3(0.2, 0.6, 1.0) * tcFresnel * 0.55;`
     if (!tier.frillMats.length || !tier.frillGlow) return;
 
     const glowByTube = tier.frillGlow;
-    for (let i = 0; i < glowByTube.length; i++) glowByTube[i] = 0;
+    glowByTube.fill(0);
 
     for (const wd of this._wormData) {
+      // tubeIndex may exceed frillMats if fewer frills than tubes (unlikely, but defensive)
       if (wd.tubeIndex >= glowByTube.length || wd.state !== 'feeding') continue;
 
       const glowPulse = 0.5 + 0.5 * Math.sin(wd.feedingPhase * 1.15 + t * 2.0);
