@@ -77,13 +77,14 @@ When re-dispatched with review comments:
 1. **Navigate** to your existing worktree: `cd <worktree-path>`
 2. **Run the mandatory preflight** and confirm it passes
 3. **Sync with latest main** before fixing: `git fetch origin main` then `git rebase origin/main`
-4. **Read** the review comments provided inline in your prompt
-5. **Fix** each issue
-6. **Validate**: run `npm run build`
-7. **Commit** with a message like `fix: address review comments`
-8. **Push**: `git push --force-with-lease` (required after rebase)
-9. **Report back** with a brief summary of what was fixed — do NOT create a new PR
-10. **Finish your turn explicitly**: call `task_complete` immediately after that summary
+4. **Install dependencies**: run `npm install` in case `package.json` changed on main during the rebase
+5. **Read** the review comments provided inline in your prompt
+6. **Fix** each issue
+7. **Validate**: run `npm run build`
+8. **Commit** with a message like `fix: address review comments`
+9. **Push**: `git push --force-with-lease` (required after rebase)
+10. **Report back** with a brief summary of what was fixed — do NOT create a new PR
+11. **Finish your turn explicitly**: call `task_complete` immediately after that summary
 
 ## Rules
 

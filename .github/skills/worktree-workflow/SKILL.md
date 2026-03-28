@@ -212,8 +212,8 @@ if (Test-Path F:\repos\deep-underworld-worktrees\<slug>) { Remove-Item F:\repos\
 # Prune stale worktree references
 git worktree prune
 
-# Delete the local branch
-git branch -d agent/<slug>
+# Delete the local branch (force required — squash merge leaves tip off main)
+git branch -D agent/<slug>
 ```
 
 ## Important Rules

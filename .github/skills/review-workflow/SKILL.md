@@ -109,10 +109,10 @@ Issue #42 completeness: All requirements verified. ✅
 
 ### Request Changes
 
-When issues are found, use capability-gated behavior:
+When issues are found, use a try/fallback approach for inline comments:
 
-- If inline line comments are supported in this session, include them.
-- If inline comments are unavailable, put explicit `path:line` references in the review body.
+1. Attempt the tool call with a `comments:` array for line-level notes.
+2. If the call fails or the tool rejects the `comments:` field, retry without it — put explicit `path:line` references in the body instead.
 
 Example with inline comments:
 

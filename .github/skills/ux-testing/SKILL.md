@@ -139,8 +139,10 @@ The `Game` instance is exposed on `window.game`. Key properties:
 - `game.autoplay` — true when in autoplay mode
 
 ```text
-evaluate_script
-function: () => {
+Tool: evaluate_script (canonical chrome-devtools-mcp)
+Parameters:
+  pageId: <current page ID>
+  function: () => {
   const game = window.game;
   if (!game) return { error: 'game not found on window' };
   return {
@@ -178,9 +180,10 @@ Use canonical `take_memory_snapshot`.
 ### Lighthouse audit
 
 ```text
-lighthouse_audit
-mode: navigation
-device: desktop
+Tool: lighthouse_audit (canonical chrome-devtools-mcp)
+Parameters:
+  mode: navigation
+  device: desktop
 ```
 
 ## What to Look For
@@ -327,25 +330,24 @@ After merges are done:
 
 ## Cleanup: Closing Browser Windows
 
-Cleanup is mandatory on every exit path. When testing is complete, or if you abort early because tooling/server setup fails, close all browser tabs and windows opened during the session:
+Cleanup is mandatory on every exit path. When testing is complete, or if you abort early because tooling/server setup fails, close every page you opened during the session.
 
-```javascript
-// Close the current page
-async (page) => {
-  await page.close();
-  return "Browser page closed";
-};
+### Step 1 — List open pages
+
+```
+Tool: list_pages (canonical chrome-devtools-mcp)
 ```
 
-Or close the entire browser context if multiple tabs were opened for different test phases:
+### Step 2 — Close each tracked page
 
-```javascript
-// Close browser context (all tabs/windows)
-async (page) => {
-  const browser = page.context().browser();
-  await browser.close();
-  return "Browser closed";
-};
+For each page ID in your tracked list:
+
+```
+Tool: close_page (canonical chrome-devtools-mcp)
+Parameters:
+  pageId: <page ID>
 ```
 
-This cleanup ensures Chrome DevTools MCP doesn't leave orphaned browser processes. Always perform cleanup before final `task_complete` call.
+Call `close_page` once per page opened. After closing all pages, confirm with `list_pages` that no tracked pages remain.
+
+This ensures Chrome DevTools MCP doesn't leave orphaned browser processes. Always perform cleanup before the final `task_complete` call.

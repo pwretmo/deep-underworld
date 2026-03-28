@@ -70,8 +70,8 @@ Use the review-workflow skill's procedures for posting reviews and managing labe
 #### If Issues Found
 
 1. Post a `REQUEST_CHANGES` review
-2. If inline line comments are supported in this session, include them
-3. If inline line comments are unavailable, include `path:line` references in the review body
+2. Attempt to post the review with a `comments:` array for line-level notes
+3. If the tool call fails or rejects `comments:`, retry without it — include `path:line` references (e.g., `src/file.js:42`) in the review body instead
 4. Add label `agent-reviewed`
 5. **Return** to the orchestrator:
 
