@@ -20,6 +20,9 @@ const RETREAT_DURATION = 6.0;
 /**
  * Scripted cinematic encounter: a colossal abyss entity drifts past the tiny sub.
  * Triggers once per session when the player reaches ~650m depth.
+ *
+ * Instead of directly mutating fog/ambient, the encounter submits a named
+ * modifier to the LightingPolicy which blends it on top of the depth-zone base.
  */
 export class AbyssEncounter {
   constructor() {
@@ -29,20 +32,17 @@ export class AbyssEncounter {
     this.entity = null;
     this.entityLights = [];
 
-    // Saved environment values to restore after encounter
+    // Saved base-profile values captured at trigger time
     this._savedFogNear = 0;
     this._savedFogFar = 0;
-    this._savedFogColor = new THREE.Color();
     this._savedAmbientIntensity = 0;
 
-    // Per-frame environment values (written by _updateEnvironmentForDepth before our update)
-    this._envFogNear = 0;
-    this._envFogFar = 0;
-    this._envAmbient = 0;
-
-    // Encounter fog targets
+    // Encounter fog targets (tightest point)
     this._closedFogNear = 1;
     this._closedFogFar = 60;
+
+    // Reusable modifier object submitted to LightingPolicy
+    this._modifier = { fogNear: 0, fogFar: 0, ambientIntensity: 0, weight: 0 };
 
     // Entity animation state
     this._entityStartPos = new THREE.Vector3();
@@ -50,54 +50,44 @@ export class AbyssEncounter {
     this._entityDriftDir = new THREE.Vector3();
   }
 
-  reset(scene) {
+  reset(scene, lightingPolicy) {
     this._despawnEntity(scene);
+    if (lightingPolicy) lightingPolicy.removeModifier('abyss_encounter');
     this.state = State.IDLE;
     this.stateTime = 0;
     this.completed = false;
     this._savedFogNear = 0;
     this._savedFogFar = 0;
-    this._savedFogColor.set(0x000000);
     this._savedAmbientIntensity = 0;
-    this._envFogNear = 0;
-    this._envFogFar = 0;
-    this._envAmbient = 0;
+    this._modifier.weight = 0;
     this._entityStartPos.set(0, 0, 0);
     this._entityEndPos.set(0, 0, 0);
     this._entityDriftDir.set(0, 0, 0);
   }
 
-  update(delta, depth, player, scene, fog, ambientLight, hud, audio) {
+  update(delta, depth, player, scene, lightingPolicy, hud, audio) {
     if (this.completed) return;
 
     this.stateTime += delta;
 
-    // Capture the environment's intended values each frame (set before us by _updateEnvironmentForDepth)
-    // These serve as restoration targets during RETREAT
-    if (this.state !== State.IDLE) {
-      this._envFogNear = fog.near;
-      this._envFogFar = fog.far;
-      this._envAmbient = ambientLight.intensity;
-    }
-
     switch (this.state) {
       case State.IDLE:
-        this._updateIdle(depth, player, scene, fog, ambientLight, hud);
+        this._updateIdle(depth, player, scene, lightingPolicy, hud);
         break;
       case State.TRIGGERED:
-        this._updateTriggered(delta, scene, fog, ambientLight, hud, audio);
+        this._updateTriggered(delta, scene, lightingPolicy, hud, audio);
         break;
       case State.FOG_CLOSING:
-        this._updateFogClosing(delta, fog, ambientLight, hud, audio);
+        this._updateFogClosing(delta, lightingPolicy, hud, audio);
         break;
       case State.REVEAL:
-        this._updateReveal(delta, fog, ambientLight);
+        this._updateReveal(delta, lightingPolicy);
         break;
       case State.DRIFT:
-        this._updateDrift(delta, fog, ambientLight, audio);
+        this._updateDrift(delta, lightingPolicy, audio);
         break;
       case State.RETREAT:
-        this._updateRetreat(delta, scene, fog, ambientLight);
+        this._updateRetreat(delta, scene, lightingPolicy);
         break;
     }
 
@@ -109,21 +99,21 @@ export class AbyssEncounter {
 
   // --- State handlers ---
 
-  _updateIdle(depth, player, scene, fog, ambientLight, hud) {
+  _updateIdle(depth, player, scene, lightingPolicy, hud) {
     if (depth >= TRIGGER_DEPTH) {
       this._transition(State.TRIGGERED);
-      // Save current environment state
-      this._savedFogNear = fog.near;
-      this._savedFogFar = fog.far;
-      this._savedFogColor.copy(fog.color);
-      this._savedAmbientIntensity = ambientLight.intensity;
+      // Capture base profile at trigger time
+      const base = lightingPolicy.getBaseProfile();
+      this._savedFogNear = base.fogNear;
+      this._savedFogFar = base.fogFar;
+      this._savedAmbientIntensity = base.ambient;
 
       // Spawn entity ahead and below the player
       this._spawnEntity(scene, player);
     }
   }
 
-  _updateTriggered(delta, scene, fog, ambientLight, hud, audio) {
+  _updateTriggered(delta, scene, lightingPolicy, hud, audio) {
     // Immediate transition to fog closing — brief pause for dramatic effect
     if (this.stateTime > 0.5) {
       hud._showWarning('MASSIVE ENTITY DETECTED', 4000);
@@ -132,16 +122,16 @@ export class AbyssEncounter {
     }
   }
 
-  _updateFogClosing(delta, fog, ambientLight, hud, audio) {
+  _updateFogClosing(delta, lightingPolicy, hud, audio) {
     const t = Math.min(this.stateTime / FOG_CLOSE_DURATION, 1);
     const ease = t * t; // ease-in
 
     // Tighten fog dramatically
-    fog.near = THREE.MathUtils.lerp(this._savedFogNear, this._closedFogNear, ease);
-    fog.far = THREE.MathUtils.lerp(this._savedFogFar, this._closedFogFar, ease);
-
-    // Reduce ambient light to near-zero
-    ambientLight.intensity = THREE.MathUtils.lerp(this._savedAmbientIntensity, 0.001, ease);
+    this._modifier.fogNear = THREE.MathUtils.lerp(this._savedFogNear, this._closedFogNear, ease);
+    this._modifier.fogFar = THREE.MathUtils.lerp(this._savedFogFar, this._closedFogFar, ease);
+    this._modifier.ambientIntensity = THREE.MathUtils.lerp(this._savedAmbientIntensity, 0.001, ease);
+    this._modifier.weight = 1;
+    lightingPolicy.setModifier('abyss_encounter', this._modifier);
 
     if (t >= 1) {
       audio?.playEncounterReveal();
@@ -149,26 +139,26 @@ export class AbyssEncounter {
     }
   }
 
-  _updateReveal(delta, fog, ambientLight) {
+  _updateReveal(delta, lightingPolicy) {
     const t = Math.min(this.stateTime / REVEAL_DURATION, 1);
     const ease = t * t * (3 - 2 * t); // smoothstep
 
     // Gradually widen fog to reveal the entity's scale
-    fog.near = THREE.MathUtils.lerp(this._closedFogNear, this._savedFogNear * 0.5, ease);
-    fog.far = THREE.MathUtils.lerp(this._closedFogFar, this._savedFogFar * 0.8, ease);
+    this._modifier.fogNear = THREE.MathUtils.lerp(this._closedFogNear, this._savedFogNear * 0.5, ease);
+    this._modifier.fogFar = THREE.MathUtils.lerp(this._closedFogFar, this._savedFogFar * 0.8, ease);
+    this._modifier.ambientIntensity = THREE.MathUtils.lerp(0.001, 0.008, ease);
+    this._modifier.weight = 1;
+    lightingPolicy.setModifier('abyss_encounter', this._modifier);
 
     // Pulse bioluminescence on the entity
     this._pulseBioluminescence(t);
-
-    // Slightly raise ambient so silhouette is visible
-    ambientLight.intensity = THREE.MathUtils.lerp(0.001, 0.008, ease);
 
     if (t >= 1) {
       this._transition(State.DRIFT);
     }
   }
 
-  _updateDrift(delta, fog, ambientLight, audio) {
+  _updateDrift(delta, lightingPolicy, audio) {
     const t = Math.min(this.stateTime / DRIFT_DURATION, 1);
     const ease = t * t * (3 - 2 * t);
 
@@ -176,11 +166,11 @@ export class AbyssEncounter {
     this.entity.position.lerpVectors(this._entityStartPos, this._entityEndPos, ease);
 
     // Slowly widen fog further during drift
-    fog.near = THREE.MathUtils.lerp(this._savedFogNear * 0.5, this._savedFogNear * 0.7, ease);
-    fog.far = THREE.MathUtils.lerp(this._savedFogFar * 0.8, this._savedFogFar * 0.9, ease);
-
-    // Gradually restore ambient
-    ambientLight.intensity = THREE.MathUtils.lerp(0.008, this._savedAmbientIntensity * 0.5, ease);
+    this._modifier.fogNear = THREE.MathUtils.lerp(this._savedFogNear * 0.5, this._savedFogNear * 0.7, ease);
+    this._modifier.fogFar = THREE.MathUtils.lerp(this._savedFogFar * 0.8, this._savedFogFar * 0.9, ease);
+    this._modifier.ambientIntensity = THREE.MathUtils.lerp(0.008, this._savedAmbientIntensity * 0.5, ease);
+    this._modifier.weight = 1;
+    lightingPolicy.setModifier('abyss_encounter', this._modifier);
 
     // Keep pulsing bioluminescence
     this._pulseBioluminescence(0.5 + t * 0.5);
@@ -191,7 +181,7 @@ export class AbyssEncounter {
     }
   }
 
-  _updateRetreat(delta, scene, fog, ambientLight) {
+  _updateRetreat(delta, scene, lightingPolicy) {
     const t = Math.min(this.stateTime / RETREAT_DURATION, 1);
     const ease = t * t * (3 - 2 * t);
 
@@ -213,15 +203,19 @@ export class AbyssEncounter {
       light.intensity = light.userData.baseIntensity * (1 - ease);
     }
 
-    // Restore environment toward current depth-appropriate values
-    fog.near = THREE.MathUtils.lerp(this._savedFogNear * 0.7, this._envFogNear, ease);
-    fog.far = THREE.MathUtils.lerp(this._savedFogFar * 0.9, this._envFogFar, ease);
-    ambientLight.intensity = THREE.MathUtils.lerp(
-      this._savedAmbientIntensity * 0.5, this._envAmbient, ease
+    // Blend modifier back toward current depth-zone base values
+    const base = lightingPolicy.getBaseProfile();
+    this._modifier.fogNear = THREE.MathUtils.lerp(this._savedFogNear * 0.7, base.fogNear, ease);
+    this._modifier.fogFar = THREE.MathUtils.lerp(this._savedFogFar * 0.9, base.fogFar, ease);
+    this._modifier.ambientIntensity = THREE.MathUtils.lerp(
+      this._savedAmbientIntensity * 0.5, base.ambient, ease
     );
+    this._modifier.weight = 1;
+    lightingPolicy.setModifier('abyss_encounter', this._modifier);
 
     if (t >= 1) {
-      // Clean up entity from scene
+      // Clean up
+      lightingPolicy.removeModifier('abyss_encounter');
       this._despawnEntity(scene);
       this.state = State.COMPLETE;
       this.completed = true;

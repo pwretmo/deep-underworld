@@ -11,6 +11,7 @@ import { PreloadCoordinator } from "./PreloadCoordinator.js";
 import { AbyssEncounter } from "./encounters/AbyssEncounter.js";
 import { qualityManager } from "./QualityManager.js";
 import { PhysicsWorld } from "./physics/PhysicsWorld.js";
+import { LightingPolicy } from "./lighting/LightingPolicy.js";
 
 export class Game {
   constructor() {
@@ -87,19 +88,7 @@ export class Game {
       this.underwaterEffect.applySoftwareRendererPolicy();
     }
 
-    this.renderTuning = {
-      // Depth thresholds sourced from UnderwaterEffect to keep both in sync.
-      depthThresholds: this.underwaterEffect.tuning.depthThresholds,
-      exposure: {
-        surface: 0.76,
-        mid: 0.68,
-        deep: 0.6,
-        abyss: 0.56,
-        flashlightBoost: 0.16,
-        easing: 0.08,
-      },
-    };
-    this._targetExposure = this.renderer.toneMappingExposure;
+    this.lightingPolicy = new LightingPolicy();
     this._pointLightBudget = {
       shallowMax: qSettings.maxPointLights,
       deepMax: Math.max(3, Math.round(qSettings.maxPointLights * 0.6)),
@@ -185,8 +174,10 @@ export class Game {
       flora: this.flora,
       creatures: this.creatures,
       prepareDepthState: (depth) => {
-        this._updateEnvironmentForDepth(depth);
-        this._updateRenderPipelineForDepth(depth);
+        this.lightingPolicy.update(
+          depth, false, this._fog, this.ocean.ambientLight,
+          this.scene.background, this.renderer, this.underwaterEffect,
+        );
       },
     });
     this.preload.startMenuIdleWarmup();
@@ -353,7 +344,7 @@ export class Game {
 
     this.preload.cancel("restart");
     this.hud.resetRuntimeState();
-    this.abyssEncounter.reset(this.scene);
+    this.abyssEncounter.reset(this.scene, this.lightingPolicy);
     this.gameOver = false;
     this.flashlightOn = false;
     this.maxDepth = 0;
@@ -380,10 +371,10 @@ export class Game {
     this._descentLastCreatureCount = 0;
     this._descentLastTeaseTime = 0;
     this.descentOverlay.classList.remove("visible", "fade-out");
-    this._updateEnvironmentForDepth(0);
-    this._targetExposure = this.renderTuning.exposure.surface;
-    this.renderer.toneMappingExposure = this._targetExposure;
-    this.underwaterEffect.applyDepthScaleCap(0);
+    this.lightingPolicy.update(
+      0, false, this._fog, this.ocean.ambientLight,
+      this.scene.background, this.renderer, this.underwaterEffect,
+    );
     if (this.autoplay) {
       this._autoplayState = this._createAutoplayState();
       this.startAutoplay();
@@ -931,18 +922,25 @@ export class Game {
       this.hud.updateDiagnostics(this._getDiagnosticsSnapshot());
       this.hud.updateBackgroundLoading(this.preload.isDescentAssistActive());
 
-      // Update underwater fog based on depth, then let encounter override if active
-      this._updateEnvironmentForDepth(depth);
-      this._updateRenderPipelineForDepth(depth);
+      // Evaluate depth-zone base, let encounter set modifiers, then apply
+      this.lightingPolicy.evaluateBase(depth, this.flashlightOn);
       this.abyssEncounter.update(
         dt,
         depth,
         this.player,
         this.scene,
-        this._fog,
-        this.ocean.ambientLight,
+        this.lightingPolicy,
         this.hud,
         this.audio,
+      );
+      this.lightingPolicy.applyToScene(
+        depth,
+        this.flashlightOn,
+        this._fog,
+        this.ocean.ambientLight,
+        this.scene.background,
+        this.renderer,
+        this.underwaterEffect,
       );
 
       this.audio.update(dt, {
@@ -971,12 +969,6 @@ export class Game {
   }
 
   _initEnvironmentColors() {
-    // Pre-allocate reusable Color objects to avoid per-frame GC pressure
-    this._fogColor = new THREE.Color();
-    this._envColorA = new THREE.Color();
-    this._envColorB = new THREE.Color();
-    this._envColorC = new THREE.Color();
-    this._envColorD = new THREE.Color();
     this._fog = new THREE.Fog(0x006994, 5, 300);
     this.scene.fog = this._fog;
 
@@ -1067,99 +1059,6 @@ export class Game {
       graphics: this.graphicsDiagnostics,
       postProcess: this.underwaterEffect.getDiagnostics(),
     };
-  }
-
-  _updateEnvironmentForDepth(depth) {
-    // Overlapping depth bands for smoother transitions without hard visual steps.
-    const twilight = THREE.MathUtils.smoothstep(depth, 35, 210);
-    const darkZone = THREE.MathUtils.smoothstep(depth, 170, 520);
-    const abyss = THREE.MathUtils.smoothstep(depth, 430, 900);
-
-    this._envColorA.set(0x004b70); // surface teal-blue
-    this._envColorB.set(0x001b2b); // twilight blue-black
-    this._envColorC.set(0x02060d); // dark zone indigo-black
-    this._envColorD.set(0x010408); // near-black abyss with faint blue for silhouettes
-
-    this._fogColor.copy(this._envColorA);
-    this._fogColor.lerp(this._envColorB, twilight);
-    this._fogColor.lerp(this._envColorC, darkZone);
-    this._fogColor.lerp(this._envColorD, abyss);
-
-    const nearTwilight = THREE.MathUtils.lerp(5.0, 2.0, twilight);
-    const nearDark = THREE.MathUtils.lerp(nearTwilight, 0.7, darkZone);
-    let fogNear = THREE.MathUtils.lerp(nearDark, 0.3, abyss);
-
-    const farTwilight = THREE.MathUtils.lerp(220, 110, twilight);
-    const farDark = THREE.MathUtils.lerp(farTwilight, 58, darkZone);
-    let fogFar = THREE.MathUtils.lerp(farDark, 50, abyss);
-
-    const ambientTwilight = THREE.MathUtils.lerp(0.24, 0.12, twilight);
-    const ambientDark = THREE.MathUtils.lerp(ambientTwilight, 0.06, darkZone);
-    const ambientIntensity = THREE.MathUtils.lerp(ambientDark, 0.05, abyss);
-
-    // When flashlight is on, push fog back so the beam can illuminate the scene.
-    // The push is proportional to depth — stronger at deeper zones where fog is thickest.
-    if (this.flashlightOn) {
-      const pushStrength = THREE.MathUtils.smoothstep(depth, 100, 600);
-      fogNear += THREE.MathUtils.lerp(0.5, 3, pushStrength);
-      fogFar += THREE.MathUtils.lerp(8, 38, pushStrength);
-    }
-
-    this._fog.color.copy(this._fogColor);
-    this._fog.near = fogNear;
-    this._fog.far = fogFar;
-    this.scene.background.copy(this._fogColor);
-    this.ocean.ambientLight.intensity = ambientIntensity;
-  }
-
-  _updateRenderPipelineForDepth(depth) {
-    const thresholds = this.renderTuning.depthThresholds;
-    const exposure = this.renderTuning.exposure;
-
-    const midBlend = THREE.MathUtils.smoothstep(
-      depth,
-      thresholds.mid,
-      thresholds.deep,
-    );
-    const deepBlend = THREE.MathUtils.smoothstep(
-      depth,
-      thresholds.deep,
-      thresholds.abyss,
-    );
-
-    let target = THREE.MathUtils.lerp(exposure.surface, exposure.mid, midBlend);
-    target = THREE.MathUtils.lerp(target, exposure.deep, deepBlend);
-
-    const abyssBlend = THREE.MathUtils.smoothstep(
-      depth,
-      thresholds.abyss,
-      thresholds.abyss + 280,
-    );
-    target = THREE.MathUtils.lerp(target, exposure.abyss, abyssBlend);
-
-    if (this.flashlightOn) {
-      // Compensate a bit more at depth so flashlight readability remains consistent
-      // while fog attenuation and ambient falloff become stronger.
-      const flashlightComp = THREE.MathUtils.lerp(
-        exposure.flashlightBoost,
-        exposure.flashlightBoost * 1.3,
-        THREE.MathUtils.smoothstep(
-          depth,
-          thresholds.mid,
-          thresholds.abyss + 180,
-        ),
-      );
-      target += flashlightComp;
-    }
-
-    this._targetExposure = THREE.MathUtils.clamp(target, 0.5, 0.9);
-    this.renderer.toneMappingExposure = THREE.MathUtils.lerp(
-      this.renderer.toneMappingExposure,
-      this._targetExposure,
-      exposure.easing,
-    );
-    // Item 2: cap composer scale by depth band (deep zones tolerate cheaper FX).
-    this.underwaterEffect.applyDepthScaleCap(depth);
   }
 
   _createAutoplayState() {
