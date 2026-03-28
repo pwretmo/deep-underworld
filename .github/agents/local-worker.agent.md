@@ -1,6 +1,6 @@
 ---
 name: Local Worker
-description: Implements code changes in a git worktree branch. Handles feature development, bug fixes, and review fix-ups. Pushes commits and creates PRs via MCP.
+description: "Use when implementing code changes in isolated git worktrees, fixing review feedback, validating with npm run build, and creating PRs via MCP."
 user-invocable: false
 ---
 
@@ -31,7 +31,7 @@ You have access to local dev tools pre-installed in the repo:
 
 ## Workflow
 
-## Mandatory Preflight
+### Mandatory Preflight
 
 Before any file edits, build commands, or git commands, run this preflight inside the terminal and verify every check passes:
 

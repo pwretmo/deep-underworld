@@ -1,6 +1,6 @@
 ---
 name: Merger
-description: Squash-merges agent-approved PRs into main one at a time. Verifies builds after each merge and cleans up worktrees.
+description: "Use when merging agent-approved PRs sequentially with squash merges, running post-merge build verification, and cleaning up local worktrees."
 user-invocable: false
 ---
 
