@@ -218,16 +218,50 @@ export class TubeCluster {
     return this._lastLodTier;
   }
 
+  _getFarProfile() {
+    return qualityManager.tier === 'ultra' ? FAR_ULTRA_PROFILE : LOD_PROFILES.far;
+  }
+
+  _disposeObjectTree(root) {
+    root.traverse((child) => {
+      if (child.geometry) child.geometry.dispose();
+      if (child.material) {
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        for (const material of materials) {
+          if (material.map && !_sharedTextures.has(material.map)) material.map.dispose();
+          if (material.normalMap && !_sharedTextures.has(material.normalMap)) material.normalMap.dispose();
+          if (material.emissiveMap && !_sharedTextures.has(material.emissiveMap)) material.emissiveMap.dispose();
+          material.dispose();
+        }
+      }
+    });
+  }
+
+  _refreshFarTierIfNeeded() {
+    const isUltra = qualityManager.tier === 'ultra';
+    if (isUltra === this._isUltra) return;
+
+    this._isUltra = isUltra;
+    const oldFarTier = this.tiers.far;
+    const oldLevelIndex = this.lod.levels.findIndex((level) => level.object === oldFarTier.group);
+    if (oldLevelIndex !== -1) {
+      this.lod.remove(oldFarTier.group);
+      this.lod.levels.splice(oldLevelIndex, 1);
+    }
+    this._disposeObjectTree(oldFarTier.group);
+
+    const newFarTier = this._buildTier(this._getFarProfile(), 'far');
+    this.tiers.far = newFarTier;
+    this.lod.addLevel(newFarTier.group, LOD_MEDIUM_DISTANCE);
+  }
+
   // ── Model construction ────────────────────────────────────────────────────
 
   _buildModel() {
     const lod = new THREE.LOD();
     // Iterate in explicit tier order so lod.levels[i] matches TIER_NAMES[i]
     for (const tierName of TIER_NAMES) {
-      // Far LOD uses a minimal profile on Ultra to stay under 100 triangles
-      const profile = (tierName === 'far' && this._isUltra)
-        ? FAR_ULTRA_PROFILE
-        : LOD_PROFILES[tierName];
+      const profile = tierName === 'far' ? this._getFarProfile() : LOD_PROFILES[tierName];
       const tier = this._buildTier(profile, tierName);
       this.tiers[tierName] = tier;
       const dist = tierName === 'near'   ? 0
@@ -780,6 +814,7 @@ totalEmissiveRadiance += vec3(0.2, 0.6, 1.0) * tcFresnel * 0.55;`
   update(dt, playerPos) {
     this.time += dt;
     this._frameCount++;
+    this._refreshFarTierIfNeeded();
 
     const dist = this.group.position.distanceTo(playerPos);
 
@@ -800,8 +835,6 @@ totalEmissiveRadiance += vec3(0.2, 0.6, 1.0) * tcFresnel * 0.55;`
     // Use the actual profile stored in the tier (may be FAR_ULTRA_PROFILE)
     const profile = tier.profile;
 
-    if (!tier || this._frameCount % profile.animInterval !== 0) return;
-
     const t = this.time;
 
     // Player proximity — trigger worm retraction; re-emergence uses staged delays
@@ -819,6 +852,12 @@ totalEmissiveRadiance += vec3(0.2, 0.6, 1.0) * tcFresnel * 0.55;`
         delay += MIN_REEMERGENCE_DELAY + Math.random() * MAX_REEMERGENCE_DELAY;
       }
     }
+
+    if (this._wormData.length > 0) {
+      this._updateWorms(dt, t, nearPlayer, tierName === 'near');
+    }
+
+    if (!tier || this._frameCount % profile.animInterval !== 0) return;
 
     // Far LOD stays merged and static except for Ultra, where the silhouette uses
     // vertex-shader-only motion and the CPU only refreshes the time uniform.
@@ -849,8 +888,10 @@ totalEmissiveRadiance += vec3(0.2, 0.6, 1.0) * tcFresnel * 0.55;`
     }
 
     // Breathing: subtle base scale pulse
-    const breath = 1 + Math.sin(t * 0.38) * 0.012;
-    tier.base.scale.set(breath, 1, breath);
+    if (!tier.farUniforms) {
+      const breath = 1 + Math.sin(t * 0.38) * 0.012;
+      tier.base.scale.set(breath, 1, breath);
+    }
   }
 
   // ── Tube sway: damped spring, co-updates openMesh to track tube tops ──────
@@ -882,17 +923,12 @@ totalEmissiveRadiance += vec3(0.2, 0.6, 1.0) * tcFresnel * 0.55;`
 
       // Opening ring matrix — track the tilted tube top so rings stay attached
       if (openMesh) {
-        const halfH  = td.height * 0.5;
-        const cosRx  = Math.cos(td.rx), sinRx = Math.sin(td.rx);
-        const cosRz  = Math.cos(td.rz), sinRz = Math.sin(td.rz);
-        const topX   = td.posX   + halfH * sinRz;
-        const topY   = td.centerY + halfH * cosRx * cosRz;
-        const topZ   = td.posZ   - halfH * sinRx;
-        _euler.set(Math.PI * 0.5 + td.rx, 0, td.rz);
+        _vec3B.set(0, td.height * 0.5, 0).applyQuaternion(_quatA).add(_vec3A);
+        _euler.set(Math.PI * 0.5, 0, 0);
         _quatB.setFromEuler(_euler);
+        _quatB.premultiply(_quatA);
         _scaleB.set(td.radius * pulse, td.radius * pulse, td.radius * pulse);
-        _vec3A.set(topX, topY, topZ);
-        _mat4B.compose(_vec3A, _quatB, _scaleB);
+        _mat4B.compose(_vec3B, _quatB, _scaleB);
         openMesh.setMatrixAt(i, _mat4B);
       }
     }
@@ -960,7 +996,7 @@ totalEmissiveRadiance += vec3(0.2, 0.6, 1.0) * tcFresnel * 0.55;`
 
   // ── Worm emergence state machine ──────────────────────────────────────────
 
-  _updateWorms(dt, t, nearPlayer) {
+  _updateWorms(dt, t, nearPlayer, syncVisuals = true) {
     for (let i = 0; i < this._wormData.length; i++) {
       const wd = this._wormData[i];
 
@@ -996,22 +1032,24 @@ totalEmissiveRadiance += vec3(0.2, 0.6, 1.0) * tcFresnel * 0.55;`
           break;
       }
 
-      // Upload emergence/feeding uniforms
-      if (wd.wormMat.userData.shaderUniforms) {
-        const u = wd.wormMat.userData.shaderUniforms;
-        u.uWormPhase.value    = wd.emergencePhase;
-        u.uFeedingPhase.value = wd.feedingPhase;
-      }
+      if (syncVisuals) {
+        // Upload emergence/feeding uniforms
+        if (wd.wormMat.userData.shaderUniforms) {
+          const u = wd.wormMat.userData.shaderUniforms;
+          u.uWormPhase.value    = wd.emergencePhase;
+          u.uFeedingPhase.value = wd.feedingPhase;
+        }
 
-      // Animate bioluminescent tip: track along worm curve using emergencePhase
-      wd.tipMesh.visible = wd.emergencePhase > 0.05;
-      if (wd.tipMesh.visible) {
-        // Interpolate from pts[0] (base) toward extTip (fully extended)
-        wd.tipMesh.position.lerpVectors(wd.pts[0], wd.extTip, wd.emergencePhase);
-        const s = wd.emergencePhase;
-        wd.tipMesh.scale.set(s, s, s);
-        wd.tipMat.emissiveIntensity = 1.0 + wd.emergencePhase
-          * (0.8 + Math.sin(t * 3.1 + i) * 0.5);
+        // Animate bioluminescent tip: track along worm curve using emergencePhase
+        wd.tipMesh.visible = wd.emergencePhase > 0.05;
+        if (wd.tipMesh.visible) {
+          // Interpolate from pts[0] (base) toward extTip (fully extended)
+          wd.tipMesh.position.lerpVectors(wd.pts[0], wd.extTip, wd.emergencePhase);
+          const s = wd.emergencePhase;
+          wd.tipMesh.scale.set(s, s, s);
+          wd.tipMat.emissiveIntensity = 1.0 + wd.emergencePhase
+            * (0.8 + Math.sin(t * 3.1 + i) * 0.5);
+        }
       }
     }
   }
@@ -1022,14 +1060,6 @@ totalEmissiveRadiance += vec3(0.2, 0.6, 1.0) * tcFresnel * 0.55;`
 
   dispose() {
     this.scene.remove(this.group);
-    this.group.traverse(c => {
-      if (c.geometry) c.geometry.dispose();
-      if (c.material) {
-        if (c.material.map         && !_sharedTextures.has(c.material.map))        c.material.map.dispose();
-        if (c.material.normalMap   && !_sharedTextures.has(c.material.normalMap))  c.material.normalMap.dispose();
-        if (c.material.emissiveMap && !_sharedTextures.has(c.material.emissiveMap))c.material.emissiveMap.dispose();
-        c.material.dispose();
-      }
-    });
+    this._disposeObjectTree(this.group);
   }
 }
