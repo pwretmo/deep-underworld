@@ -9,6 +9,8 @@ import { qualityManager } from "../QualityManager.js";
 const _v3A = new THREE.Vector3();
 const _v3B = new THREE.Vector3();
 const _v3C = new THREE.Vector3();
+const _qA = new THREE.Quaternion();
+const _qB = new THREE.Quaternion();
 const _webControl = new THREE.Vector3();
 const _webCenter = new THREE.Vector3();
 const _webTangent = new THREE.Vector3();
@@ -26,6 +28,8 @@ const WEB_RADIUS = 0.016;
 const WEB_OUTWARD_OFFSET = 0.18;
 const WEB_UP = new THREE.Vector3(0, 1, 0);
 const WEB_ALT_UP = new THREE.Vector3(1, 0, 0);
+const LIMB_AIM_AXIS = new THREE.Vector3(0, 1, 0);
+const SKULL_AIM_AXIS = new THREE.Vector3(0, 0, 1);
 
 // -- Amalgam-specific LOD distances (abyss-zone fog far-plane ≈42m) -----------
 const AMALGAM_MEDIUM_DIST = 30;
@@ -556,6 +560,7 @@ export class Amalgam {
 
     for (let si = 0; si < profile.skulls; si++) {
       const skullGroup = new THREE.Group();
+      skullGroup.userData.eyes = [];
       const r = 0.28 + Math.random() * 0.08;
       const skullGeo = new THREE.SphereGeometry(
         r,
@@ -621,7 +626,10 @@ export class Amalgam {
           );
           const eye = new THREE.Mesh(eyeGeo, eyeMat);
           eye.position.set(side * 0.08, 0.06, r * 0.85);
+          eye.userData.basePosition = eye.position.clone();
+          eye.userData.idlePhase = Math.random() * TWO_PI;
           skullGroup.add(eye);
+          skullGroup.userData.eyes.push(eye);
           skullEyes.push(eye);
         }
       }
@@ -629,6 +637,7 @@ export class Amalgam {
       const anchor = skullAnchors[si];
       skullGroup.position.copy(anchor);
       skullGroup.lookAt(0, 0, 0);
+      skullGroup.userData.baseQuaternion = skullGroup.quaternion.clone();
       skulls.push(skullGroup);
       tierGroup.add(skullGroup);
     }
@@ -687,6 +696,7 @@ export class Amalgam {
       const anchor = limbAnchors[li];
       limbGroup.position.copy(anchor);
       limbGroup.lookAt(0, 0, 0);
+      limbGroup.userData.baseQuaternion = limbGroup.quaternion.clone();
       limbs.push(limbGroup);
       tierGroup.add(limbGroup);
 
@@ -944,6 +954,12 @@ export class Amalgam {
       this.group.scale.setScalar(this._baseScale);
     }
 
+    if (tier === "near") {
+      this.group.updateMatrixWorld(true);
+      _v3A.copy(playerPos);
+      this.group.worldToLocal(_v3A);
+    }
+
     if (medTier.coreMesh) {
       const mediumPulse = tier === "medium" ? Math.sin(this.time * 1.4) : 0;
       medTier.coreMesh.scale.setScalar(1 + mediumPulse * 0.035);
@@ -973,9 +989,13 @@ export class Amalgam {
 
     // Limb animation — gate to visible tier only
     if (tier === "near") {
-      this._animateLimbs(dt, nearTier, true);
+      this._animateLimbs(dt, nearTier, _v3A, true);
     } else if (tier === "medium") {
       this._animateLimbsBasic(dt, medTier);
+    }
+
+    if (tier === "near" && nearTier.skulls.length > 0) {
+      this._animateSkullsAndEyes(nearTier, _v3A);
     }
 
     // Skull jaw articulation (near only)
@@ -990,16 +1010,6 @@ export class Amalgam {
         this._jawAngles[i] +=
           (this._jawTargets[i] - this._jawAngles[i]) * Math.min(1, dt * 3);
         nearTier.skullJaws[i].rotation.x = this._jawAngles[i];
-      }
-    }
-
-    // Eye independent tracking (near only)
-    if (tier === "near" && nearTier.skullEyes.length > 0) {
-      for (let i = 0; i < nearTier.skullEyes.length; i++) {
-        const eye = nearTier.skullEyes[i];
-        const eyePhase = this.time * 1.5 + i * 2.1;
-        eye.position.x += Math.sin(eyePhase) * 0.0003;
-        eye.position.y += Math.cos(eyePhase * 0.7) * 0.0002;
       }
     }
 
@@ -1101,7 +1111,8 @@ export class Amalgam {
     }
   }
 
-  _animateLimbs(dt, tier, isNear) {
+  _animateLimbs(dt, tier, playerLocal, isNear) {
+    const aimBlend = this._proximityFactor * 0.9;
     for (let i = 0; i < tier.limbs.length; i++) {
       const limb = tier.limbs[i];
 
@@ -1114,16 +1125,34 @@ export class Amalgam {
 
       const twitchRaw = this._twitchTimers[i] < 0.4 ? 1 : 0;
       const phase = this.time * 2 + i * 1.3;
+      const twitchIntensity = twitchRaw * (1 + this._proximityFactor * 1.8);
+      const twitchKick =
+        Math.sin(this.time * 36 + i * 13.7) * 0.03 * twitchIntensity;
+      const idleX = Math.sin(phase) * 0.012;
+      const idleZ = Math.cos(phase * 0.7) * 0.006;
+      const reachBias =
+        this._proximityFactor > 0.3
+          ? Math.sin(this.time * 3 + i * 0.8) * 0.008 * this._proximityFactor
+          : 0;
 
-      // Base undulation
-      limb.rotation.x += Math.sin(phase) * 0.012;
-      limb.rotation.z += Math.cos(phase * 0.7) * 0.006;
-
-      // Coordinated reaching on proximity
-      if (this._proximityFactor > 0.3) {
-        limb.rotation.x +=
-          Math.sin(this.time * 3 + i * 0.8) * 0.008 * this._proximityFactor;
+      if (playerLocal) {
+        _v3B.copy(playerLocal).sub(limb.position);
+        if (_v3B.lengthSq() > 1e-6) {
+          _v3B.normalize();
+          _qA.setFromUnitVectors(LIMB_AIM_AXIS, _v3B);
+          limb.quaternion
+            .copy(limb.userData.baseQuaternion)
+            .slerp(_qA, aimBlend);
+        } else {
+          limb.quaternion.copy(limb.userData.baseQuaternion);
+        }
+      } else {
+        limb.quaternion.copy(limb.userData.baseQuaternion);
       }
+
+      // Keep the existing idle/twitch layer, but apply it relative to the aimed pose.
+      limb.rotateX(idleX + reachBias + twitchKick);
+      limb.rotateZ(idleZ + twitchKick * 0.6);
 
       // Near-LOD shader uniforms
       if (
@@ -1132,7 +1161,47 @@ export class Amalgam {
         this._shaderUniforms.limbs[i]
       ) {
         this._shaderUniforms.limbs[i].uTime.value = this.time;
-        this._shaderUniforms.limbs[i].uTwitch.value = twitchRaw;
+        this._shaderUniforms.limbs[i].uTwitch.value = twitchIntensity;
+      }
+    }
+  }
+
+  _animateSkullsAndEyes(tier, playerLocal) {
+    const aimBlend = this._proximityFactor * 0.95;
+    for (let i = 0; i < tier.skulls.length; i++) {
+      const skull = tier.skulls[i];
+      _v3B.copy(playerLocal).sub(skull.position);
+      if (_v3B.lengthSq() > 1e-6) {
+        _v3B.normalize();
+        _qA.setFromUnitVectors(SKULL_AIM_AXIS, _v3B);
+        skull.quaternion
+          .copy(skull.userData.baseQuaternion)
+          .slerp(_qA, aimBlend);
+      } else {
+        skull.quaternion.copy(skull.userData.baseQuaternion);
+      }
+
+      const skullPhase = this.time * 0.9 + i * 1.7;
+      skull.rotateX(Math.sin(skullPhase) * 0.03);
+      skull.rotateY(Math.cos(skullPhase * 0.7) * 0.025);
+
+      const skullEyes = skull.userData.eyes;
+      if (!skullEyes || skullEyes.length === 0) continue;
+
+      _qB.copy(skull.quaternion).invert();
+      _v3C.copy(_v3B).applyQuaternion(_qB);
+
+      const focusX = THREE.MathUtils.clamp(_v3C.x, -0.8, 0.8) * 0.012 * aimBlend;
+      const focusY = THREE.MathUtils.clamp(_v3C.y, -0.8, 0.8) * 0.009 * aimBlend;
+      const focusZ = Math.max(0, _v3C.z) * 0.006 * aimBlend;
+
+      for (let eyeIndex = 0; eyeIndex < skullEyes.length; eyeIndex++) {
+        const eye = skullEyes[eyeIndex];
+        const eyePhase = this.time * 1.5 + eye.userData.idlePhase;
+        eye.position.copy(eye.userData.basePosition);
+        eye.position.x += focusX + Math.sin(eyePhase) * 0.0003;
+        eye.position.y += focusY + Math.cos(eyePhase * 0.7) * 0.0002;
+        eye.position.z += focusZ;
       }
     }
   }
