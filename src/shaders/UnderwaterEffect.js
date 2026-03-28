@@ -66,7 +66,6 @@ const RENDER_PIPELINE_TUNING = deepFreeze({
     vignette: 0.28,
     grain: 0.018,
     scanline: 0.0,
-    darkening: 0.0,
     eyeAdapt: 0.12,
   },
   highlightRoll: {
@@ -119,7 +118,6 @@ const UNDERWATER_UNIFORM_TEMPLATE = {
   resolution: { value: new THREE.Vector2() },
   depthThresholds: { value: new THREE.Vector3(130, 340, 720) },
   grading: { value: new THREE.Vector4(1.08, 0.28, 0.018, 0.0) },
-  darkening: { value: 0.0 },
   extinction: { value: new THREE.Vector3(0.22, 0.045, 0.014) },
   scatterColor: { value: new THREE.Vector3(0.012, 0.048, 0.075) },
   scatterDensity: { value: 0.003 },
@@ -138,7 +136,6 @@ function createUnderwaterUniformNodes(uniforms) {
     resolution: uniform(uniforms.resolution.value),
     depthThresholds: uniform(uniforms.depthThresholds.value),
     grading: uniform(uniforms.grading.value),
-    darkening: uniform(uniforms.darkening.value),
     extinction: uniform(uniforms.extinction.value),
     scatterColor: uniform(uniforms.scatterColor.value),
     scatterDensity: uniform(uniforms.scatterDensity.value),
@@ -154,8 +151,12 @@ function disposeRttNode(node) {
     return;
   }
 
+  if (typeof node.dispose === 'function') {
+    node.dispose();
+    return;
+  }
+
   node.renderTarget?.dispose?.();
-  node._quadMesh?.material?.dispose?.();
 }
 
 function updateRttNodeScale(node, width, height, pixelRatio, scale) {
@@ -404,7 +405,6 @@ export class UnderwaterEffect {
       this.tuning.grading.grain,
       this.tuning.grading.scanline
     );
-    this.underwaterPass.uniforms.darkening.value = this.tuning.grading.darkening;
     this.underwaterPass.uniforms.extinction.value.set(
       this.tuning.extinction.r,
       this.tuning.extinction.g,
