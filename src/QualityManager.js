@@ -55,30 +55,102 @@ const QUALITY_TIERS = {
   },
 };
 
-const TIER_ORDER = ['low', 'medium', 'high', 'ultra'];
-const STORAGE_KEY = 'qualityTier';
+const TIER_ORDER = ["low", "medium", "high", "ultra"];
+const STORAGE_KEY = "qualityTier";
 
 // Auto-quality thresholds
-const AUTO_DOWNGRADE_MS = 33;   // < 30 fps
+const AUTO_DOWNGRADE_MS = 33; // < 30 fps
 const AUTO_DOWNGRADE_SECS = 3;
-const AUTO_UPGRADE_MS = 20;     // > 50 fps
+const AUTO_UPGRADE_MS = 20; // > 50 fps
 const AUTO_UPGRADE_SECS = 5;
 const EMA_ALPHA = 2 / (30 + 1); // ~30-frame EMA
 
 // GPU patterns that qualify for automatic ultra tier selection
 const HIGH_END_GPU_PATTERNS = [
-  /RTX\s*40/i, /RTX\s*50/i, /RTX\s*4090/i, /RTX\s*4080/i,
-  /RX\s*7900/i, /RX\s*9070/i, /RTX\s*5090/i, /RTX\s*5080/i,
+  /RTX\s*40/i,
+  /RTX\s*50/i,
+  /RTX\s*4090/i,
+  /RTX\s*4080/i,
+  /RX\s*7900/i,
+  /RX\s*9070/i,
+  /RTX\s*5090/i,
+  /RTX\s*5080/i,
 ];
+
+function pushGpuLabel(labels, value) {
+  if (typeof value !== "string") return;
+  const normalized = value.trim();
+  if (!normalized) return;
+  labels.push(normalized);
+}
+
+function hasHighEndGpuSignature(labels) {
+  return labels.some((label) =>
+    HIGH_END_GPU_PATTERNS.some((pattern) => pattern.test(label)),
+  );
+}
+
+function getWebGLGpuLabels(gl) {
+  const labels = [];
+  if (!gl?.getParameter) return labels;
+
+  const ext = gl.getExtension?.("WEBGL_debug_renderer_info");
+  if (ext) {
+    pushGpuLabel(labels, gl.getParameter(ext.UNMASKED_RENDERER_WEBGL));
+    pushGpuLabel(labels, gl.getParameter(ext.UNMASKED_VENDOR_WEBGL));
+  }
+
+  pushGpuLabel(labels, gl.getParameter(gl.RENDERER));
+  pushGpuLabel(labels, gl.getParameter(gl.VENDOR));
+  return [...new Set(labels)];
+}
+
+async function getWebGPUGpuLabels(renderer) {
+  const labels = [];
+  const backend = renderer?.backend;
+
+  const adapterInfoCandidates = [
+    backend?.adapter?.info,
+    backend?.device?.adapterInfo,
+  ];
+  for (const info of adapterInfoCandidates) {
+    pushGpuLabel(labels, info?.description);
+    pushGpuLabel(labels, info?.vendor);
+    pushGpuLabel(labels, info?.architecture);
+  }
+
+  let adapter = backend?.adapter;
+  if (!adapter && typeof navigator !== "undefined" && navigator.gpu) {
+    adapter = await navigator.gpu.requestAdapter();
+  }
+  if (!adapter) return [...new Set(labels)];
+
+  let info = adapter.info ?? null;
+  if (!info && typeof adapter.requestAdapterInfo === "function") {
+    try {
+      info = await adapter.requestAdapterInfo();
+    } catch (_) {
+      info = null;
+    }
+  }
+
+  pushGpuLabel(labels, info?.description);
+  pushGpuLabel(labels, info?.vendor);
+  pushGpuLabel(labels, info?.architecture);
+  return [...new Set(labels)];
+}
 
 class QualityManager {
   constructor() {
-    const stored = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
+    const stored =
+      typeof localStorage !== "undefined"
+        ? localStorage.getItem(STORAGE_KEY)
+        : null;
     if (stored && QUALITY_TIERS[stored]) {
       this._tier = stored;
       this._autoQuality = false; // user previously chose a tier
     } else {
-      this._tier = 'high';
+      this._tier = "high";
       this._autoQuality = true;
     }
     this._settings = { ...QUALITY_TIERS[this._tier] };
@@ -92,11 +164,17 @@ class QualityManager {
   }
 
   /** Current tier name. */
-  get tier() { return this._tier; }
+  get tier() {
+    return this._tier;
+  }
 
   /** Whether auto tier adjustment is active. */
-  get autoQuality() { return this._autoQuality; }
-  set autoQuality(val) { this._autoQuality = !!val; }
+  get autoQuality() {
+    return this._autoQuality;
+  }
+  set autoQuality(val) {
+    this._autoQuality = !!val;
+  }
 
   /** Returns a shallow copy of the current tier's settings. */
   getSettings() {
@@ -106,25 +184,25 @@ class QualityManager {
   /**
    * Detect GPU capabilities from the renderer and auto-select ultra tier
    * if a high-end GPU is detected and autoQuality is enabled.
-   * Call this once after the renderer is created.
+   * Call this once after renderer.init() has completed.
    */
-  detectGPU(renderer) {
+  async detectGPU(renderer) {
     if (!this._autoQuality) return;
+    this._highEndGpuDetected = false;
+
     try {
       const backend = renderer.backend;
-      const isWebGL = backend && backend.isWebGLBackend;
+      const gpuLabels = backend?.isWebGLBackend
+        ? getWebGLGpuLabels(backend.gl)
+        : await getWebGPUGpuLabels(renderer);
 
-      if (isWebGL) {
-        const gl = backend.gl;
-        const ext = gl?.getExtension('WEBGL_debug_renderer_info');
-        if (!ext) return;
-        const gpuRenderer = gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) || '';
-        this._highEndGpuDetected = HIGH_END_GPU_PATTERNS.some((p) => p.test(gpuRenderer));
-      } else {
-        // WebGPU backend — assume high-end GPU since WebGPU requires modern hardware
-        this._highEndGpuDetected = true;
+      this._highEndGpuDetected = hasHighEndGpuSignature(gpuLabels);
+      if (this._highEndGpuDetected && this._tier !== "ultra") {
+        this._applyAutoTier("ultra");
       }
-    } catch (_) { /* GPU detection not available */ }
+    } catch (_) {
+      /* GPU detection not available */
+    }
   }
 
   /** Switch to a specific tier. Persists to localStorage. */
@@ -136,8 +214,16 @@ class QualityManager {
     this._downgradeDuration = 0;
     this._upgradeDuration = 0;
     this._ultraUpgradeDuration = 0;
-    try { localStorage.setItem(STORAGE_KEY, tier); } catch (_) { /* noop */ }
-    window.dispatchEvent(new CustomEvent('qualitychange', { detail: { tier, settings: this._settings } }));
+    try {
+      localStorage.setItem(STORAGE_KEY, tier);
+    } catch (_) {
+      /* noop */
+    }
+    window.dispatchEvent(
+      new CustomEvent("qualitychange", {
+        detail: { tier, settings: this._settings },
+      }),
+    );
   }
 
   /**
@@ -146,7 +232,8 @@ class QualityManager {
    */
   updateFrameTime(dt) {
     const frameMs = dt * 1000;
-    this._frameTimeEma = this._frameTimeEma + EMA_ALPHA * (frameMs - this._frameTimeEma);
+    this._frameTimeEma =
+      this._frameTimeEma + EMA_ALPHA * (frameMs - this._frameTimeEma);
 
     if (!this._autoQuality) return;
 
@@ -161,7 +248,7 @@ class QualityManager {
     } else if (this._frameTimeEma < AUTO_UPGRADE_MS) {
       this._downgradeDuration = 0;
       this._upgradeDuration += dt;
-      const maxGenericIdx = TIER_ORDER.indexOf('high');
+      const maxGenericIdx = TIER_ORDER.indexOf("high");
       if (this._upgradeDuration >= AUTO_UPGRADE_SECS && idx < maxGenericIdx) {
         this._applyAutoTier(TIER_ORDER[idx + 1]);
       }
@@ -184,11 +271,13 @@ class QualityManager {
     this._upgradeDuration = 0;
     this._ultraUpgradeDuration = 0;
     // Don't persist auto changes to localStorage
-    window.dispatchEvent(new CustomEvent('qualitychange', { detail: { tier, settings: this._settings } }));
+    window.dispatchEvent(
+      new CustomEvent("qualitychange", {
+        detail: { tier, settings: this._settings },
+      }),
+    );
   }
 }
 
 /** Singleton instance. */
 export const qualityManager = new QualityManager();
-
-

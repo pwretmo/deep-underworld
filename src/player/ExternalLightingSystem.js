@@ -47,11 +47,29 @@ export class ExternalLightingSystem {
     this.hullLightsGroup.visible = true;
 
     this._beamMaterials = [];
+    this._beamMeshes = [];
     this.headlights = [];
     this.hullLights = [];
 
     this._buildHeadlights();
     this._buildHullLights();
+  }
+
+  _createBeamMaterial() {
+    const cfg = this.config;
+
+    if (this._volumetricEnabled) {
+      const beamMaterial = createAdvancedVolumetricBeamMaterial();
+      beamMaterial.uniforms.beamLength.value = cfg.beamLength;
+      beamMaterial.uniforms.baseOpacity.value = cfg.beamBaseOpacity;
+      beamMaterial.uniforms.coneTanHalfAngle.value = Math.tan(cfg.coneAngle);
+      return beamMaterial;
+    }
+
+    const beamMaterial = createFallbackBeamMaterial();
+    beamMaterial.userData.baseOpacity = cfg.beamBaseOpacity * 0.55;
+    beamMaterial.opacity = beamMaterial.userData.baseOpacity;
+    return beamMaterial;
   }
 
   _buildHeadlights() {
@@ -79,22 +97,12 @@ export class ExternalLightingSystem {
       this.group.add(spot.target);
       this.headlights.push(spot);
 
-      let beamMaterial;
-      if (this._volumetricEnabled) {
-        beamMaterial = createAdvancedVolumetricBeamMaterial();
-        beamMaterial.uniforms.beamLength.value = cfg.beamLength;
-        beamMaterial.uniforms.baseOpacity.value = cfg.beamBaseOpacity;
-        beamMaterial.uniforms.coneTanHalfAngle.value = Math.tan(cfg.coneAngle);
-      } else {
-        beamMaterial = createFallbackBeamMaterial();
-        beamMaterial.userData.baseOpacity = cfg.beamBaseOpacity * 0.55;
-        beamMaterial.opacity = beamMaterial.userData.baseOpacity;
-      }
-
+      const beamMaterial = this._createBeamMaterial();
       const beam = new THREE.Mesh(beamGeo, beamMaterial);
       beam.position.set(x, 0, 0);
       beam.renderOrder = 2;
       this.group.add(beam);
+      this._beamMeshes.push(beam);
       this._beamMaterials.push(beamMaterial);
     }
   }
@@ -122,6 +130,25 @@ export class ExternalLightingSystem {
 
   setEnabled(enabled) {
     this.group.visible = enabled;
+  }
+
+  setVolumetricEnabled(enabled) {
+    const nextEnabled = !!enabled;
+    if (nextEnabled === this._volumetricEnabled) return;
+
+    this._volumetricEnabled = nextEnabled;
+
+    const nextMaterials = [];
+    for (let i = 0; i < this._beamMeshes.length; i++) {
+      const beam = this._beamMeshes[i];
+      const nextMaterial = this._createBeamMaterial();
+      const previousMaterial = beam.material;
+      beam.material = nextMaterial;
+      nextMaterials.push(nextMaterial);
+      previousMaterial?.dispose?.();
+    }
+
+    this._beamMaterials = nextMaterials;
   }
 
   update(_dt, depth, time) {
