@@ -23,11 +23,12 @@ Use this skill when a PR's code is ready, the blocking feedback has been address
 ## Preferred Path
 
 - Resolve the thread after verifying the fix.
-- If thread resolution cannot be completed, post an in-thread reply explaining what changed.
+- Use `gh api graphql` as the first option for thread resolution in this repository.
+- If thread resolution cannot be completed with `gh api graphql`, post an in-thread reply explaining what changed.
 
 ## Resolve With `gh api graphql`
 
-Use this path as the default resolution mechanism in this repo when the thread has been addressed and `gh` is available.
+Use this path as the default and first-choice resolution mechanism in this repo when the thread has been addressed.
 
 Preconditions:
 
@@ -37,7 +38,7 @@ Preconditions:
 
 1. Use `gh api graphql` to find the review-thread node ID that contains the comment.
 2. Call the `resolveReviewThread` mutation for that thread ID.
-3. If resolution fails or the thread ID cannot be found, fall back to the in-thread reply path below.
+3. If resolution fails, `gh` is unavailable, or the thread ID cannot be found, fall back to the in-thread reply path below.
 
 Example PowerShell sequence:
 
@@ -85,7 +86,7 @@ If this resolution step fails, do not block merge readiness if the feedback is a
 
 ## Fallback Reply With MCP
 
-If `gh api graphql` cannot resolve the thread, use `mcp_io_github_git_add_reply_to_pull_request_comment` to reply to the top-level comment in the thread.
+If `gh api graphql` cannot resolve the thread, use `mcp_io_github_git_add_reply_to_pull_request_comment` to reply to the top-level comment in the thread. Do not skip the `gh api graphql` attempt when the workflow requires thread resolution.
 
 Example reply:
 
@@ -104,7 +105,7 @@ Parameters:
 1. Poll review threads and identify unresolved blocking threads.
 2. Verify the underlying code fix is actually present on the current PR head.
 3. Identify the top-level review comment ID for each thread that has been addressed.
-4. Attempt to resolve the thread with `gh api graphql`.
+4. Attempt to resolve the thread with `gh api graphql` as the first option.
 5. If resolution cannot be completed, post a reply in the thread with a brief note that explains what changed.
 6. Continue with approval or merge once the feedback is addressed and the thread has either been resolved or acknowledged with the reply.
 

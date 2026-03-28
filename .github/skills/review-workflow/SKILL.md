@@ -55,9 +55,9 @@ Parameters:
 
 ### Resolving Or Replying On Addressed Threads
 
-If the code fix is present but a blocking review conversation is still open, use `.github/skills/review-thread-resolution/SKILL.md` to resolve the thread when possible. If resolution cannot be completed, post a reply in the thread before approving the PR.
+If the code fix is present but a blocking review conversation is still open, use `.github/skills/review-thread-resolution/SKILL.md` to resolve the thread with `gh api graphql` first. If resolution cannot be completed, post a reply in the thread before approving the PR.
 
-In this repo, resolving the thread is the preferred path. The in-thread reply is the fallback when resolution cannot be completed.
+In this repo, `gh api graphql` resolution is the preferred first path. The in-thread reply is the fallback when resolution cannot be completed.
 
 Use the top-level review comment from the thread for the fallback reply, and explain what changed.
 
@@ -248,7 +248,7 @@ GitHub may be configured with an external Copilot reviewer that automatically re
 
 - **Poll before reviewing**: The orchestrator should use `mcp_io_github_git_pull_request_read` with `method: "get_reviews"` and `method: "get_review_comments"` to check for external reviews before dispatching the local Reviewer.
 - **Don't duplicate feedback**: If the external reviewer already flagged an issue, the local Reviewer should skip it and focus on anything the external reviewer missed.
-- **Resolve addressed threads when possible**: If a blocking external review thread is fixed but still open, use `.github/skills/review-thread-resolution/SKILL.md` to resolve it. If that fails, post a reply in the thread before approval or merge.
+- **Resolve addressed threads with `gh api graphql` first**: If a blocking external review thread is fixed but still open, use `.github/skills/review-thread-resolution/SKILL.md` and attempt `gh api graphql` resolution before any fallback. If that fails, post a reply in the thread before approval or merge.
 - **Merge readiness**: A PR needs no outstanding `REQUEST_CHANGES` from **any** reviewer (external or local) and no unaddressed blocking review conversations before it can be merged.
 - **Re-poll after fixes**: When a worker pushes fixes, the external reviewer may run again. The orchestrator should poll for new external reviews before re-dispatching the local Reviewer.
 

@@ -125,7 +125,7 @@ Cloud agents do not use worktrees — they work directly on their `copilot/` bra
 Local agents **must** use the GitHub MCP server tools (`mcp_io_github_git_*`) for all GitHub operations:
 
 - Creating branches, PRs, reading files, searching code, merging PRs, etc.
-- **Never** use the `gh` CLI locally unless the user explicitly asks for it. The only standing exception is the optional `gh api graphql` path in `.github/skills/review-thread-resolution/SKILL.md` when the user explicitly wants review threads resolved.
+- **Never** use the `gh` CLI locally unless the workflow explicitly requires it. Review-thread resolution is the standing exception: when a review thread needs to be resolved, use the `gh api graphql` procedure in `.github/skills/review-thread-resolution/SKILL.md` as the first option before any fallback reply path.
 - The MCP tools use the parameters `owner: "pwretmo"` and `repo: "deep-underworld"`.
 
 GitHub cloud agents (Copilot coding agent) use their built-in GitHub API access instead.
@@ -135,7 +135,8 @@ GitHub cloud agents (Copilot coding agent) use their built-in GitHub API access 
 GitHub review-thread state is part of merge readiness in this repository.
 
 - Preferred policy: when blocking review feedback has been addressed, resolve the review thread.
-- If GitHub MCP read/write tools do not expose direct `resolveReviewThread` / `unresolveReviewThread` operations, use `.github/skills/review-thread-resolution/SKILL.md` and its `gh api graphql` path to resolve the thread when possible.
+- Use `.github/skills/review-thread-resolution/SKILL.md` and its `gh api graphql` path as the first option for resolving the thread.
+- If `gh api graphql` cannot resolve the thread, use the skill's in-thread reply fallback.
 - If thread resolution is not possible, open blocking review conversations are acceptable if the underlying fix is verified and a reply has been posted in the thread.
 - Do not depend on browser automation for merge-critical thread handling.
 - The workflow for this lives in `.github/skills/review-thread-resolution/SKILL.md`.
@@ -211,17 +212,19 @@ You are a Local Worker agent for the deep-underworld repo (owner: pwretmo, repo:
 Your worktree is at: F:\repos\deep-underworld-worktrees\<slug>
 Your branch is: agent/<slug>
 
-PRECHECK: Before any edits, builds, or git commands, verify you are exactly in that worktree path and on that branch. If not, abort immediately and report the violation.
-
 TASK: <description>
 ISSUE: #<number> (omit if not implementing a specific issue)
 
-ENGINEERING RULE: Never remove, disable, or downgrade a feature to fix a bug. Fix the root cause while preserving all functionality. See Engineering Quality Standards in copilot-instructions.md.
-
-If an ISSUE number is provided, include "Fixes #<number>" in the PR body and ensure ALL requirements from the issue are implemented — not just some. The reviewer will verify completeness.
-
 Follow the worktree-workflow skill in .github/skills/worktree-workflow/SKILL.md.
-When done: commit, push, and create a PR targeting main with the label "agent-work".
+Non-negotiables:
+- Run the worktree preflight before any edit, build, or git command. Abort on any path or branch mismatch.
+- Never work on `main` or outside the assigned worktree.
+- Never remove, disable, or downgrade a feature to fix a bug; preserve functionality and fix the root cause.
+- If ISSUE is provided, include "Fixes #<number>" in the PR body and fully implement that issue.
+
+For new work: create the PR targeting `main` and ensure the `agent-work` label is present.
+For review-fix work: update the existing branch only and do not create a new PR.
+Return a short summary with PR status, then call task_complete.
 ```
 
 ### Dispatch a Reviewer
@@ -230,20 +233,17 @@ When done: commit, push, and create a PR targeting main with the label "agent-wo
 You are a Reviewer agent for the deep-underworld repo (owner: pwretmo, repo: deep-underworld).
 Review PR #<number>.
 
-BLOCKING RULES:
-1. Reject any PR that removes, disables, or downgrades existing functionality to fix a bug. The fix must preserve the feature and address the root cause.
-2. If the PR references a GitHub issue (Fixes #X), verify that ALL requirements from that issue are implemented. Partial implementations are blocking — list the missing requirements.
-3. Treat external Copilot review comments/threads as blocking feedback until verified fixed. Do not approve while any Copilot-raised issue remains unresolved.
-4. If code changes are correct but blocking review conversations remain open, use `.github/skills/review-thread-resolution/SKILL.md` to resolve the thread when possible. If that cannot be done, post a reply in the thread before adding `agent-approved`.
-See Engineering Quality Standards in copilot-instructions.md.
-
 Follow the review-workflow skill in .github/skills/review-workflow/SKILL.md.
-Use the review-thread-resolution skill in .github/skills/review-thread-resolution/SKILL.md if fixed review conversations still need to be resolved or acknowledged before approval.
-If issues found: post REQUEST_CHANGES review, add "agent-reviewed" label, return the list of issues.
-If approved: post APPROVE review, add "agent-reviewed" and "agent-approved" labels.
-When adding labels, use read-merge-write reconciliation: read current labels first, merge, then write — never overwrite with a bare list (see review-workflow skill).
+Use the review-thread-resolution skill in .github/skills/review-thread-resolution/SKILL.md if fixed review conversations still need to be resolved or acknowledged before approval. When thread resolution is needed, use `gh api graphql` first and only fall back to an in-thread reply if that fails.
 
-If GitHub blocks formal review actions on self-authored PRs, still return REVIEW RESULT: REQUEST_CHANGES when blockers exist and do not allow `agent-approved` labeling until blockers are fixed.
+Blocking rules:
+1. Reject any PR that removes, disables, or downgrades existing functionality to fix a bug.
+2. If the PR references a GitHub issue, verify that all requirements from that issue are implemented.
+3. Treat external Copilot review comments and threads as blocking until verified fixed.
+4. Do not add `agent-approved` until blocking review conversations are resolved or acknowledged in-thread per the skill.
+
+Post the review, reconcile labels with read-merge-write, return `REVIEW RESULT: REQUEST_CHANGES`, `REVIEW RESULT: APPROVED`, or `REVIEW RESULT: BLOCKED`, then call task_complete.
+If GitHub blocks formal review actions on a self-authored PR, still return the correct review result and withhold `agent-approved` while blockers remain.
 ```
 
 ### Re-dispatch Worker with Review Fixes
@@ -263,14 +263,16 @@ Your worktree is at: F:\repos\deep-underworld-worktrees\<slug>
 Your branch is: agent/<slug>
 PR number: #<number>
 
-PRECHECK: Before any edits, builds, or git commands, verify you are exactly in that worktree path and on that branch. If not, abort immediately and report the violation.
-
-ENGINEERING RULE: Never remove, disable, or downgrade a feature to fix a bug. Fix the root cause while preserving all functionality. If the original fix removed functionality, the new fix must restore it AND address the root cause properly.
-
 FIX THESE REVIEW ISSUES:
 <paste review comments here>
 
-Fix the issues, commit, and push. Do not create a new PR.
+Follow the worktree-workflow skill in .github/skills/worktree-workflow/SKILL.md.
+Non-negotiables:
+- Run the worktree preflight before any edit, build, or git command. Abort on any mismatch.
+- Never work on `main` or outside the assigned worktree.
+- Never remove, disable, or downgrade a feature to fix a bug. Restore and preserve functionality while fixing the root cause.
+
+Fix the issues, validate with `npm run build`, update the existing branch only, return a short summary, and call task_complete.
 ```
 
 ### Dispatch the Merger
@@ -279,11 +281,16 @@ Fix the issues, commit, and push. Do not create a new PR.
 You are a Merger agent for the deep-underworld repo (owner: pwretmo, repo: deep-underworld).
 
 Follow the merge-workflow skill in .github/skills/merge-workflow/SKILL.md.
-If blocking review conversations remain open but are already fixed in code, use .github/skills/review-thread-resolution/SKILL.md and resolve the thread when possible; otherwise ensure a reply has been posted in the thread before merge.
-Find all open PRs labeled "agent-approved" and squash-merge them one at a time.
-Before merging each PR, re-poll reviews and review comments and confirm there are no unaddressed Copilot comments/threads and no outstanding REQUEST_CHANGES from any reviewer.
-After each merge, pull main locally and run npm run build to verify.
-Clean up worktrees for any merged local branches.
+Use .github/skills/review-thread-resolution/SKILL.md if already-addressed blocking review conversations are still open. When thread resolution is needed, use `gh api graphql` first and only fall back to an in-thread reply if that fails.
+
+Non-negotiables:
+- Merge only PRs labeled `agent-approved`.
+- Re-poll review state before each merge and stop on any unaddressed blocker or outstanding `REQUEST_CHANGES`.
+- Squash-merge one PR at a time.
+- After each merge, pull `main`, run `npm run build`, and stop on the first failure.
+- Clean up worktrees only for merged local `agent/` branches.
+
+Return `MERGE RESULTS`, then call task_complete.
 ```
 
 ### Dispatch a UX Tester
@@ -293,28 +300,24 @@ Before dispatching this agent, read .github/skills/ux-testing/SKILL.md in the ma
 
 You are a UX Tester agent for the deep-underworld repo (owner: pwretmo, repo: deep-underworld).
 
-Before any testing, read these skills:
+Read these skills before testing:
 - .github/skills/ux-testing/SKILL.md
 - .github/skills/worktree-workflow/SKILL.md
 - .github/skills/review-workflow/SKILL.md
 - .github/skills/merge-workflow/SKILL.md
 
-Workflow contract:
-1. Start with the browser tool discovery and about:blank liveness check from the ux-testing skill.
+Non-negotiables:
+1. Start with the browser-tool discovery and about:blank liveness check from the ux-testing skill.
 2. Use `http://localhost:5173?autoplay` for automated UX testing.
-3. Use browser-only evidence gathering; do not substitute code analysis for live testing.
-4. BROWSER HYGIENE IS MANDATORY: One browser page at a time. If npm run dev auto-opens a tab, close it before opening your automation page. Never open the game in both an external browser and VS Code Simple Browser. Track all pages and close ALL of them before task_complete. See Browser Hygiene in copilot-instructions.md.
-5. For every issue found, follow the Local Worker -> Reviewer -> Merger lifecycle defined in repo instructions. Do not substitute direct code edits, built-in PR generation, or alternate PR flows.
-6. Do not stop after issue discovery or worker dispatch. Continue through review, merge, and fix verification unless blocked by a hard-stop condition from the skill.
-
-Play the game and find UX issues. For each issue, dispatch the required follow-up work through the repo workflow.
-
-ENGINEERING RULE: Suggested fixes must never remove, disable, or downgrade a feature. Fix the root cause while preserving all functionality. See Engineering Quality Standards in copilot-instructions.md.
+3. Use browser-only evidence gathering.
+4. Enforce browser hygiene exactly as defined in the ux-testing skill and Browser Hygiene in copilot-instructions.md.
+5. For every issue found, use the Local Worker -> Reviewer -> Merger lifecycle. Do not edit source directly or substitute alternate PR flows.
+6. Suggested fixes must preserve functionality and target the root cause.
+7. Continue through review, merge, and re-test unless blocked by a required hard-stop condition from the skills.
 
 Focus area (optional): <area or "full sweep">
 
-Follow the ux-testing skill in .github/skills/ux-testing/SKILL.md.
-When done: return a structured UX test report with all issues found and PRs created.
+Return a structured UX test report with issues found, PRs created, and verification results, then call task_complete.
 ```
 
 ## Parallelization Rules

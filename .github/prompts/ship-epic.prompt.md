@@ -1,5 +1,5 @@
 ---
-description: "Run the full ship-it workflow for an epic and all sub-issues in dependency order, one-by-one, from implementation through merge and build verification. Use when you want a single orchestrator run for an entire epic."
+description: "Use when you want to ship an epic across multiple sub-issues in dependency order, running the full worktree, PR, review, fix, merge, and build-verification workflow for each one."
 agent: agent
 ---
 
@@ -24,18 +24,22 @@ implement -> review -> fix loop (if needed) -> merge -> `npm run build` verify.
 6. Never start a sub-issue until all its prerequisites are merged into `main` and build-verified.
 7. If there is a dependency cycle or ambiguity, stop and report exact issues involved.
 
-## Per-Sub-Issue Steps
+## Per-Sub-Issue Workflow
 
-1. Dispatch Local Worker in a dedicated worktree/branch.
-2. Require complete implementation for that sub-issue.
-3. Enforce engineering rule: never remove, disable, or downgrade features to fix bugs; fix root cause.
-4. Open PR labeled `agent-work` with `Fixes #<sub-issue-number>` in the PR body.
-5. Dispatch Reviewer.
-6. If review requests changes (including unaddressed Copilot comments/threads), re-dispatch Local Worker on the same PR branch and repeat review.
-7. After approval, dispatch Merger to squash-merge.
-8. Pull/update `main` and run `npm run build`.
-9. If build fails, stop immediately and report blocker details.
-10. Mark sub-issue complete and continue with next eligible dependent sub-issue.
+For each eligible sub-issue, run the same end-to-end ship-it workflow defined by the repo:
+
+1. Dispatch Local Worker in a dedicated worktree and require complete implementation for that sub-issue.
+2. Require `Fixes #<sub-issue-number>` in the PR body so issue completeness can be reviewed.
+3. Dispatch Reviewer and repeat the Local Worker -> Reviewer loop until approved.
+4. Dispatch Merger to squash-merge only after approval, then verify `npm run build` on `main`.
+5. Stop immediately on any blocker, failed merge gate, or failed post-merge build.
+6. Continue with the next eligible dependent sub-issue only after the current one is merged and build-verified.
+
+Hard gates:
+
+- Never remove, disable, or downgrade features to fix bugs; require root-cause fixes.
+- Never bypass the repo's review-thread policy for addressed blocking conversations.
+- Never run multiple active Worker -> Reviewer -> Merger chains at once for this epic.
 
 ## Final Report
 

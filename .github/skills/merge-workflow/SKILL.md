@@ -21,7 +21,7 @@ Parameters:
 
 From the results, select only PRs that have the `agent-approved` label.
 
-If review conversations remain open after the code is fixed, use `.github/skills/review-thread-resolution/SKILL.md` to resolve the thread when possible. If resolution cannot be completed, ensure the feedback is addressed and a reply has been posted in the thread.
+If review conversations remain open after the code is fixed, use `.github/skills/review-thread-resolution/SKILL.md` and attempt `gh api graphql` thread resolution first. If resolution cannot be completed, ensure the feedback is addressed and a reply has been posted in the thread.
 
 ## Squash-Merging a PR
 
@@ -48,7 +48,7 @@ Parameters:
 ```
 
 2. Confirm there is no outstanding `REQUEST_CHANGES` from any reviewer.
-3. If blocking review threads remain but the code is fixed, use `.github/skills/review-thread-resolution/SKILL.md` to verify the fix and resolve the thread when possible. If that cannot be done, post a reply in the thread.
+3. If blocking review threads remain but the code is fixed, use `.github/skills/review-thread-resolution/SKILL.md` to verify the fix and attempt `gh api graphql` resolution first. If that cannot be done, post a reply in the thread.
 4. Confirm there are no unaddressed Copilot comments/threads. Open threads are acceptable only when the feedback is addressed and a reply has been posted in-thread after a failed or unavailable resolution step.
 5. If either condition fails, do not merge. Return `FAILED — review blockers remain`.
 
@@ -119,7 +119,7 @@ If the worktree directory doesn't exist (already cleaned), just prune and move o
 ```
 For each approved PR:
   1. Poll reviews + review comments
-  2. IF code is fixed but review threads remain → use the review-thread-resolution skill and resolve the thread when possible, otherwise post a reply in the thread
+  2. IF code is fixed but review threads remain → use the review-thread-resolution skill, try `gh api graphql` first, otherwise post a reply in the thread
   3. IF blockers still remain → stop, report
   4. Squash-merge via MCP
   5. git pull origin main
