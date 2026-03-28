@@ -184,7 +184,9 @@ const AdvancedVolumetricBeamShader = {
     fogColor: { value: new THREE.Color(0x000000) },
     fogNear: { value: 1.0 },
     fogFar: { value: 300.0 },
-    coneTanHalfAngle: { value: Math.tan(Math.PI / 7) },
+    coneTanHalfAngle: { value: Math.tan(Math.PI / 9) },
+    waterExtinction: { value: new THREE.Vector3(0.38, 0.065, 0.018) },
+    waterDepth: { value: 0 },
   },
 
   vertexShader: /* glsl */ `
@@ -224,6 +226,8 @@ const AdvancedVolumetricBeamShader = {
     uniform vec3 fogColor;
     uniform float fogNear;
     uniform float fogFar;
+    uniform vec3 waterExtinction;
+    uniform float waterDepth;
 
     varying vec3 vLocalPos;
     varying vec3 vWorldPos;
@@ -269,18 +273,22 @@ const AdvancedVolumetricBeamShader = {
     }
 
     void main() {
-      float axialFade = exp(-2.0 * vAxialT) * (1.0 - 0.55 * vAxialT);
-      float radialFade = exp(-3.8 * vRadialT * vRadialT);
+      float axialFade = exp(-2.5 * vAxialT) * (1.0 - 0.6 * vAxialT);
+      float radialFade = exp(-4.2 * vRadialT * vRadialT);
 
       vec3 viewDir = normalize(cameraPosition - vWorldPos);
       float cosTheta = dot(viewDir, vBeamDirWorld);
       float g = anisotropy;
       float phase = (1.0 - g * g) / (4.0 * 3.14159 * pow(1.0 + g * g - 2.0 * g * cosTheta, 1.5));
-      float scatter = clamp(phase * 2.2, 0.35, 3.4);
+      float scatter = clamp(phase * 2.2, 0.35, 2.2);
 
       vec3 noiseCoord = vLocalPos * (noiseScale * 0.09) + vec3(time * 0.11, time * 0.07, time * 0.05);
       float n = fbm(noiseCoord);
       float noiseMod = 1.0 - noiseStrength + (noiseStrength * n * 2.0);
+
+      // Particulate forward scatter: deeper water has more suspended material,
+      // making the beam read in open water without needing high base opacity.
+      float depthParticleBoost = 1.0 + smoothstep(100.0, 500.0, waterDepth) * 0.5;
 
       float density = baseOpacity;
       density *= axialFade;
@@ -289,16 +297,20 @@ const AdvancedVolumetricBeamShader = {
       density *= noiseMod;
       density *= depthAttenuation;
       density *= depthOpacityScale;
+      density *= depthParticleBoost;
 
       float edgeSoftness = smoothstep(1.0, 0.72, vRadialT);
       density *= edgeSoftness;
 
+      // Water extinction: beam color attenuates with depth (Beer-Lambert).
+      vec3 depthTint = beamColor * exp(-waterExtinction * waterDepth * 0.25);
+
       float dist = length(vWorldPos - cameraPosition);
       float fogFactor = smoothstep(fogNear, fogFar, dist);
-      vec3 finalColor = mix(beamColor, fogColor, fogFactor * 0.65);
+      vec3 finalColor = mix(depthTint, fogColor, fogFactor * 0.65);
       density *= (1.0 - fogFactor * 0.68);
 
-      gl_FragColor = vec4(finalColor, clamp(density, 0.0, 0.16));
+      gl_FragColor = vec4(finalColor, clamp(density, 0.0, 0.10));
     }
   `,
 };
