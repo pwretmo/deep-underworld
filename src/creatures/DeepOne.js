@@ -230,11 +230,11 @@ export class DeepOne {
     this._tiers = { near: nearTier, medium: medTier, far: farTier };
 
     // Single point light — near tier only; mid/far use emissive-only glow
-    this._eyeLight = new THREE.PointLight(0x440000, 0.5, 4);
+    this._eyeLight = new THREE.PointLight(0x440000, 0.5, 4 * this.scale);
     this._eyeLight.position.set(0, 2.0, 0.8);
     nearTier.group.add(this._eyeLight);
 
-    // Ambient glow sprite (emissive-only, no extra draw call)
+    // Ambient glow sprite (emissive-only visual, single additional draw call)
     const spriteMat = new THREE.SpriteMaterial({
       map: _glowTexture,
       color: 0x802040,
@@ -359,19 +359,32 @@ export class DeepOne {
       }
       tubeGeo.computeVertexNormals();
 
-      const tentacleMat = new THREE.MeshPhysicalMaterial({
-        color: 0x1a1a30,
-        roughness: 0.82,
-        metalness: 0,
-        emissive: 0x502040,
-        emissiveIntensity: 0.4,
-        transparent: true,
-        opacity: 0.92,
-        transmission: 0.12,
-        thickness: 0.08,
-        normalMap: _suckerNormalTex,
-        normalScale: new THREE.Vector2(0.45, 0.45),
-      });
+      const isNearTier = profile === LOD_PROFILE.near;
+      const tentacleMat = isNearTier
+        ? new THREE.MeshPhysicalMaterial({
+          color: 0x1a1a30,
+          roughness: 0.82,
+          metalness: 0,
+          emissive: 0x502040,
+          emissiveIntensity: 0.4,
+          transparent: true,
+          opacity: 0.92,
+          transmission: 0.12,
+          thickness: 0.08,
+          normalMap: _suckerNormalTex,
+          normalScale: new THREE.Vector2(0.45, 0.45),
+        })
+        : new THREE.MeshStandardMaterial({
+          color: 0x1a1a30,
+          roughness: 0.88,
+          metalness: 0,
+          emissive: 0x502040,
+          emissiveIntensity: 0.34,
+          transparent: true,
+          opacity: 0.88,
+          normalMap: _suckerNormalTex,
+          normalScale: new THREE.Vector2(0.35, 0.35),
+        });
 
       const mesh = new THREE.Mesh(tubeGeo, tentacleMat);
       mesh.position.y = -0.5;
@@ -414,7 +427,8 @@ export class DeepOne {
       { x: -0.3, y: 2.4, z: 0.7 },
     ];
 
-    const eyeMat = new THREE.MeshPhysicalMaterial({
+    const usePhysicalEyes = profile.eyeW >= 16;
+    const eyeMat = usePhysicalEyes ? new THREE.MeshPhysicalMaterial({
       color: 0x330000,
       emissive: 0x550000,
       emissiveIntensity: 2.2,
@@ -422,9 +436,15 @@ export class DeepOne {
       metalness: 0.1,
       clearcoat: 1.0,
       clearcoatRoughness: 0.02,
+    }) : new THREE.MeshStandardMaterial({
+      color: 0x330000,
+      emissive: 0x550000,
+      emissiveIntensity: 1.8,
+      roughness: 0.15,
+      metalness: 0.05,
     });
 
-    const cornealMat = profile.eyeW >= 16 ? new THREE.MeshPhysicalMaterial({
+    const cornealMat = usePhysicalEyes ? new THREE.MeshPhysicalMaterial({
       color: 0x000000,
       emissive: 0x220000,
       emissiveIntensity: 0.5,
@@ -687,14 +707,9 @@ export class DeepOne {
     return { group, tentacles: [], profile: LOD_PROFILE.far };
   }
 
-  // ─── LOD tier selection with hysteresis ──────────────────────────────────────
+  // ─── LOD tier selection matched to THREE.LOD thresholds ─────────────────────
 
   _getLodTierName(dist) {
-    const hyst = 4;
-    const prev = this._lastTierName;
-    if (prev === 'near' && dist < LOD_NEAR_DISTANCE + hyst) return 'near';
-    if (prev === 'medium' && dist > LOD_NEAR_DISTANCE - hyst && dist < LOD_MEDIUM_DISTANCE + hyst) return 'medium';
-    if (prev === 'far' && dist > LOD_MEDIUM_DISTANCE - hyst) return 'far';
     if (dist < LOD_NEAR_DISTANCE) return 'near';
     if (dist < LOD_MEDIUM_DISTANCE) return 'medium';
     return 'far';
