@@ -3,6 +3,7 @@ import {
   LOD_NEAR_DISTANCE,
   toStandardMaterial,
 } from "./lodUtils.js";
+import { qualityManager } from "../QualityManager.js";
 
 // -- Pre-allocated temps (zero per-frame allocations) -------------------------
 const _v3A = new THREE.Vector3();
@@ -67,7 +68,7 @@ const AMALGAM_LOD = {
   far: {
     coreSegs: [6, 5], // ~48 triangles: lightweight silhouette beyond fog plane
     skulls: 0,
-    limbs: 2,
+    limbs: 0,
     claws: 0,
     ribs: 0,
     spineSegs: 0,
@@ -887,6 +888,7 @@ export class Amalgam {
 
   update(dt, playerPos) {
     this.time += dt;
+    this._frameCount++;
     const tier = this._getVisibleTierName();
 
     // -- Movement: slow agonized drift ----------------------------------------
@@ -955,9 +957,17 @@ export class Amalgam {
       }
     }
     if (farTier.coreMesh?.material?.emissiveIntensity !== undefined) {
-      const farGlow = tier === "far" ? Math.sin(this.time * 1.8) * 0.18 : 0;
-      farTier.coreMesh.material.emissiveIntensity =
-        farTier.coreMesh.userData.baseEmissiveIntensity + farGlow;
+      const farGlowStep = qualityManager.tier === "ultra" ? 4 : 1;
+      const shouldUpdateFarGlow =
+        tier !== "far" ||
+        farGlowStep === 1 ||
+        this._frameCount % farGlowStep === 0;
+
+      if (shouldUpdateFarGlow) {
+        const farGlow = tier === "far" ? Math.sin(this.time * 1.8) * 0.18 : 0;
+        farTier.coreMesh.material.emissiveIntensity =
+          farTier.coreMesh.userData.baseEmissiveIntensity + farGlow;
+      }
       farTier.coreMesh.scale.setScalar(1);
     }
 
@@ -1049,7 +1059,6 @@ export class Amalgam {
     }
 
     // Secondary motion: connective web stretch with limb movement (near only, every 3rd frame)
-    this._frameCount++;
     if (
       tier === "near" &&
       nearTier.webs.length > 0 &&
@@ -1068,11 +1077,11 @@ export class Amalgam {
         _v3C.x += Math.sin(limbB.rotation.x) * 0.35;
         _v3C.z += Math.sin(limbB.rotation.z) * 0.35;
         // Midpoint pushed outward — web bows taut as limbs extend
-        _computeWebArchMidpoint(_v3A, _v3B, _v3C);
+        const webMidpoint = _computeWebArchMidpoint(_v3A, _v3B, _v3C);
         _updateWebGeometry(
           web.geometry,
           _v3B,
-          curve,
+          webMidpoint,
           _v3C,
           web.userData.tubeRadius,
           web.userData.tubeSegs,
