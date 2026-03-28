@@ -18,9 +18,11 @@ const SYMBIOTIC_CHECK_EVERY  = 60;    // frames between symbiotic proximity chec
 const _mat4A  = new THREE.Matrix4();
 const _mat4B  = new THREE.Matrix4();  // second matrix for opening ring update
 const _vec3A  = new THREE.Vector3();
-const _vec3B  = new THREE.Vector3();  // second temp for symbiotic proximity checks
+const _vec3B  = new THREE.Vector3();
+const _vec3C  = new THREE.Vector3();
 const _quatA  = new THREE.Quaternion();
 const _quatB  = new THREE.Quaternion();  // second quaternion for opening ring
+const _quatC  = new THREE.Quaternion();
 const _scaleA = new THREE.Vector3();
 const _scaleB = new THREE.Vector3();     // second scale for opening ring
 const _euler  = new THREE.Euler();
@@ -406,13 +408,17 @@ export class TubeCluster {
       _mat4A.compose(_vec3A, _quatA, _scaleA);
       openMesh.setMatrixAt(i, _mat4A);
 
-      tubeData.push({
+      const currentTube = {
         posX, posZ, centerY, openY,
         radius, height,
         phase: Math.random() * TWO_PI,
         rx: 0, rz: 0,
         vx: 0, vz: 0,
-      });
+        frills: [],
+        fringe: [],
+        worms: [],
+      };
+      tubeData.push(currentTube);
 
       // Crown frills (near + medium)
       if (profile.frills) {
@@ -425,6 +431,7 @@ export class TubeCluster {
           const fm = new THREE.Mesh(fg, frillMat);
           fm.position.set(posX, openY + 0.04, posZ);
           tierGroup.add(fm);
+          currentTube.frills.push(fm);
         }
       }
 
@@ -444,8 +451,18 @@ export class TubeCluster {
           fm2.rotation.z = brZ;
           fm2.rotation.x = brX;
           tierGroup.add(fm2);
-          fringeMeshes.push({ mesh: fm2, baseRotX: brX, baseRotZ: brZ, angle: fa,
-            phase: Math.random() * TWO_PI });
+          const fringeData = {
+            mesh: fm2,
+            baseRotX: brX,
+            baseRotZ: brZ,
+            angle: fa,
+            offsetX: Math.cos(fa) * fr,
+            offsetY: 0.09,
+            offsetZ: Math.sin(fa) * fr,
+            phase: Math.random() * TWO_PI,
+          };
+          fringeMeshes.push(fringeData);
+          currentTube.fringe.push(fringeData);
         }
       }
 
@@ -455,6 +472,7 @@ export class TubeCluster {
         if (wd) {
           this.worms.push(wd.mesh);  // backward-compat
           wormData.push(wd);
+          currentTube.worms.push(wd);
         }
       }
     }
@@ -846,8 +864,6 @@ totalEmissiveRadiance += vec3(0.2, 0.6, 1.0) * tcFresnel * 0.55;`
     if (tierName === 'near') {
       this._syncWormVisuals(t);
       this._updateFrillFeedingGlow(tier, t);
-      // Fringe flutter
-      this._updateFringe(t, tier);
       // Symbiotic interaction — occasional check
       if (this._frameCount % SYMBIOTIC_CHECK_EVERY === 0) {
         this._checkSymbioticInteraction();
@@ -896,27 +912,50 @@ totalEmissiveRadiance += vec3(0.2, 0.6, 1.0) * tcFresnel * 0.55;`
       tubeMesh.setMatrixAt(i, _mat4A);
 
       // Opening ring matrix — track the tilted tube top so rings stay attached
-      _vec3B.set(0, td.height * 0.5, 0).applyQuaternion(_quatA).add(_vec3A);
-      _euler.set(Math.PI * 0.5, 0, 0);
-      _quatB.setFromEuler(_euler);
-      _quatB.premultiply(_quatA);
-      _scaleB.set(td.radius * pulse, td.radius * pulse, td.radius * pulse);
-      _mat4B.compose(_vec3B, _quatB, _scaleB);
-      openMesh.setMatrixAt(i, _mat4B);
+      if (openMesh) {
+        _vec3B.set(0, td.height * 0.5, 0).applyQuaternion(_quatA).add(_vec3A);
+        _euler.set(Math.PI * 0.5, 0, 0);
+        _quatB.setFromEuler(_euler);
+        _quatB.premultiply(_quatA);
+        _scaleB.set(td.radius * pulse, td.radius * pulse, td.radius * pulse);
+        _mat4B.compose(_vec3B, _quatB, _scaleB);
+        openMesh.setMatrixAt(i, _mat4B);
+      }
+
+      for (const frill of td.frills) {
+        frill.position.copy(_vec3B);
+        frill.quaternion.copy(_quatA);
+        frill.scale.set(pulse, 1, pulse);
+      }
+
+      for (const fringeData of td.fringe) {
+        const flutter = Math.sin(t * 2.1 + fringeData.phase) * 0.15;
+        const localRotX = fringeData.baseRotX + flutter * Math.sin(fringeData.angle);
+        const localRotZ = fringeData.baseRotZ + flutter * Math.cos(fringeData.angle);
+
+        _vec3C.set(
+          fringeData.offsetX * pulse,
+          fringeData.offsetY,
+          fringeData.offsetZ * pulse
+        ).applyQuaternion(_quatA).add(_vec3B);
+
+        _euler.set(localRotX, 0, localRotZ);
+        _quatC.setFromEuler(_euler);
+        _quatC.premultiply(_quatA);
+
+        fringeData.mesh.position.copy(_vec3C);
+        fringeData.mesh.quaternion.copy(_quatC);
+      }
+
+      for (const wormData of td.worms) {
+        wormData.mesh.position.copy(_vec3B);
+        wormData.mesh.quaternion.copy(_quatA);
+        wormData.mesh.scale.set(pulse, 1, pulse);
+      }
     }
 
     tubeMesh.instanceMatrix.needsUpdate = true;
     openMesh.instanceMatrix.needsUpdate = true;
-  }
-
-  // ── Fringe flutter: per-fin rotation driven by current simulation ─────────
-
-  _updateFringe(t, tier) {
-    for (const fd of tier.fringeMeshes) {
-      const flutter = Math.sin(t * 2.1 + fd.phase) * 0.15;
-      fd.mesh.rotation.x = fd.baseRotX + flutter * Math.sin(fd.angle);
-      fd.mesh.rotation.z = fd.baseRotZ + flutter * Math.cos(fd.angle);
-    }
   }
 
   _updateFrillFeedingGlow(tier, t) {
@@ -943,21 +982,31 @@ totalEmissiveRadiance += vec3(0.2, 0.6, 1.0) * tcFresnel * 0.55;`
 
   // ── Symbiotic interaction: worm-tip proximity causes recoil ──────────────
 
+  _getWormTipLocalPosition(wormData, target) {
+    target.lerpVectors(wormData.pts[0], wormData.extTip, wormData.emergencePhase);
+    const sweep = wormData.emergencePhase;
+    target.x += Math.sin(wormData.feedingPhase) * 0.09 * sweep;
+    target.z += Math.sin(wormData.feedingPhase * 2.0 + 1.0) * 0.06 * sweep;
+    return target;
+  }
+
+  _getWormTipWorldPosition(wormData, target) {
+    this._getWormTipLocalPosition(wormData, target);
+    wormData.mesh.updateMatrixWorld(true);
+    return wormData.mesh.localToWorld(target);
+  }
+
   _checkSymbioticInteraction() {
     const worms = this._wormData;
     for (let i = 0; i < worms.length; i++) {
       const wa = worms[i];
       if (wa.state !== 'feeding') continue;
-      const ax = wa.mesh.position.x + wa.extTip.x * wa.emergencePhase;
-      const ay = wa.mesh.position.y + wa.extTip.y * wa.emergencePhase;
-      const az = wa.mesh.position.z + wa.extTip.z * wa.emergencePhase;
+      this._getWormTipWorldPosition(wa, _vec3A);
       for (let j = i + 1; j < worms.length; j++) {
         const wb = worms[j];
         if (wb.state !== 'feeding') continue;
-        const bx = wb.mesh.position.x + wb.extTip.x * wb.emergencePhase;
-        const by = wb.mesh.position.y + wb.extTip.y * wb.emergencePhase;
-        const bz = wb.mesh.position.z + wb.extTip.z * wb.emergencePhase;
-        const d2 = (ax - bx) ** 2 + (ay - by) ** 2 + (az - bz) ** 2;
+        this._getWormTipWorldPosition(wb, _vec3B);
+        const d2 = _vec3A.distanceToSquared(_vec3B);
         if (d2 < SYMBIOTIC_PROXIMITY_SQ) {
           // Recoil: the contacted worm retracts, then re-emerges after a short delay
           wb.pendingRecoilDelay = MIN_REEMERGENCE_DELAY + Math.random() * 0.8;
@@ -982,7 +1031,7 @@ totalEmissiveRadiance += vec3(0.2, 0.6, 1.0) * tcFresnel * 0.55;`
 
       wd.tipMesh.visible = wd.emergencePhase > 0.05;
       if (wd.tipMesh.visible) {
-        wd.tipMesh.position.lerpVectors(wd.pts[0], wd.extTip, wd.emergencePhase);
+        this._getWormTipLocalPosition(wd, wd.tipMesh.position);
         const s = wd.emergencePhase;
         wd.tipMesh.scale.set(s, s, s);
         wd.tipMat.emissiveIntensity = 1.0 + wd.emergencePhase
