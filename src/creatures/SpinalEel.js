@@ -281,6 +281,7 @@ function _applyOrganicShader(material, uniformRefs, options = {}) {
       `float eelRim = pow(1.0 - max(dot(normalize(vEelWorldNormal), normalize(vEelViewDir)), 0.0), 3.0);
        float eelStripe = exp(-pow(vEelUv.y - 0.24, 2.0) * 180.0) + exp(-pow(vEelUv.y - 0.76, 2.0) * 180.0);
        float eelJawPulse = (1.0 - vEelProgress) * (0.5 + 0.5 * sin(uTime * 5.0));
+       // Color constants are linear-space emissive contributions; OutputPass handles sRGB encoding
        vec3 eelGlowColor = vec3(0.08, 0.55, 0.4) * eelStripe * uGlowPulse;
        eelGlowColor += vec3(0.16, 0.22, 0.08) * eelJawPulse * uJawGlow;
        gl_FragColor.rgb += eelGlowColor + eelRim * (vec3(0.08, 0.2, 0.16) * uRimStrength + eelGlowColor * 0.35);
