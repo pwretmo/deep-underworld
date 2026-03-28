@@ -125,10 +125,21 @@ Cloud agents do not use worktrees — they work directly on their `copilot/` bra
 Local agents **must** use the GitHub MCP server tools (`mcp_io_github_git_*`) for all GitHub operations:
 
 - Creating branches, PRs, reading files, searching code, merging PRs, etc.
-- **Never** use the `gh` CLI locally — it may not be installed or authenticated.
+- **Never** use the `gh` CLI locally unless the user explicitly asks for it. The only standing exception is the optional `gh api graphql` path in `.github/skills/review-thread-resolution/SKILL.md` when the user explicitly wants review threads resolved.
 - The MCP tools use the parameters `owner: "pwretmo"` and `repo: "deep-underworld"`.
 
 GitHub cloud agents (Copilot coding agent) use their built-in GitHub API access instead.
+
+### GitHub Review Thread Follow-Up
+
+GitHub review-thread state is part of merge readiness in this repository.
+
+- Preferred policy: when blocking review feedback has been addressed, resolve the review thread.
+- If GitHub MCP read/write tools do not expose direct `resolveReviewThread` / `unresolveReviewThread` operations, use `.github/skills/review-thread-resolution/SKILL.md` and its `gh api graphql` path to resolve the thread when possible.
+- If thread resolution is not possible, open blocking review conversations are acceptable if the underlying fix is verified and a reply has been posted in the thread.
+- Do not depend on browser automation for merge-critical thread handling.
+- The workflow for this lives in `.github/skills/review-thread-resolution/SKILL.md`.
+- Before approving or merging, re-poll reviews and review comments to confirm the feedback is addressed and that the thread has either been resolved or acknowledged with an in-thread reply.
 
 ### PR Lifecycle
 
@@ -171,12 +182,13 @@ Four agent roles are defined in `.github/agents/`:
 
 Supporting skills in `.github/skills/`:
 
-| Skill             | Folder               | Purpose                                                       |
-| ----------------- | -------------------- | ------------------------------------------------------------- |
-| Worktree Workflow | `worktree-workflow/` | How to create, use, and clean up worktrees + push via git/MCP |
-| Review Workflow   | `review-workflow/`   | How to read PR diffs, post reviews, and manage labels via MCP |
-| Merge Workflow    | `merge-workflow/`    | How to find approved PRs, squash-merge, verify, and clean up  |
-| UX Testing        | `ux-testing/`        | How to play-test the game in a browser and dispatch fixes     |
+| Skill                    | Folder                      | Purpose                                                                                                     |
+| ------------------------ | --------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Worktree Workflow        | `worktree-workflow/`        | How to create, use, and clean up worktrees + push via git/MCP                                               |
+| Review Workflow          | `review-workflow/`          | How to read PR diffs, post reviews, and manage labels via MCP                                               |
+| Review Thread Resolution | `review-thread-resolution/` | How to verify addressed review feedback, resolve threads when possible, and fall back to an in-thread reply |
+| Merge Workflow           | `merge-workflow/`           | How to find approved PRs, squash-merge, verify, and clean up                                                |
+| UX Testing               | `ux-testing/`               | How to play-test the game in a browser and dispatch fixes                                                   |
 
 ## Orchestrator Patterns (Local VS Code Only)
 
@@ -222,9 +234,11 @@ BLOCKING RULES:
 1. Reject any PR that removes, disables, or downgrades existing functionality to fix a bug. The fix must preserve the feature and address the root cause.
 2. If the PR references a GitHub issue (Fixes #X), verify that ALL requirements from that issue are implemented. Partial implementations are blocking — list the missing requirements.
 3. Treat external Copilot review comments/threads as blocking feedback until verified fixed. Do not approve while any Copilot-raised issue remains unresolved.
+4. If code changes are correct but blocking review conversations remain open, use `.github/skills/review-thread-resolution/SKILL.md` to resolve the thread when possible. If that cannot be done, post a reply in the thread before adding `agent-approved`.
 See Engineering Quality Standards in copilot-instructions.md.
 
 Follow the review-workflow skill in .github/skills/review-workflow/SKILL.md.
+Use the review-thread-resolution skill in .github/skills/review-thread-resolution/SKILL.md if fixed review conversations still need to be resolved or acknowledged before approval.
 If issues found: post REQUEST_CHANGES review, add "agent-reviewed" label, return the list of issues.
 If approved: post APPROVE review, add "agent-reviewed" and "agent-approved" labels.
 When adding labels, use read-merge-write reconciliation: read current labels first, merge, then write — never overwrite with a bare list (see review-workflow skill).
@@ -265,8 +279,9 @@ Fix the issues, commit, and push. Do not create a new PR.
 You are a Merger agent for the deep-underworld repo (owner: pwretmo, repo: deep-underworld).
 
 Follow the merge-workflow skill in .github/skills/merge-workflow/SKILL.md.
+If blocking review conversations remain open but are already fixed in code, use .github/skills/review-thread-resolution/SKILL.md and resolve the thread when possible; otherwise ensure a reply has been posted in the thread before merge.
 Find all open PRs labeled "agent-approved" and squash-merge them one at a time.
-Before merging each PR, re-poll reviews and review comments and confirm there are no unresolved Copilot comments/threads and no outstanding REQUEST_CHANGES from any reviewer.
+Before merging each PR, re-poll reviews and review comments and confirm there are no unaddressed Copilot comments/threads and no outstanding REQUEST_CHANGES from any reviewer.
 After each merge, pull main locally and run npm run build to verify.
 Clean up worktrees for any merged local branches.
 ```

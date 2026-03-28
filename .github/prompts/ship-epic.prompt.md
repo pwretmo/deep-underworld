@@ -31,7 +31,7 @@ implement -> review -> fix loop (if needed) -> merge -> `npm run build` verify.
 3. Enforce engineering rule: never remove, disable, or downgrade features to fix bugs; fix root cause.
 4. Open PR labeled `agent-work` with `Fixes #<sub-issue-number>` in the PR body.
 5. Dispatch Reviewer.
-6. If review requests changes (including unresolved Copilot comments/threads), re-dispatch Local Worker on the same PR branch and repeat review.
+6. If review requests changes (including unaddressed Copilot comments/threads), re-dispatch Local Worker on the same PR branch and repeat review.
 7. After approval, dispatch Merger to squash-merge.
 8. Pull/update `main` and run `npm run build`.
 9. If build fails, stop immediately and report blocker details.

@@ -16,8 +16,8 @@ ${input:task:Describe the change you want}
 Execute these steps sequentially:
 
 1. **Implement** — Dispatch a Local Worker to implement the change in an isolated worktree, validate the build, push, and open a PR with the `agent-work` label.
-2. **Review** — Dispatch a Reviewer to review the PR, including external Copilot review comments/threads. If any issues are requested (human reviewer, local reviewer, or Copilot comments), continue to step 3. If approved, skip to step 4.
+2. **Review** — Dispatch a Reviewer to review the PR, including external Copilot review comments/threads. If any issues are requested (human reviewer, local reviewer, or Copilot comments), continue to step 3. If blocking review threads are already fixed in code but still open, use the review-thread-resolution skill to resolve them when possible, or otherwise post a reply in the thread before approval. If approved, skip to step 4.
 3. **Fix** — Re-dispatch the Local Worker with all review findings, including Copilot comments. It fixes the issues, commits, and pushes. Then go back to step 2 for re-review.
-4. **Merge** — Dispatch the Merger to squash-merge the approved PR into `main`, verify the build, and clean up the worktree. Merge is only allowed when there are no unresolved Copilot comments/threads and no outstanding `REQUEST_CHANGES` from any reviewer.
+4. **Merge** — Dispatch the Merger to squash-merge the approved PR into `main`, verify the build, and clean up the worktree. If remaining addressed review conversations are still open, use the review-thread-resolution skill and resolve them when possible, or otherwise ensure a reply has been posted in the thread before merging. Merge is only allowed when there are no unaddressed Copilot comments/threads and no outstanding `REQUEST_CHANGES` from any reviewer.
 
 Use the dispatch templates from `.github/copilot-instructions.md` for each step.

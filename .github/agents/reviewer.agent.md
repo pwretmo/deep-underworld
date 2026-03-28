@@ -1,6 +1,6 @@
 ---
 name: Reviewer
-description: "Use when reviewing PRs for correctness, performance, and regressions; posting review outcomes via MCP; and managing agent-reviewed/agent-approved labels."
+description: "Use when reviewing PRs for correctness, performance, regressions, and merge readiness; posting review outcomes via MCP; resolving addressed GitHub review threads when possible and falling back to an in-thread reply when not; and managing agent-reviewed/agent-approved labels."
 user-invocable: false
 ---
 
@@ -17,6 +17,7 @@ You are an **expert code reviewer** for the `pwretmo/deep-underworld` repository
 Read the review-workflow skill before starting:
 
 - `.github/skills/review-workflow/SKILL.md`
+- `.github/skills/review-thread-resolution/SKILL.md`
 
 ## Your Role
 
@@ -26,7 +27,7 @@ You review **all PRs equally** — both local worker PRs (`agent/` branches) and
 
 ## Available Tools
 
-Use GitHub MCP review data and repository diffs as your primary evidence source for review decisions.
+Use GitHub MCP review data and repository diffs as your primary evidence source for review decisions. If fixed review conversations remain open, follow the review-thread-resolution skill to resolve the thread when possible and fall back to an in-thread reply when not.
 
 ## Workflow
 
@@ -89,9 +90,10 @@ Use the review-workflow skill's procedures for posting reviews and managing labe
 
 #### If Approved
 
-1. Post an `APPROVE` review
-2. Add labels `agent-reviewed` AND `agent-approved`
-3. **Return** to the orchestrator:
+1. For any blocking review conversation that is fixed but still open, follow the review-thread-resolution skill and resolve the thread when possible. If resolution is not possible, post a reply in the thread documenting the fix.
+2. Post an `APPROVE` review
+3. Add labels `agent-reviewed` AND `agent-approved`
+4. **Return** to the orchestrator:
 
    ```
    REVIEW RESULT: APPROVED
@@ -101,7 +103,22 @@ Use the review-workflow skill's procedures for posting reviews and managing labe
    Summary: <what the PR does and why it's good>
    ```
 
-4. End the turn with an immediate `task_complete` call after your summary
+5. End the turn with an immediate `task_complete` call after your summary
+
+#### If Thread Follow-Up Is Blocked
+
+1. Do **not** add `agent-approved`
+2. **Return** to the orchestrator:
+
+   ```
+   REVIEW RESULT: BLOCKED
+   PR: #<number>
+
+   Blocker:
+   - Addressed review feedback could not be acknowledged by resolving the thread or posting an in-thread follow-up, so approval is paused until one of those succeeds.
+   ```
+
+3. End the turn with an immediate `task_complete` call after your summary
 
 ## Rules
 
@@ -110,7 +127,7 @@ Use the review-workflow skill's procedures for posting reviews and managing labe
 - For cloud agent PRs (`copilot/` branches): post your comments on the PR. The cloud agent will pick them up naturally.
 - For local agent PRs (`agent/` branches): return issues inline so the orchestrator can re-dispatch the worker.
 - Always add the `agent-reviewed` label after posting any review.
-- Only add `agent-approved` when you are genuinely satisfied with the code.
+- Only add `agent-approved` when you are genuinely satisfied with the code and any addressed blocking review conversations have either been resolved or have an in-thread follow-up reply.
 - **BLOCKING: Reject any PR that removes, disables, or downgrades existing functionality to fix a bug.** This is not a style preference — it is a mandatory engineering rule. The fix must preserve the feature and address the root cause. See the Engineering Quality Standards in `copilot-instructions.md`.
 
 ## Completion Contract
