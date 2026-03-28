@@ -49,9 +49,29 @@ Parameters:
 
 ### Blocking rule
 
-- Any unresolved or unaddressed Copilot comment is a blocking issue.
+- Any unaddressed Copilot comment is a blocking issue.
 - A PR cannot be approved while any Copilot-raised request remains open or unaddressed.
-- If review API metadata lacks explicit thread state, use conservative behavior: treat recent Copilot comments as unresolved until the corresponding code change is verified.
+- If review API metadata lacks explicit thread state, treat an open thread as addressed only when the corresponding code change is verified and the thread has either been resolved or acknowledged with a follow-up reply.
+
+### Resolving Or Replying On Addressed Threads
+
+If the code fix is present but a blocking review conversation is still open, use `.github/skills/review-thread-resolution/SKILL.md` to resolve the thread with `gh api graphql` first. If resolution cannot be completed, post a reply in the thread before approving the PR.
+
+In this repo, `gh api graphql` resolution is the preferred first path. The in-thread reply is the fallback when resolution cannot be completed.
+
+Use the top-level review comment from the thread for the fallback reply, and explain what changed.
+
+Example:
+
+```
+Tool: mcp_io_github_git_add_reply_to_pull_request_comment
+Parameters:
+  owner: "pwretmo"
+  repo: "deep-underworld"
+  pullNumber: <number>
+  commentId: <top-level review comment id>
+  body: "Addressed in the latest commit: <brief explanation of the fix>."
+```
 
 ## Verifying Issue Completeness
 
@@ -147,7 +167,7 @@ Parameters:
 
 ### Approve
 
-When the code looks good:
+When the code looks good and blocking review feedback is addressed:
 
 ```
 Tool: mcp_io_github_git_pull_request_review_write
@@ -228,7 +248,8 @@ GitHub may be configured with an external Copilot reviewer that automatically re
 
 - **Poll before reviewing**: The orchestrator should use `mcp_io_github_git_pull_request_read` with `method: "get_reviews"` and `method: "get_review_comments"` to check for external reviews before dispatching the local Reviewer.
 - **Don't duplicate feedback**: If the external reviewer already flagged an issue, the local Reviewer should skip it and focus on anything the external reviewer missed.
-- **Merge readiness**: A PR needs no outstanding `REQUEST_CHANGES` from **any** reviewer (external or local) before it can be merged.
+- **Resolve addressed threads with `gh api graphql` first**: If a blocking external review thread is fixed but still open, use `.github/skills/review-thread-resolution/SKILL.md` and attempt `gh api graphql` resolution before any fallback. If that fails, post a reply in the thread before approval or merge.
+- **Merge readiness**: A PR needs no outstanding `REQUEST_CHANGES` from **any** reviewer (external or local) and no unaddressed blocking review conversations before it can be merged.
 - **Re-poll after fixes**: When a worker pushes fixes, the external reviewer may run again. The orchestrator should poll for new external reviews before re-dispatching the local Reviewer.
 
 ### Approval restrictions on self-authored PRs
@@ -284,4 +305,14 @@ PR: #<number>
 
 Issue completeness: All requirements from #<issue> verified. ✅  (or: No linked issue.)
 Summary: <brief description of what the PR does well>
+```
+
+### On Thread-Follow-Up Blocker
+
+```
+REVIEW RESULT: BLOCKED
+PR: #<number>
+
+Blocker:
+- Addressed review feedback could not be acknowledged by resolving the thread or posting an in-thread follow-up, so approval is paused until one of those succeeds.
 ```

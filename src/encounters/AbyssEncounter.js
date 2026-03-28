@@ -50,6 +50,23 @@ export class AbyssEncounter {
     this._entityDriftDir = new THREE.Vector3();
   }
 
+  reset(scene) {
+    this._despawnEntity(scene);
+    this.state = State.IDLE;
+    this.stateTime = 0;
+    this.completed = false;
+    this._savedFogNear = 0;
+    this._savedFogFar = 0;
+    this._savedFogColor.set(0x000000);
+    this._savedAmbientIntensity = 0;
+    this._envFogNear = 0;
+    this._envFogFar = 0;
+    this._envAmbient = 0;
+    this._entityStartPos.set(0, 0, 0);
+    this._entityEndPos.set(0, 0, 0);
+    this._entityDriftDir.set(0, 0, 0);
+  }
+
   update(delta, depth, player, scene, fog, ambientLight, hud, audio) {
     if (this.completed) return;
 

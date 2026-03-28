@@ -160,6 +160,9 @@ export class Game {
     this.gameOverOverlay = document.getElementById("game-over");
     this.controlsHelpOverlay = document.getElementById("controls-help");
     this.controlsHelpVisible = false;
+    this._lockLostDuringDescent = false;
+    this._startupToken = 0;
+    this._descentFadeTimer = null;
     this.descentOverlay = document.getElementById("descent-transition");
     this.descentProgressBar = document.getElementById("descent-progress-bar");
     this._descentItems = document.getElementById("descent-items");
@@ -202,6 +205,17 @@ export class Game {
     });
 
     document.addEventListener("keydown", (e) => {
+      const pauseVisible = this.pauseOverlay.classList.contains("visible");
+
+      if (
+        e.code === "KeyR" &&
+        (this.running || this.startPreparing || pauseVisible || this.gameOver)
+      ) {
+        e.preventDefault();
+        this.restart();
+        return;
+      }
+
       // Autoplay mode: ESC toggles pause, but only after priming is complete
       if (
         e.code === "Escape" &&
@@ -209,7 +223,6 @@ export class Game {
         !this.gameOver &&
         !this.startPreparing
       ) {
-        const pauseVisible = this.pauseOverlay.classList.contains("visible");
         if (this.running || pauseVisible) {
           this._toggleAutoplayPause();
         }
@@ -332,19 +345,45 @@ export class Game {
   }
 
   restart() {
-    this.hud.closeLocator();
+    this._startupToken++;
+    if (this._descentFadeTimer !== null) {
+      clearTimeout(this._descentFadeTimer);
+      this._descentFadeTimer = null;
+    }
+
+    this.preload.cancel("restart");
+    this.hud.resetRuntimeState();
+    this.abyssEncounter.reset(this.scene);
     this.gameOver = false;
     this.flashlightOn = false;
+    this.maxDepth = 0;
+    this.depth = 0;
+    this.player.depth = 0;
+    this.fps = 0;
+    this._fpsFrames = 0;
+    this._fpsTime = 0;
     this.pendingStart = false;
     this.running = false;
     this.startPreparing = false;
-    this.gameOverOverlay.classList.add("visible");
+    this._lockLostDuringDescent = false;
+    this._startTransition.startRequested = false;
+    this._startTransition.started = false;
+    this.gameOverOverlay.classList.remove("visible");
+    this.controlsHelpVisible = false;
+    this.controlsHelpOverlay.classList.remove("visible");
     this.player.reset();
     this.creatures.reset();
     this.player.flashlight.visible = false;
     this.pauseOverlay.classList.remove("visible");
     this._descentActive = false;
+    this._descentPhase = "idle";
+    this._descentLastCreatureCount = 0;
+    this._descentLastTeaseTime = 0;
     this.descentOverlay.classList.remove("visible", "fade-out");
+    this._updateEnvironmentForDepth(0);
+    this._targetExposure = this.renderTuning.exposure.surface;
+    this.renderer.toneMappingExposure = this._targetExposure;
+    this.underwaterEffect.applyDepthScaleCap(0);
     if (this.autoplay) {
       this._autoplayState = this._createAutoplayState();
       this.startAutoplay();
@@ -393,6 +432,7 @@ export class Game {
   async _primeAndEnterGameplay(logMessage) {
     if (this.running || this.startPreparing || this.gameOver) return;
 
+    const startupToken = ++this._startupToken;
     this.startPreparing = true;
     this._startTransition.startRequested = false;
     this._startTransition.started = true;
@@ -414,18 +454,26 @@ export class Game {
     this.underwaterEffect.beginStartupGuard();
 
     // Initialize Rapier WASM physics before terrain/player use it
-    this.physicsWorld = new PhysicsWorld();
-    await this.physicsWorld.init();
-    this.terrain.setPhysicsWorld(this.physicsWorld);
-    this.player.setPhysicsWorld(this.physicsWorld);
+    const physicsWorld = new PhysicsWorld();
+    await physicsWorld.init();
+    if (startupToken !== this._startupToken) return;
+
+    this.physicsWorld = physicsWorld;
+    this.terrain.setPhysicsWorld(physicsWorld);
+    this.player.setPhysicsWorld(physicsWorld);
 
     this._descentPhase = 'shaders';
     this._updateDescentProgress();
 
     const primeSummary = await this.preload.primeStartBaseline({
-      onProgress: (data) => this._updateDescentProgress(data),
+      onProgress: (data) => {
+        if (startupToken === this._startupToken) {
+          this._updateDescentProgress(data);
+        }
+      },
     });
 
+    if (startupToken !== this._startupToken) return;
     if (this.gameOver) {
       this.startPreparing = false;
       return;
@@ -444,14 +492,17 @@ export class Game {
     }
     this.clock.start();
     await this._warmOpeningFrames();
+    if (startupToken !== this._startupToken) return;
 
     // Dismiss descent overlay only after the first live gameplay frames have
     // rendered, so the player does not inherit opening-frame shader stalls.
     this._descentActive = false;
     this.descentOverlay.classList.add("fade-out");
-    setTimeout(() => {
+    this._descentFadeTimer = setTimeout(() => {
+      if (startupToken !== this._startupToken) return;
       this.descentOverlay.classList.remove("visible");
       this.descentOverlay.classList.remove("fade-out");
+      this._descentFadeTimer = null;
     }, 800);
 
     console.log(`[deep-underworld] ${logMessage}`, primeSummary);
@@ -990,6 +1041,8 @@ export class Game {
         depthClearMargin: 1.5, // must beat the prior local max by this much to clear a stall
         depthGainMin: 0.15, // metres gained to count as progress
         posGainMin: 0.25, // world-unit change to count as progress
+        recoveryGraceDuration: 4.5,
+        recoveryGraceTime: 0,
       },
 
       // Recovery state
@@ -1049,11 +1102,20 @@ export class Game {
     const rec = s.recover;
 
     // ─── Progress watchdog (issue #102) ───────────────────────────────────
+    wd.recoveryGraceTime = Math.max(0, wd.recoveryGraceTime - dt);
     wd.checkElapsed += dt;
     if (wd.checkElapsed >= wd.checkInterval) {
       wd.checkElapsed = 0;
       const px = this.player.position.x;
       const pz = this.player.position.z;
+      if (wd.recoveryGraceTime > 0) {
+        wd.stallTime = 0;
+        wd.depthStallTime = 0;
+        wd.lastDepth = depth;
+        wd.lastClearDepth = depth;
+        wd.lastX = px;
+        wd.lastZ = pz;
+      } else {
       const depthGain = depth - wd.lastDepth;
       const posChange = Math.sqrt((px - wd.lastX) ** 2 + (pz - wd.lastZ) ** 2);
       const depthProgress = depthGain >= wd.depthGainMin;
@@ -1074,9 +1136,10 @@ export class Game {
       wd.lastZ = pz;
 
       // Trigger recovery when stalled long enough and not already recovering
+      const stalledOnDepth = wd.depthStallTime >= wd.depthStallThreshold;
       if (
         (wd.stallTime >= wd.stallThreshold ||
-          wd.depthStallTime >= wd.depthStallThreshold) &&
+          stalledOnDepth) &&
         !rec.active
       ) {
         const samePocket =
@@ -1099,9 +1162,10 @@ export class Game {
         rec.lastTriggerZ = pz;
         wd.stallTime = 0;
         wd.depthStallTime = 0;
+        wd.recoveryGraceTime = 0;
         this.player.velocity.set(0, 0, 0);
         let nudgeMode = "none";
-        if (samePocket && rec.attempts >= 2) {
+        if (stalledOnDepth || (samePocket && rec.attempts >= 2)) {
           this.player.autoplayCollisionBypassTimer = Math.max(
             this.player.autoplayCollisionBypassTimer || 0,
             rec.duration + 1,
@@ -1121,6 +1185,7 @@ export class Game {
           nudgeMode,
         });
       }
+      }
     }
 
     // ─── Recovery steering (issue #102) ───────────────────────────────────
@@ -1128,6 +1193,12 @@ export class Game {
       rec.timer += dt;
       if (rec.timer >= rec.duration) {
         rec.active = false;
+        wd.recoveryGraceTime = wd.recoveryGraceDuration;
+        wd.checkElapsed = 0;
+        wd.lastDepth = depth;
+        wd.lastClearDepth = depth;
+        wd.lastX = this.player.position.x;
+        wd.lastZ = this.player.position.z;
         console.log("[autoplay] Recovery complete — resuming descent");
       }
     }
