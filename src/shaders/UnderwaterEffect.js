@@ -400,6 +400,9 @@ export class UnderwaterEffect {
     this._bloomTargetStrength = this.tuning.bloom.surfaceStrength;
     this._bloomTargetThreshold = this.tuning.bloom.surfaceThreshold;
     this._bloomTargetRadius = this.tuning.bloom.radius * 2.0;
+    this._lastDepth = 0;
+    this._lastFlashlightOn = false;
+    this._lastExposure = 0.76;
     this._rebuildScaleLadder();
     this._applyComposerScale(true);
 
@@ -649,6 +652,9 @@ export class UnderwaterEffect {
 
   _updatePassState(depth, flashlightOn, exposure) {
     this.time += 0.016;
+    this._lastDepth = depth;
+    this._lastFlashlightOn = flashlightOn;
+    this._lastExposure = exposure;
     this.underwaterPass.uniforms.time.value = this.time;
     this.underwaterPass.uniforms.depth.value = depth;
     this.underwaterPass.uniforms.exposure.value = exposure;
@@ -814,6 +820,15 @@ export class UnderwaterEffect {
   }
 
   getDiagnostics() {
+    const extinction = this.underwaterPass.uniforms.extinction.value;
+    const scatterColor = this.underwaterPass.uniforms.scatterColor.value;
+    const bloomParams = this.underwaterPass.uniforms.bloomParams.value;
+    const transmittance = {
+      r: Math.exp(-extinction.x * this._lastDepth),
+      g: Math.exp(-extinction.y * this._lastDepth),
+      b: Math.exp(-extinction.z * this._lastDepth),
+    };
+    const scatterMix = 1 - Math.exp(-this.underwaterPass.uniforms.scatterDensity.value * this._lastDepth);
     const emaPressure = this._renderEmaMs > this.tuning.performance.emergencyThresholdMs
       ? 'emergency'
       : this._renderEmaMs > this.tuning.performance.degradeThresholdMs
@@ -837,6 +852,36 @@ export class UnderwaterEffect {
       renderEmaMs: this._renderEmaMs,
       lastRenderMs: this._lastRenderMs,
       bloomSuspended: this._bloomSuspended,
+      reducedShaderMode: this._reducedShaderMode,
+      depthScaleCap: this._depthScaleCap,
+      postProcessMaxScale: this._postProcessMaxScale,
+      depth: this._lastDepth,
+      flashlightOn: this._lastFlashlightOn,
+      exposure: this._lastExposure,
+      extinction: {
+        r: extinction.x,
+        g: extinction.y,
+        b: extinction.z,
+      },
+      transmittance,
+      scatter: {
+        color: {
+          r: scatterColor.x,
+          g: scatterColor.y,
+          b: scatterColor.z,
+        },
+        density: this.underwaterPass.uniforms.scatterDensity.value,
+        mix: scatterMix,
+      },
+      bloom: {
+        mode: this._bloomPass ? 'unreal' : 'shader',
+        passEnabled: !!this._bloomPass && !this._bloomSuspended,
+        shaderStrength: bloomParams.x,
+        shaderThreshold: bloomParams.y,
+        shaderRadius: bloomParams.z,
+        passStrength: this._bloomPass?.strength ?? null,
+        passThreshold: this._bloomPass?.threshold ?? null,
+      },
       emaPressure,
       lastRenderPressure,
       renderPressure: emergency ? 'emergency' : pressured ? 'pressured' : 'normal',

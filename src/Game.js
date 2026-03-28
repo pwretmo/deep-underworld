@@ -220,7 +220,7 @@ export class Game {
         return;
       }
       if (
-        e.code === "KeyV" &&
+        (e.code === "KeyV" || (e.code === "KeyL" && e.shiftKey)) &&
         (this.running || this.pauseOverlay.classList.contains("visible"))
       ) {
         this.hud.toggleDiagnostics();
@@ -919,7 +919,6 @@ export class Game {
         this.player.position,
         this.camera,
       );
-      this.hud.updateDiagnostics(this._getDiagnosticsSnapshot());
       this.hud.updateBackgroundLoading(this.preload.isDescentAssistActive());
 
       // Evaluate depth-zone base, let encounter set modifiers, then apply
@@ -963,6 +962,10 @@ export class Game {
         flashlightOn: this.flashlightOn,
         exposure: this.renderer.toneMappingExposure,
       });
+
+      if (this.hud.isDiagnosticsVisible()) {
+        this.hud.updateDiagnostics(this._getDiagnosticsSnapshot());
+      }
     } catch (err) {
       console.error("[deep-underworld] Animation frame error:", err);
     }
@@ -1056,8 +1059,45 @@ export class Game {
         y: this.player.position.y,
         z: this.player.position.z,
       },
+      lighting: this.lightingPolicy.getDiagnostics(),
+      pointLights: this._getPointLightBudgetDiagnostics(),
       graphics: this.graphicsDiagnostics,
       postProcess: this.underwaterEffect.getDiagnostics(),
+    };
+  }
+
+  _getPointLightBudgetDiagnostics() {
+    const budget = this._pointLightBudget;
+    const depthBlend = THREE.MathUtils.smoothstep(this.depth, 35, 220);
+    const maxLights = Math.round(
+      THREE.MathUtils.lerp(budget.shallowMax, budget.deepMax, depthBlend),
+    );
+    const managedCategories = {};
+    const activeCategories = {};
+    let managedCount = 0;
+    let activeCount = 0;
+
+    for (const light of budget.managedLights) {
+      if (!light.parent) continue;
+      managedCount++;
+      const category = light.userData.duwCategory ?? 'uncategorized';
+      managedCategories[category] = (managedCategories[category] ?? 0) + 1;
+
+      if ((light.userData.duwTargetIntensity ?? 0) > 0.01) {
+        activeCount++;
+        activeCategories[category] = (activeCategories[category] ?? 0) + 1;
+      }
+    }
+
+    return {
+      managedCount,
+      activeCount,
+      maxLights,
+      transitionBand: budget.transitionBand,
+      scanInterval: budget.scanInterval,
+      retargetInterval: budget.retargetInterval,
+      managedCategories,
+      activeCategories,
     };
   }
 
