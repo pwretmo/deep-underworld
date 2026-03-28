@@ -45,19 +45,23 @@ export class Flora {
       emissiveIntensity: 0.8,
       transparent: true,
       opacity: 0.7,
+      roughness: 0.3,
     });
 
-    // Shared geometry/materials for instanced tube worms
+    // Shared geometry/materials for instanced tube worms — wet organic look
     this._tubeGeo = new THREE.CylinderGeometry(0.04, 0.06, 1, 6);
     this._tubeMat = new THREE.MeshStandardMaterial({
       color: 0x884422,
-      roughness: 0.9,
+      roughness: 0.4,
+      metalness: 0.05,
     });
     this._tipGeo = new THREE.SphereGeometry(0.12, 6, 6);
     this._tipMat = new THREE.MeshStandardMaterial({
       color: 0xff3300,
       emissive: 0xff2200,
-      emissiveIntensity: 0.3,
+      emissiveIntensity: 0.4,
+      roughness: 0.25,
+      metalness: 0.1,
     });
 
     window.addEventListener('qualitychange', (e) => {
@@ -188,11 +192,25 @@ export class Flora {
     const geo = new THREE.TubeGeometry(curve, kelpData.segments, kelpData.radius, 4, false);
     const mat = new THREE.MeshStandardMaterial({
       color: new THREE.Color(0.1, kelpData.green, 0.05),
-      roughness: 0.8,
+      roughness: 0.5,
+      metalness: 0.02,
       transparent: true,
-      opacity: 0.8,
+      opacity: 0.85,
       side: THREE.DoubleSide,
+      emissive: new THREE.Color(0.02, kelpData.green * 0.15, 0.01),
+      emissiveIntensity: 0.5,
     });
+    mat.onBeforeCompile = (shader) => {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
+        {
+          float NdV = abs(dot(normal, normalize(vViewPosition)));
+          float rim = pow(1.0 - NdV, 2.0);
+          totalEmissiveRadiance += diffuseColor.rgb * rim * 0.15;
+        }`
+      );
+    };
 
     const kelp = new THREE.Mesh(geo, mat);
     kelp.position.set(kelpData.x, kelpData.y, kelpData.z);
@@ -222,7 +240,8 @@ export class Flora {
       : new THREE.Color(0);
     const mat = new THREE.MeshStandardMaterial({
       color: coralData.color,
-      roughness: 0.7,
+      roughness: 0.45,
+      metalness: 0.05,
       emissive,
     });
 
