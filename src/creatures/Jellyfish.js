@@ -6,6 +6,10 @@ const JELLY_RESPAWN_DISTANCE = 340;
 const TWO_PI = Math.PI * 2;
 const HALF_PI = Math.PI * 0.5;
 
+// Max jellies to build synchronously in the constructor to stay within the
+// 50 ms spawn budget. The rest are deferred to subsequent update() frames.
+const SYNC_JELLY_LIMIT = 2;
+
 const _tmpMatrix = new THREE.Matrix4();
 const _tmpQuat = new THREE.Quaternion();
 const _tmpPos = new THREE.Vector3();
@@ -220,15 +224,25 @@ export class Jellyfish {
       0x5566dd, 0xdd5577, 0x44ccaa, 0xbb55dd,
     ];
 
+    // Pre-compute spawn positions and colors for all jellies so deferred
+    // ones land in the same spatial cluster as immediate ones.
+    this._pendingJellies = [];
     for (let i = 0; i < count; i++) {
-      const jelly = this._createJelly(colors[i % colors.length]);
-      jelly.group.position.set(
+      const color = colors[i % colors.length];
+      const pos = new THREE.Vector3(
         position.x + (Math.random() - 0.5) * 30,
         position.y + (Math.random() - 0.5) * 15,
         position.z + (Math.random() - 0.5) * 30
       );
-      this.jellies.push(jelly);
-      this.group.add(jelly.group);
+
+      if (i < SYNC_JELLY_LIMIT) {
+        const jelly = this._createJelly(color);
+        jelly.group.position.copy(pos);
+        this.jellies.push(jelly);
+        this.group.add(jelly.group);
+      } else {
+        this._pendingJellies.push({ color, position: pos });
+      }
     }
 
     scene.add(this.group);
@@ -1197,6 +1211,15 @@ totalEmissiveRadiance += diffuseColor.rgb * (vPulse - 0.76) * 0.42;`
   }
 
   update(dt, playerPos) {
+    // Drain one deferred jelly per frame to spread construction cost.
+    if (this._pendingJellies.length > 0) {
+      const pending = this._pendingJellies.shift();
+      const jelly = this._createJelly(pending.color);
+      jelly.group.position.copy(pending.position);
+      this.jellies.push(jelly);
+      this.group.add(jelly.group);
+    }
+
     this.time += dt;
     this._frameCount++;
 
