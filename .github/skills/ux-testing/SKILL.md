@@ -143,19 +143,19 @@ Tool: evaluate_script (canonical chrome-devtools-mcp)
 Parameters:
   pageId: <current page ID>
   function: () => {
-  const game = window.game;
-  if (!game) return { error: 'game not found on window' };
-  return {
-    playerPos: game.player?.position,
-    depth: game.depth,
-    fps: game.fps,
-    creatureCount: game.creatureManager?.creatures?.length,
-    oxygen: game.oxygen,
-    battery: game.battery,
-    running: game.running,
-    gameOver: game.gameOver,
-  };
-}
+    const game = window.game;
+    if (!game) return { error: 'game not found on window' };
+    return {
+      playerPos: game.player?.position,
+      depth: game.depth,
+      fps: game.fps,
+      creatureCount: game.creatureManager?.creatures?.length,
+      oxygen: game.oxygen,
+      battery: game.battery,
+      running: game.running,
+      gameOver: game.gameOver,
+    };
+  }
 ```
 
 > **Tip**: If `window.game` isn't responding, check that the page has
@@ -180,7 +180,7 @@ Use canonical `take_memory_snapshot`.
 ### Lighthouse audit
 
 ```text
-Tool: lighthouse_audit (canonical chrome-devtools-mcp)
+Tool: lighthouse_audit (host-exposed performance audit tool)
 Parameters:
   mode: navigation
   device: desktop

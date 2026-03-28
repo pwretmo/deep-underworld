@@ -50,7 +50,7 @@ These rules are mandatory for every UX test run:
 
 You have access to local dev tools pre-installed in the repo:
 
-- **lighthouse** — run `npx lighthouse http://localhost:5173` to detect performance regressions, Core Web Vitals issues, accessibility problems
+- **lighthouse** — run `npx lighthouse http://localhost:5173?autoplay` to detect performance regressions, Core Web Vitals issues, accessibility problems
 - **io.github.ChromeDevTools/chrome-devtools-mcp** — required browser automation server for gameplay testing, screenshots, console monitoring
 
 ## Workflow
