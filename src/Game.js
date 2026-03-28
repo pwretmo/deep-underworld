@@ -19,6 +19,7 @@ export class Game {
     this.running = false;
     this.pendingStart = false;
     this.startPreparing = false;
+    this._streamingFrameParity = 0;
 
     // Renderer
     this.renderer = new THREE.WebGLRenderer({
@@ -410,6 +411,7 @@ export class Game {
     this._descentItems.innerHTML = '';
     this._descentTease.innerHTML = '';
     this._updateDescentProgress();
+    this.underwaterEffect.beginStartupGuard();
 
     // Initialize Rapier WASM physics before terrain/player use it
     this.physicsWorld = new PhysicsWorld();
@@ -456,10 +458,19 @@ export class Game {
   }
 
   async _warmOpeningFrames() {
-    for (let i = 0; i < 12; i++) {
+    let responsiveFrames = 0;
+    for (let i = 0; i < 180; i++) {
       await new Promise((resolve) =>
         window.requestAnimationFrame(() => resolve()),
       );
+      if (this.underwaterEffect.isStartupResponsive()) {
+        responsiveFrames++;
+        if (responsiveFrames >= 6) {
+          break;
+        }
+      } else {
+        responsiveFrames = 0;
+      }
     }
   }
 
@@ -633,8 +644,9 @@ export class Game {
   _animate() {
     requestAnimationFrame(() => this._animate());
 
-    const dt = Math.min(this.clock.getDelta(), 0.05);
-    qualityManager.updateFrameTime(dt);
+    const rawDt = this.clock.getDelta();
+    const dt = Math.min(rawDt, 0.05);
+    qualityManager.updateFrameTime(rawDt);
     if (
       !this.running ||
       this.gameOver ||
@@ -673,8 +685,11 @@ export class Game {
       // Time terrain + flora chunk work so creature spawning can be deferred
       // when the frame is already heavy (prevents compounding expensive operations).
       const _initStart = performance.now();
-      this.terrain.update(this.player.position);
-      this.flora.update(dt, this.player.position);
+      this._streamingFrameParity = (this._streamingFrameParity + 1) % 2;
+      const _allowTerrainChunkWork = this._streamingFrameParity === 0;
+      const _allowFloraChunkWork = !_allowTerrainChunkWork;
+      this.terrain.update(this.player.position, _allowTerrainChunkWork);
+      this.flora.update(dt, this.player.position, _allowFloraChunkWork);
       const _initElapsed = performance.now() - _initStart;
       const _spawnBudget = Math.max(0, 12 - _initElapsed);
       const _descentAssistActive = this.preload.isDescentAssistActive();
@@ -733,17 +748,6 @@ export class Game {
       // on terrain/flora/creature work.
       if (performance.now() - _initStart < 14) {
         this.preload.pumpDescentAssist();
-      }
-
-      // Safety-net: dismiss descent overlay if still active (normally handled in _primeAndEnterGameplay)
-      if (this._descentActive) {
-        this._updateDescentProgress();
-        this._descentActive = false;
-        this.descentOverlay.classList.add("fade-out");
-        setTimeout(() => {
-          this.descentOverlay.classList.remove("visible");
-          this.descentOverlay.classList.remove("fade-out");
-        }, 800);
       }
 
       // Render with post-processing
@@ -1487,4 +1491,6 @@ export class Game {
     }
   }
 }
+
+
 

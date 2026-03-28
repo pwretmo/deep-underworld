@@ -13,10 +13,10 @@ const MAX_PRELOADED_FLORA_CHUNKS = 5;
 const FRAME_BUDGET_MS = 6;
 const DESCENT_ASSIST_FRAME_BUDGET_MS = 5;
 const START_PRIME_FRAME_BUDGET_MS = 4;
-const START_PRIME_TIMEOUT_MS = 1000 * 6;
-// Keep startup priming focused on the opening band so the first playable
-// frames stay responsive instead of front-loading deep-scene work.
-const START_PRIME_DEPTH = 120;
+const START_PRIME_TIMEOUT_MS = 1000 * 8;
+// Prime the opening and mid-depth creature set behind the descent overlay so
+// early gameplay does not hit first-seen creature shader compiles.
+const START_PRIME_DEPTH = 220;
 const WRITE_THROTTLE_MS = 5000;
 const ENTRY_TTL_MS = 1000 * 60 * 60 * 24;
 const INDEXED_DB_SIZE_CEILING = 3 * 1024 * 1024;
@@ -194,11 +194,15 @@ export class PreloadCoordinator {
       }
     }
 
-    // Force-compile shader programs for all preloaded creature materials
-    // so the first gameplay render doesn't trigger synchronous GPU compiles.
+    // Do a final yield after startup priming rather than calling renderer.compileAsync().
+    // Three's compileAsync() still performs a synchronous compile step up front and
+    // has been hanging on some scene/material combinations. The opening-band warm
+    // renders above are cheaper and keep startup responsive.
     _phase = 'finalizing';
     reportProgress();
-    await this.renderer.compileAsync(this.underwaterEffect.scene, this.underwaterEffect.camera);
+    await this._finishCreaturePrime(START_PRIME_DEPTH);
+    await this._warmDepthBandRenders();
+    await this._warmCreatureShowcaseRenders(START_PRIME_DEPTH);
     await new Promise(resolve => window.requestAnimationFrame(() => resolve()));
 
     reportProgress();
@@ -222,7 +226,10 @@ export class PreloadCoordinator {
         this._applyAdvisorySnapshot(advisorySnapshot);
       }
 
-      await this._runBudgeted(token, () => this._warmGpuOnce(token));
+      // Keep menu-idle warmup CPU-bound. Synchronous renderer.compile() calls can
+      // still monopolize the main thread after the player hits start, even if the
+      // warmup token gets cancelled. Explicit start priming already does the GPU
+      // work behind the descent overlay using the async warm-up path.
       await this._runBudgeted(token, () => this._warmCreatureQueue(token));
       await this._runBudgeted(token, () => this._warmTerrainAndFlora(token));
       await this._runBudgeted(token, () => this._warmNonAudioLookups(token));
@@ -282,7 +289,6 @@ export class PreloadCoordinator {
     if (token.cancelled) return true;
     if (this._gpuWarmed) return true;
 
-    this.renderer.compile(this.underwaterEffect.scene, this.underwaterEffect.camera);
     this.underwaterEffect.warmRender(0, {
       flashlightOn: false,
       exposure: this.renderer.toneMappingExposure,
@@ -292,11 +298,9 @@ export class PreloadCoordinator {
       flashlightOn: false,
       exposure: this.renderer.toneMappingExposure,
     });
-    // Item 5: warm additional depth bands and bloom-suspended variants.
-    this.underwaterEffect.warmPerformanceFallbacks({ depth: 400, flashlightOn: false, exposure: this.renderer.toneMappingExposure });
-    this.underwaterEffect.warmPerformanceFallbacks({ depth: 800, flashlightOn: false, exposure: this.renderer.toneMappingExposure });
+    // Keep startup GPU warm-up focused on the opening band. Deep-band variants can
+    // compile lazily later without freezing the player at the first interactive frame.
     this.underwaterEffect.warmBloomSuspendedVariant({ depth: 0, flashlightOn: false, exposure: this.renderer.toneMappingExposure });
-    this.underwaterEffect.warmBloomSuspendedVariant({ depth: 400, flashlightOn: false, exposure: this.renderer.toneMappingExposure });
 
     // Warm flashlight materials so first toggle doesn't cause a shader-compile hitch
     this._warmFlashlightOnce();
@@ -308,7 +312,10 @@ export class PreloadCoordinator {
   _warmFlashlightOnce() {
     const wasVisible = this.player.flashlight.visible;
     this.player.flashlight.visible = true;
-    this.renderer.compile(this.underwaterEffect.scene, this.underwaterEffect.camera);
+    this.underwaterEffect.warmRender(0, {
+      flashlightOn: true,
+      exposure: this.renderer.toneMappingExposure,
+    });
     this.player.flashlight.visible = wasVisible;
   }
 
@@ -316,15 +323,12 @@ export class PreloadCoordinator {
     if (token.cancelled) return;
     if (this._gpuWarmed) return;
 
-    await this.renderer.compileAsync(this.underwaterEffect.scene, this.underwaterEffect.camera);
-    await new Promise(r => requestAnimationFrame(r));
-    if (token.cancelled) return;
-
-    this.underwaterEffect.warmRender(0, {
+    await this._warmRenderAsync({
+      depth: 0,
       flashlightOn: false,
+      flashlightVisible: false,
       exposure: this.renderer.toneMappingExposure,
     });
-    await new Promise(r => requestAnimationFrame(r));
     if (token.cancelled) return;
 
     this.underwaterEffect.warmPerformanceFallbacks({
@@ -335,19 +339,7 @@ export class PreloadCoordinator {
     await new Promise(r => requestAnimationFrame(r));
     if (token.cancelled) return;
 
-    this.underwaterEffect.warmPerformanceFallbacks({ depth: 400, flashlightOn: false, exposure: this.renderer.toneMappingExposure });
-    await new Promise(r => requestAnimationFrame(r));
-    if (token.cancelled) return;
-
-    this.underwaterEffect.warmPerformanceFallbacks({ depth: 800, flashlightOn: false, exposure: this.renderer.toneMappingExposure });
-    await new Promise(r => requestAnimationFrame(r));
-    if (token.cancelled) return;
-
     this.underwaterEffect.warmBloomSuspendedVariant({ depth: 0, flashlightOn: false, exposure: this.renderer.toneMappingExposure });
-    await new Promise(r => requestAnimationFrame(r));
-    if (token.cancelled) return;
-
-    this.underwaterEffect.warmBloomSuspendedVariant({ depth: 400, flashlightOn: false, exposure: this.renderer.toneMappingExposure });
     await new Promise(r => requestAnimationFrame(r));
     if (token.cancelled) return;
 
@@ -358,9 +350,21 @@ export class PreloadCoordinator {
   }
 
   async _warmFlashlightOnceAsync() {
+    await this._warmRenderAsync({
+      depth: 0,
+      flashlightOn: true,
+      flashlightVisible: true,
+      exposure: this.renderer.toneMappingExposure,
+    });
+  }
+
+  async _warmRenderAsync({ depth = 0, flashlightOn = false, flashlightVisible = false, exposure = this.renderer.toneMappingExposure } = {}) {
     const wasVisible = this.player.flashlight.visible;
-    this.player.flashlight.visible = true;
-    await this.renderer.compileAsync(this.underwaterEffect.scene, this.underwaterEffect.camera);
+    this.player.flashlight.visible = flashlightVisible;
+    this.underwaterEffect.warmRender(depth, {
+      flashlightOn,
+      exposure,
+    });
     await new Promise(r => requestAnimationFrame(r));
     this.player.flashlight.visible = wasVisible;
   }
@@ -478,16 +482,34 @@ export class PreloadCoordinator {
       this.flora.getPendingCount() > 0;
   }
 
+  async _finishCreaturePrime(maxDepth, maxExtraMs = 2500) {
+    const deadline = performance.now() + maxExtraMs;
+    while (this.creatures.hasQueuedSpawnsUpToDepth(maxDepth) && performance.now() < deadline) {
+      const drained = this.creatures.preloadDrain(1, undefined, maxDepth);
+      await new Promise(resolve => window.requestAnimationFrame(() => resolve()));
+      if (drained <= 0) {
+        await new Promise(resolve => window.requestAnimationFrame(() => resolve()));
+      }
+    }
+  }
+
   async _warmDepthBandRenders() {
     if (!this.prepareDepthState) return;
 
-    // Item 5: extended depth bands cover mid/deep/abyss post-FX configurations.
-    const sampleDepths = [0, 120, 320, 500, 800];
-    const sampleYawAngles = [0, Math.PI];
+    // Warm representative view/depth bands behind the descent overlay so the
+    // player does not hit first-seen creature and terrain shader compiles later
+    // in the run. Use broad yaw coverage rather than exhaustive scene sweeps.
     const originalPosition = this.player.position.clone();
     const originalQuaternion = this.player.camera.quaternion.clone();
     const originalEuler = this.player.euler.clone();
     const originalDepth = this.player.depth;
+    const sampleDepths = [0, 80, 160, 240];
+    const sampleYawAngles = [
+      originalEuler.y,
+      originalEuler.y + Math.PI * 0.5,
+      originalEuler.y + Math.PI,
+      originalEuler.y + Math.PI * 1.5,
+    ];
 
     for (const depth of sampleDepths) {
       this.player.position.copy(originalPosition);
@@ -496,14 +518,52 @@ export class PreloadCoordinator {
       this.prepareDepthState(depth);
 
       for (const yaw of sampleYawAngles) {
-        this.player.euler.set(0, yaw, 0, 'YXZ');
+        this.player.euler.set(0.08, yaw, 0, 'YXZ');
         this.player.camera.quaternion.setFromEuler(this.player.euler);
-        this.underwaterEffect.render(depth, {
+        this.underwaterEffect.warmRender(depth, {
           flashlightOn: false,
           exposure: this.renderer.toneMappingExposure,
         });
         await new Promise(resolve => window.requestAnimationFrame(() => resolve()));
       }
+    }
+
+    this.player.position.copy(originalPosition);
+    this.player.depth = originalDepth;
+    this.player.euler.copy(originalEuler);
+    this.player.camera.quaternion.copy(originalQuaternion);
+    this.prepareDepthState(Math.max(0, -this.player.position.y));
+  }
+
+  async _warmCreatureShowcaseRenders(maxDepth = START_PRIME_DEPTH) {
+    const originalPosition = this.player.position.clone();
+    const originalQuaternion = this.player.camera.quaternion.clone();
+    const originalEuler = this.player.euler.clone();
+    const originalDepth = this.player.depth;
+    const seenTypes = new Set();
+
+    for (const creature of this.creatures.creatures) {
+      if (creature.depthMin > maxDepth || seenTypes.has(creature.type)) {
+        continue;
+      }
+
+      const pos = creature.instance?.getPosition?.();
+      const root = creature.instance?.group;
+      if (!pos || !root) {
+        continue;
+      }
+
+      seenTypes.add(creature.type);
+      this.player.position.set(pos.x, pos.y + 2, pos.z + 18);
+      this.player.depth = Math.max(0, -this.player.position.y);
+      this.prepareDepthState(this.player.depth);
+      this.player.camera.lookAt(pos.x, pos.y, pos.z);
+      this.player.euler.setFromQuaternion(this.player.camera.quaternion, 'YXZ');
+      this.underwaterEffect.warmRender(this.player.depth, {
+        flashlightOn: false,
+        exposure: this.renderer.toneMappingExposure,
+      });
+      await new Promise(resolve => window.requestAnimationFrame(() => resolve()));
     }
 
     this.player.position.copy(originalPosition);
@@ -798,4 +858,8 @@ class ProceduralStartupCache {
     });
   }
 }
+
+
+
+
 

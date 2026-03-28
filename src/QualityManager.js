@@ -63,8 +63,6 @@ const AUTO_DOWNGRADE_MS = 33;   // < 30 fps
 const AUTO_DOWNGRADE_SECS = 3;
 const AUTO_UPGRADE_MS = 20;     // > 50 fps
 const AUTO_UPGRADE_SECS = 5;
-const AUTO_ULTRA_UPGRADE_MS = 12;   // < 12ms = ~83+ fps headroom for ultra
-const AUTO_ULTRA_UPGRADE_SECS = 10;
 const EMA_ALPHA = 2 / (30 + 1); // ~30-frame EMA
 
 // GPU patterns that qualify for automatic ultra tier selection
@@ -155,21 +153,13 @@ class QualityManager {
     } else if (this._frameTimeEma < AUTO_UPGRADE_MS) {
       this._downgradeDuration = 0;
       this._upgradeDuration += dt;
-      const ultraIdx = TIER_ORDER.indexOf('ultra');
-      const maxGenericIdx = ultraIdx >= 0 ? ultraIdx - 1 : TIER_ORDER.length - 1;
+      const maxGenericIdx = TIER_ORDER.indexOf('high');
       if (this._upgradeDuration >= AUTO_UPGRADE_SECS && idx < maxGenericIdx) {
         this._applyAutoTier(TIER_ORDER[idx + 1]);
       }
-      // Frame-time-based auto-upgrade to ultra: if sitting on high with
-      // very low frame times, promote to ultra after sustained headroom.
-      if (this._tier === 'high' && this._frameTimeEma < AUTO_ULTRA_UPGRADE_MS) {
-        this._ultraUpgradeDuration += dt;
-        if (this._ultraUpgradeDuration >= AUTO_ULTRA_UPGRADE_SECS) {
-          this._applyAutoTier('ultra');
-        }
-      } else {
-        this._ultraUpgradeDuration = 0;
-      }
+      // Keep ultra opt-in. Runtime promotion to ultra can introduce large
+      // mid-session hitches when bloom and higher-resolution targets spin up.
+      this._ultraUpgradeDuration = 0;
     } else {
       this._downgradeDuration = 0;
       this._upgradeDuration = 0;
@@ -192,4 +182,5 @@ class QualityManager {
 
 /** Singleton instance. */
 export const qualityManager = new QualityManager();
+
 
