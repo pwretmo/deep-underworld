@@ -10,7 +10,7 @@ import {
   instancedDynamicBufferAttribute,
   max,
   mix,
-  modelViewMatrix,
+  positionView,
   positionWorld,
   pow,
   smoothstep,
@@ -94,7 +94,10 @@ function createParticleMaterial(geometry, snowTexture, baseSize, baseOpacity) {
     sin(uniforms.time.mul(0.08).add(phaseNode)).mul(0.6),
     uniforms.time.mul(0.1).add(seedNode).add(phaseNode).mul(0.7).cos().mul(1.5)
   ));
-  const viewDist = varying(modelViewMatrix.mul(vec3(driftedCenter)).z.negate());
+  material.positionNode = driftedCenter;
+  material.sizeAttenuation = true;
+
+  const viewDist = positionView.z.negate();
   const bokeh = varying(step(0.95, fract(seedNode.mul(127.1).add(phaseNode.mul(311.7)))));
   const focusDist = 30.0;
   const coc = viewDist.sub(focusDist).abs().div(focusDist);
@@ -104,7 +107,6 @@ function createParticleMaterial(geometry, snowTexture, baseSize, baseOpacity) {
   const bokehBright = float(1.0).add(bokeh.mul(2.0));
   const distFade = smoothstep(3.0, 14.0, viewDist);
 
-  material.positionNode = driftedCenter;
   material.sizeNode = clamp(
     sizeNode
       .mul(uniforms.baseSize)
@@ -241,7 +243,7 @@ export class Ocean {
 
   _createParticles() {
     const count = 3000;
-    const geo = new THREE.PlaneGeometry(1, 1, 1, 1);
+    const geo = new THREE.Sprite().geometry.clone();
     const positions = new Float32Array(count * 3);
     const sizes = new Float32Array(count);
     const colors = new Float32Array(count * 3);
@@ -289,13 +291,11 @@ export class Ocean {
 
     const mat = createParticleMaterial(geo, snowTexture, this.particleBaseSize, this.particleBaseOpacity);
 
-    this.particleSystem = new THREE.InstancedMesh(geo, mat, count);
+    // WebGPU honors textured particle sizing for PointsNodeMaterial on instanced Sprites.
+    this.particleSystem = new THREE.Sprite(mat);
+    this.particleSystem.geometry = geo;
+    this.particleSystem.count = count;
     this.particleSystem.frustumCulled = false;
-    const identity = new THREE.Matrix4();
-    for (let i = 0; i < count; i++) {
-      this.particleSystem.setMatrixAt(i, identity);
-    }
-    this.particleSystem.instanceMatrix.needsUpdate = true;
     this.scene.add(this.particleSystem);
   }
 
