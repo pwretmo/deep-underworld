@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { toStandardMaterial } from './lodUtils.js';
+import { qualityManager } from '../QualityManager.js';
 
 const TWO_PI = Math.PI * 2;
 
@@ -7,11 +7,15 @@ const TWO_PI = Math.PI * 2;
 const LOD_BS_NEAR = 30;
 const LOD_BS_MID  = 55;
 
+// Far LOD frame-skip: quality-responsive (ultra = every 4th frame, else every 3rd)
+const FAR_LOD_SKIP_DEFAULT = 3;
+const FAR_LOD_SKIP_ULTRA   = 4;
+
 // Pre-allocated temporaries — zero per-frame allocations
 const _tmpVec3A = new THREE.Vector3();
 const _tmpVec3B = new THREE.Vector3();
 
-// LOD tier geometry profiles
+// LOD tier geometry profiles (far handled separately as a silhouette — see _buildFarSilhouette)
 const LOD_PROFILE = {
   near: {
     coreSegW: 32,  coreSegH: 24,
@@ -32,16 +36,6 @@ const LOD_PROFILE = {
     connCount: 2,
     poreCount: 0,
     animInterval: 3,
-  },
-  far: {
-    coreSegW: 8, coreSegH: 6,
-    sacSegW:  6, sacSegH:  4,
-    embryoSegW: 0, embryoSegH: 0,
-    stalkSegs: 3, stalkRadial: 3,
-    veinRadial: 3,
-    connCount: 0,
-    poreCount: 0,
-    animInterval: 4,
   },
 };
 
@@ -228,8 +222,9 @@ export class BirthSac {
 
   // ── Materials ──
 
-  _createSacMaterial(useFar) {
-    if (useFar) {
+  _createSacMaterial(tierName) {
+    // Medium: standard material — no shader injection, no per-vertex deformation cost
+    if (tierName === 'medium') {
       return new THREE.MeshStandardMaterial({
         color: 0x201018, roughness: 0.2, metalness: 0,
         transparent: true, opacity: 0.75,
@@ -238,6 +233,7 @@ export class BirthSac {
       });
     }
 
+    // Near: full MeshPhysicalMaterial with per-vertex pulsation + slosh shader
     const mat = new THREE.MeshPhysicalMaterial({
       color: 0x201018, roughness: 0.15, metalness: 0,
       clearcoat: 0.95, clearcoatRoughness: 0.05,
@@ -288,14 +284,13 @@ export class BirthSac {
     return mat;
   }
 
-  _createVeinMaterial(useFar) {
-    const mat = new THREE.MeshPhysicalMaterial({
+  _createVeinMaterial() {
+    return new THREE.MeshPhysicalMaterial({
       color: 0x1a1018, roughness: 0.15, metalness: 0,
       clearcoat: 0.8,
       emissive: 0x802060, emissiveIntensity: 0.8,
       emissiveMap: veinEmissiveTex,
     });
-    return useFar ? toStandardMaterial(mat) : mat;
   }
 
   // ── Build model ──
@@ -305,12 +300,16 @@ export class BirthSac {
     const lod = new THREE.LOD();
 
     for (const [tierName, profile] of Object.entries(LOD_PROFILE)) {
-      const useFar = tierName === 'far';
-      const tier   = this._buildTier(profile, useFar, tierName);
+      const tier = this._buildTier(profile, tierName);
       this.tiers[tierName] = tier;
-      const dist = tierName === 'near' ? 0 : tierName === 'medium' ? LOD_BS_NEAR : LOD_BS_MID;
+      const dist = tierName === 'near' ? 0 : LOD_BS_NEAR;
       lod.addLevel(tier.group, dist);
     }
+
+    // Far tier: single silhouette proxy — aggressively lightweight (<100 triangles)
+    const farTier = this._buildFarSilhouette();
+    this.tiers.far = farTier;
+    lod.addLevel(farTier.group, LOD_BS_MID);
 
     this.lod = lod;
     this.group.add(lod);
@@ -320,10 +319,31 @@ export class BirthSac {
     this.group.scale.setScalar(s);
   }
 
-  _buildTier(profile, useFar, tierName) {
+  /** Far tier: single blob silhouette representing the entire cluster (<100 triangles). */
+  _buildFarSilhouette() {
+    const g = new THREE.Group();
+
+    // Single elongated blob — represents the sac cluster; ~60 triangles total
+    const silMat = new THREE.MeshStandardMaterial({
+      color: 0x1a0c14, roughness: 0.3, metalness: 0,
+      transparent: true, opacity: 0.80,
+      emissive: 0x3a1030, emissiveIntensity: 0.55,
+      side: THREE.DoubleSide,
+    });
+    const silGeo = new THREE.SphereGeometry(0.95, 6, 4);
+    silGeo.scale(1.2, 1.0, 1.0);
+    g.add(new THREE.Mesh(silGeo, silMat));
+
+    const glow = new THREE.PointLight(0x660022, 0.6, 8);
+    g.add(glow);
+
+    return { group: g, sacMat: silMat, sacs: [], glow, connTissues: [] };
+  }
+
+  _buildTier(profile, tierName) {
     const tierGroup = new THREE.Group();
-    const sacMat    = this._createSacMaterial(useFar);
-    const veinMat   = this._createVeinMaterial(useFar);
+    const sacMat    = this._createSacMaterial(tierName);
+    const veinMat   = this._createVeinMaterial();
 
     // ── Central organic mass ──
     const coreGeo = new THREE.SphereGeometry(0.6, profile.coreSegW, profile.coreSegH);
@@ -524,9 +544,12 @@ export class BirthSac {
       tier.glow.intensity = 0.4 + heartbeat * 0.25;
     }
 
-    // Far LOD: static cluster, minimal glow only, update every 4th frame
-    if (tierName === 'far' && this._frameCount % this.tiers.far.profile.animInterval === 0) {
-      this.tiers.far.glow.intensity = 0.3 + Math.abs(heartbeat) * 0.15;
+    // Far LOD: static silhouette, minimal glow only — skip frames based on quality tier
+    if (tierName === 'far') {
+      const farStep = qualityManager.tier === 'ultra' ? FAR_LOD_SKIP_ULTRA : FAR_LOD_SKIP_DEFAULT;
+      if (this._frameCount % farStep === 0) {
+        this.tiers.far.glow.intensity = 0.3 + Math.abs(heartbeat) * 0.15;
+      }
     }
 
     // Slow rotation
