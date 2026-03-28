@@ -1,5 +1,29 @@
 import * as THREE from 'three/webgpu';
-import { pass } from 'three/tsl';
+import {
+  Fn,
+  If,
+  abs,
+  clamp,
+  convertToTexture,
+  cos,
+  distance,
+  dot,
+  exp,
+  float,
+  fract,
+  max,
+  min,
+  mix,
+  pass,
+  pow,
+  screenUV,
+  sin,
+  smoothstep,
+  uniform,
+  vec2,
+  vec3,
+  vec4,
+} from 'three/tsl';
 import { bloom as createBloomNode } from 'three/addons/tsl/display/BloomNode.js';
 import { qualityManager } from '../QualityManager.js';
 import { DEPTH_THRESHOLDS } from '../lighting/LightingPolicy.js';
@@ -87,219 +111,242 @@ const RENDER_PIPELINE_TUNING = deepFreeze({
   },
 });
 
-const UnderwaterShader = {
-  uniforms: {
-    tDiffuse: { value: null },
-    time: { value: 0 },
-    depth: { value: 0 },
-    exposure: { value: 0.76 },
-    flashlightActive: { value: 0 },
-    resolution: { value: new THREE.Vector2() },
-    depthThresholds: { value: new THREE.Vector3(130, 340, 720) },
-    grading: { value: new THREE.Vector4(1.08, 0.28, 0.018, 0.0) },
-    darkening: { value: 0.0 },
-    extinction: { value: new THREE.Vector3(0.22, 0.045, 0.014) },
-    scatterColor: { value: new THREE.Vector3(0.012, 0.048, 0.075) },
-    scatterDensity: { value: 0.003 },
-    eyeAdapt: { value: 0.12 },
-    highlightRoll: { value: new THREE.Vector3(0.78, 0.34, 0.40) },
-    bloomParams: { value: new THREE.Vector3(0.28, 0.78, 1.6) },
-    reducedMode: { value: 0.0 },
-  },
-  vertexShader: `
-    varying vec2 vUv;
-    void main() {
-      vUv = uv;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-    }
-  `,
-  fragmentShader: `
-    uniform sampler2D tDiffuse;
-    uniform float time;
-    uniform float depth;
-    uniform float exposure;
-    uniform float flashlightActive;
-    uniform vec2 resolution;
-    uniform vec3 depthThresholds;
-    uniform vec4 grading;
-    uniform float darkening;
-    uniform vec3 extinction;
-    uniform vec3 scatterColor;
-    uniform float scatterDensity;
-    uniform float eyeAdapt;
-    uniform vec3 highlightRoll;
-    uniform vec3 bloomParams;
-    uniform float reducedMode;
-    varying vec2 vUv;
-
-    void main() {
-      vec2 uv = vUv;
-
-      // Underwater distortion - subtle wavy effect
-      float distortStr = 0.0011 + depth * 0.0000055;
-      uv.x += sin(uv.y * 15.0 + time * 1.0) * distortStr;
-      uv.y += cos(uv.x * 12.0 + time * 0.8) * distortStr * 0.6;
-
-      vec4 color = texture2D(tDiffuse, uv);
-      vec2 fragCoord = uv * resolution;
-      float midBlend = smoothstep(depthThresholds.x, depthThresholds.y, depth);
-      float deepBlend = smoothstep(depthThresholds.y, depthThresholds.z, depth);
-      float abyssBlend = smoothstep(depthThresholds.z, depthThresholds.z + 280.0, depth);
-      float depthBlend = clamp(midBlend * 0.45 + deepBlend * 0.7 + abyssBlend * 0.35, 0.0, 1.0);
-
-      // Keep aberration subtle: depth-aware, edge-weighted, and hard-capped.
-      // Skip the extra texture taps entirely in reduced mode.
-      if (reducedMode < 0.5) {
-        float edgeDist = distance(uv, vec2(0.5));
-        float edgeMask = smoothstep(0.2, 0.74, edgeDist);
-        float caStr = (depthBlend * 0.00014 + abyssBlend * 0.00005) * edgeMask;
-        caStr = min(caStr, 0.00022);
-        float r = texture2D(tDiffuse, uv + vec2(caStr, caStr * 0.3)).r;
-        float b = texture2D(tDiffuse, uv - vec2(caStr, caStr * 0.2)).b;
-        color.r = r;
-        color.b = b;
-      }
-
-      // Vignette — lighter to preserve edge detail at depth.
-      float vigBase = 0.12 + depthBlend * grading.y;
-      float vigStr = min(vigBase, 0.65);
-      vec2 center = uv - 0.5;
-      float vigDist = dot(center, center);
-      float vignette = 1.0 - smoothstep(0.12, 0.42, vigDist) * vigStr;
-      color.rgb *= max(vignette, 0.2);
-
-      // Physically-based water column attenuation (Beer-Lambert extinction).
-      // Red light absorbs first, then green, then blue — preserving relative
-      // contrast between nearby surfaces instead of crushing to uniform black.
-      vec3 transmittance = exp(-extinction * depth);
-
-      // Forward scatter: blue-green ambient glow accumulated along the view path.
-      float scatterMix = 1.0 - exp(-scatterDensity * depth);
-      vec3 scatter = scatterColor * scatterMix;
-
-      // Exempt flashlight-illuminated pixels from attenuation.
-      // Bright emissive pixels should not read as flashlight spill on their own,
-      // so require both the flashlight to be active and nearby pixels to share
-      // similar brightness before relaxing the deep-water grading.
-      float preTintLuma = max(max(color.r, color.g), color.b);
-      float litAmount = 0.0;
-      if (flashlightActive > 0.5) {
-        if (reducedMode > 0.5) {
-          litAmount = smoothstep(0.08, 0.22, preTintLuma) * 0.65;
-        } else {
-          vec2 lightProbe = max(vec2(1.0) / resolution, vec2(0.0005));
-          float nearbyLuma = 0.25 * (
-            max(max(texture2D(tDiffuse, uv + vec2(lightProbe.x, 0.0)).r, texture2D(tDiffuse, uv + vec2(lightProbe.x, 0.0)).g), texture2D(tDiffuse, uv + vec2(lightProbe.x, 0.0)).b) +
-            max(max(texture2D(tDiffuse, uv - vec2(lightProbe.x, 0.0)).r, texture2D(tDiffuse, uv - vec2(lightProbe.x, 0.0)).g), texture2D(tDiffuse, uv - vec2(lightProbe.x, 0.0)).b) +
-            max(max(texture2D(tDiffuse, uv + vec2(0.0, lightProbe.y)).r, texture2D(tDiffuse, uv + vec2(0.0, lightProbe.y)).g), texture2D(tDiffuse, uv + vec2(0.0, lightProbe.y)).b) +
-            max(max(texture2D(tDiffuse, uv - vec2(0.0, lightProbe.y)).r, texture2D(tDiffuse, uv - vec2(0.0, lightProbe.y)).g), texture2D(tDiffuse, uv - vec2(0.0, lightProbe.y)).b)
-          );
-          float localSpread = 1.0 - smoothstep(0.08, 0.38, abs(preTintLuma - nearbyLuma));
-          float nearbyLight = smoothstep(0.03, 0.16, nearbyLuma);
-          litAmount = smoothstep(0.05, 0.18, preTintLuma) * nearbyLight * localSpread;
-        }
-      }
-
-      // Apply extinction to ambient surfaces; flashlight-lit pixels retain partial
-      // extinction so water absorption preserves form-revealing depth contrast.
-      float clampedLit = litAmount * 0.6;
-      color.rgb = color.rgb * mix(transmittance, vec3(1.0), clampedLit)
-                + scatter * (1.0 - litAmount * 0.7);
-
-      // Screen-space caustics: additive light pattern in shallow water
-      float shallowCaustic = 1.0 - smoothstep(0.0, 80.0, depth);
-      if (shallowCaustic > 0.001) {
-        vec2 cUV = uv * 12.0;
-        float ct = time * 0.35;
-        float c1 = sin(cUV.x * 3.7 + ct) * sin(cUV.y * 4.1 - ct * 0.8);
-        float c2 = sin(cUV.x * 2.3 - ct * 1.2 + 1.7) * sin(cUV.y * 3.3 + ct * 0.9);
-        float c3 = sin((cUV.x + cUV.y) * 2.8 + ct * 0.6);
-        float causticVal = max(0.0, c1 + c2 * 0.7 + c3 * 0.5);
-        causticVal = pow(causticVal * 0.33, 2.2);
-        float nearSurface = smoothstep(60.0, 5.0, depth) * 0.14;
-        float midCaustic = smoothstep(80.0, 25.0, depth) * 0.05;
-        color.rgb += color.rgb * causticVal * (nearSurface + midCaustic) * shallowCaustic;
-      }
-
-      // Depth-aware contrast to strengthen separation in mid/deep zones.
-      float contrast = mix(1.0, grading.x, depthBlend);
-      color.rgb = (color.rgb - 0.18) * contrast + 0.18;
-
-      // Luminance-based eye adaptation: preserve local contrast at mid-depth
-      // without flattening the oppressive abyss.
-      float adaptLuma = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
-      float midtoneMask = smoothstep(0.005, 0.08, adaptLuma)
-                        * (1.0 - smoothstep(0.25, 0.6, adaptLuma));
-      float adaptAmount = midBlend * eyeAdapt * (1.0 - deepBlend * 0.5);
-      color.rgb += color.rgb * midtoneMask * adaptAmount;
-
-      // Preserve faint hero silhouettes in abyss by gently lifting midtones.
-      float luma = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
-      float silhouetteLift = smoothstep(0.02, 0.25, luma) * 0.028 * abyssBlend;
-      color.rgb += silhouetteLift;
-
-      // Film grain — heavier for oppressive atmosphere; reduced in low-cost mode (items 6/7)
-      float grainStr = (grading.z + depthBlend * 0.02) * (1.0 - reducedMode * 0.7);
-      float grain = fract(sin(dot(uv * time * 0.01, vec2(12.9898, 78.233))) * 43758.5453);
-      color.rgb += (grain - 0.5) * grainStr;
-
-      // Ordered dither in darker gradients helps break visible color banding.
-      float dither = fract(52.9829189 * fract(dot(fragCoord, vec2(0.06711056, 0.00583715)) + time * 0.003));
-      float ditherStrength = mix(0.0016, 0.0065, abyssBlend) * (1.0 - reducedMode * 0.75);
-      color.rgb += (dither - 0.5) * ditherStrength;
-
-      // A single-sample highlight spill is much cheaper than sampling neighboring
-      // texels for bloom, while still keeping bright bioluminescent accents lively.
-      float highlight = max(max(color.r, color.g), color.b);
-      float neighborPeak = highlight;
-      if (reducedMode < 0.5) {
-        vec2 bloomProbe = max(vec2(1.0) / resolution, vec2(0.0006));
-        neighborPeak = 0.25 * (
-          max(max(texture2D(tDiffuse, uv + vec2(bloomProbe.x, 0.0)).r, texture2D(tDiffuse, uv + vec2(bloomProbe.x, 0.0)).g), texture2D(tDiffuse, uv + vec2(bloomProbe.x, 0.0)).b) +
-          max(max(texture2D(tDiffuse, uv - vec2(bloomProbe.x, 0.0)).r, texture2D(tDiffuse, uv - vec2(bloomProbe.x, 0.0)).g), texture2D(tDiffuse, uv - vec2(bloomProbe.x, 0.0)).b) +
-          max(max(texture2D(tDiffuse, uv + vec2(0.0, bloomProbe.y)).r, texture2D(tDiffuse, uv + vec2(0.0, bloomProbe.y)).g), texture2D(tDiffuse, uv + vec2(0.0, bloomProbe.y)).b) +
-          max(max(texture2D(tDiffuse, uv - vec2(0.0, bloomProbe.y)).r, texture2D(tDiffuse, uv - vec2(0.0, bloomProbe.y)).g), texture2D(tDiffuse, uv - vec2(0.0, bloomProbe.y)).b)
-        );
-      }
-      float sparkleIsolated =
-        smoothstep(0.04, 0.2, highlight - neighborPeak) *
-        (1.0 - smoothstep(0.08, 0.3, neighborPeak));
-      float bloomMask = smoothstep(bloomParams.y, 1.0, highlight) * (1.0 - sparkleIsolated * 0.85);
-      float bloomLift = bloomParams.x * (0.18 + depthBlend * 0.22) * (1.0 - sparkleIsolated * 0.65);
-      color.rgb += color.rgb * bloomMask * bloomLift;
-
-      // Slight scanline effect for deep water dread
-      float scanline = 0.97 + 0.03 * sin(uv.y * resolution.y * 1.5);
-      float scanlineStr = clamp(depthBlend, 0.0, 1.0) * grading.w * (1.0 - reducedMode * 0.9);
-      color.rgb *= mix(1.0, scanline, scanlineStr);
-
-      // Highlight roll-off reduces flashlight hotspot clipping while keeping punch.
-      float peak = max(max(color.r, color.g), color.b);
-
-      // Local beam-center exposure roll-off: compress highlights near the beam
-      // axis (screen center) instead of lifting the entire frame when the
-      // flashlight is on. This prevents the double-lobe whiteout artifact.
-      if (flashlightActive > 0.5) {
-        float beamCenterDist = distance(uv, vec2(0.5));
-        float beamInfluence = 1.0 - smoothstep(0.0, 0.38, beamCenterDist);
-        float localCompress = beamInfluence * smoothstep(0.3, 0.75, peak) * 0.45;
-        color.rgb = mix(color.rgb, color.rgb / (1.0 + color.rgb * 0.7), localCompress);
-        peak = max(max(color.r, color.g), color.b);
-      }
-
-      float rollStart = max(0.45, highlightRoll.x - exposure * 0.08);
-      float rollBlend = smoothstep(rollStart, rollStart + highlightRoll.y, peak) * highlightRoll.z;
-      vec3 rolled = color.rgb / (1.0 + color.rgb);
-      color.rgb = mix(color.rgb, rolled, rollBlend);
-
-      color.rgb = clamp(color.rgb, 0.0, 1.0);
-
-      // Output is linear; OutputPass at the end of the composer chain
-      // handles tone mapping and sRGB encoding for the final canvas output.
-      gl_FragColor = color;
-    }
-  `,
+const UNDERWATER_UNIFORM_TEMPLATE = {
+  time: { value: 0 },
+  depth: { value: 0 },
+  exposure: { value: 0.76 },
+  flashlightActive: { value: 0 },
+  resolution: { value: new THREE.Vector2() },
+  depthThresholds: { value: new THREE.Vector3(130, 340, 720) },
+  grading: { value: new THREE.Vector4(1.08, 0.28, 0.018, 0.0) },
+  darkening: { value: 0.0 },
+  extinction: { value: new THREE.Vector3(0.22, 0.045, 0.014) },
+  scatterColor: { value: new THREE.Vector3(0.012, 0.048, 0.075) },
+  scatterDensity: { value: 0.003 },
+  eyeAdapt: { value: 0.12 },
+  highlightRoll: { value: new THREE.Vector3(0.78, 0.34, 0.40) },
+  bloomParams: { value: new THREE.Vector3(0.28, 0.78, 1.6) },
+  reducedMode: { value: 0.0 },
 };
+
+function createUnderwaterUniformNodes(uniforms) {
+  return {
+    time: uniform(uniforms.time.value),
+    depth: uniform(uniforms.depth.value),
+    exposure: uniform(uniforms.exposure.value),
+    flashlightActive: uniform(uniforms.flashlightActive.value),
+    resolution: uniform(uniforms.resolution.value),
+    depthThresholds: uniform(uniforms.depthThresholds.value),
+    grading: uniform(uniforms.grading.value),
+    darkening: uniform(uniforms.darkening.value),
+    extinction: uniform(uniforms.extinction.value),
+    scatterColor: uniform(uniforms.scatterColor.value),
+    scatterDensity: uniform(uniforms.scatterDensity.value),
+    eyeAdapt: uniform(uniforms.eyeAdapt.value),
+    highlightRoll: uniform(uniforms.highlightRoll.value),
+    bloomParams: uniform(uniforms.bloomParams.value),
+    reducedMode: uniform(uniforms.reducedMode.value),
+  };
+}
+
+function disposeRttNode(node) {
+  if (!node?.isRTTNode) {
+    return;
+  }
+
+  node.renderTarget?.dispose?.();
+  node._quadMesh?.material?.dispose?.();
+}
+
+function updateRttNodeScale(node, width, height, pixelRatio, scale) {
+  if (!node?.isRTTNode) {
+    return;
+  }
+
+  node.setSize(width, height);
+  node.setPixelRatio(pixelRatio * scale);
+}
+
+function createUnderwaterPostColorNode(sourceNode, uniformNodes) {
+  const sourceTextureNode = convertToTexture(sourceNode);
+  const sourceUVNode = sourceTextureNode.uvNode || screenUV;
+  const peakOf = (colorNode) => max(max(colorNode.r, colorNode.g), colorNode.b);
+  const samplePeak = (sampleUvNode) => peakOf(sourceTextureNode.sample(sampleUvNode).rgb);
+
+  return Fn(() => {
+    const distortedUv = vec2(sourceUVNode).toVar();
+    const lumaWeights = vec3(0.2126, 0.7152, 0.0722);
+    const distortionStrength = uniformNodes.depth.mul(0.0000055).add(0.0011);
+
+    distortedUv.assign(vec2(
+      distortedUv.x.add(sin(distortedUv.y.mul(15.0).add(uniformNodes.time)).mul(distortionStrength)),
+      distortedUv.y,
+    ));
+    distortedUv.assign(vec2(
+      distortedUv.x,
+      distortedUv.y.add(
+        cos(distortedUv.x.mul(12.0).add(uniformNodes.time.mul(0.8)))
+          .mul(distortionStrength)
+          .mul(0.6)
+      ),
+    ));
+
+    const baseSample = sourceTextureNode.sample(distortedUv);
+    const color = vec3(baseSample.rgb).toVar();
+    const fragCoord = distortedUv.mul(uniformNodes.resolution);
+    const midBlend = smoothstep(uniformNodes.depthThresholds.x, uniformNodes.depthThresholds.y, uniformNodes.depth);
+    const deepBlend = smoothstep(uniformNodes.depthThresholds.y, uniformNodes.depthThresholds.z, uniformNodes.depth);
+    const abyssBlend = smoothstep(
+      uniformNodes.depthThresholds.z,
+      uniformNodes.depthThresholds.z.add(280.0),
+      uniformNodes.depth,
+    );
+    const depthBlend = clamp(
+      midBlend.mul(0.45).add(deepBlend.mul(0.7)).add(abyssBlend.mul(0.35)),
+      0.0,
+      1.0,
+    );
+
+    If(uniformNodes.reducedMode.lessThan(0.5), () => {
+      const edgeDist = distance(distortedUv, vec2(0.5));
+      const edgeMask = smoothstep(0.2, 0.74, edgeDist);
+      const aberrationStrength = min(
+        depthBlend.mul(0.00014).add(abyssBlend.mul(0.00005)).mul(edgeMask),
+        0.00022,
+      );
+      const red = sourceTextureNode.sample(distortedUv.add(vec2(aberrationStrength, aberrationStrength.mul(0.3)))).r;
+      const blue = sourceTextureNode.sample(distortedUv.sub(vec2(aberrationStrength, aberrationStrength.mul(0.2)))).b;
+
+      color.assign(vec3(red, color.g, blue));
+    });
+
+    const vignetteStrength = min(depthBlend.mul(uniformNodes.grading.y).add(0.12), 0.65);
+    const vignetteDistance = dot(distortedUv.sub(0.5), distortedUv.sub(0.5));
+    const vignetteMask = float(1.0).sub(smoothstep(0.12, 0.42, vignetteDistance).mul(vignetteStrength));
+    color.assign(color.mul(max(vignetteMask, 0.2)));
+
+    const transmittance = exp(uniformNodes.extinction.mul(uniformNodes.depth).mul(-1.0));
+    const scatterMix = float(1.0).sub(exp(uniformNodes.scatterDensity.mul(uniformNodes.depth).mul(-1.0)));
+    const scatter = uniformNodes.scatterColor.mul(scatterMix);
+    const preTintLuma = peakOf(color);
+    const litAmount = float(0.0).toVar();
+
+    If(uniformNodes.flashlightActive.greaterThan(0.5), () => {
+      If(uniformNodes.reducedMode.greaterThan(0.5), () => {
+        litAmount.assign(smoothstep(0.08, 0.22, preTintLuma).mul(0.65));
+      }).Else(() => {
+        const lightProbe = max(vec2(1.0).div(uniformNodes.resolution), vec2(0.0005));
+        const nearbyLuma = samplePeak(distortedUv.add(vec2(lightProbe.x, 0.0)))
+          .add(samplePeak(distortedUv.sub(vec2(lightProbe.x, 0.0))))
+          .add(samplePeak(distortedUv.add(vec2(0.0, lightProbe.y))))
+          .add(samplePeak(distortedUv.sub(vec2(0.0, lightProbe.y))))
+          .mul(0.25);
+        const localSpread = float(1.0).sub(smoothstep(0.08, 0.38, abs(preTintLuma.sub(nearbyLuma))));
+        const nearbyLight = smoothstep(0.03, 0.16, nearbyLuma);
+
+        litAmount.assign(smoothstep(0.05, 0.18, preTintLuma).mul(nearbyLight).mul(localSpread));
+      });
+    });
+
+    const clampedLit = litAmount.mul(0.6);
+    color.assign(
+      color
+        .mul(mix(transmittance, vec3(1.0), clampedLit))
+        .add(scatter.mul(float(1.0).sub(litAmount.mul(0.7))))
+    );
+
+    const shallowCaustic = float(1.0).sub(smoothstep(0.0, 80.0, uniformNodes.depth));
+    If(shallowCaustic.greaterThan(0.001), () => {
+      const causticUv = distortedUv.mul(12.0);
+      const causticTime = uniformNodes.time.mul(0.35);
+      const causticOne = sin(causticUv.x.mul(3.7).add(causticTime)).mul(
+        sin(causticUv.y.mul(4.1).sub(causticTime.mul(0.8)))
+      );
+      const causticTwo = sin(causticUv.x.mul(2.3).sub(causticTime.mul(1.2)).add(1.7)).mul(
+        sin(causticUv.y.mul(3.3).add(causticTime.mul(0.9)))
+      );
+      const causticThree = sin(causticUv.x.add(causticUv.y).mul(2.8).add(causticTime.mul(0.6)));
+      const causticValue = pow(max(0.0, causticOne.add(causticTwo.mul(0.7)).add(causticThree.mul(0.5))).mul(0.33), 2.2);
+      const nearSurface = float(1.0).sub(smoothstep(5.0, 60.0, uniformNodes.depth)).mul(0.14);
+      const midCaustic = float(1.0).sub(smoothstep(25.0, 80.0, uniformNodes.depth)).mul(0.05);
+
+      color.addAssign(color.mul(causticValue).mul(nearSurface.add(midCaustic)).mul(shallowCaustic));
+    });
+
+    const contrast = mix(1.0, uniformNodes.grading.x, depthBlend);
+    color.assign(color.sub(0.18).mul(contrast).add(0.18));
+
+    const adaptLuma = dot(color, lumaWeights);
+    const midtoneMask = smoothstep(0.005, 0.08, adaptLuma)
+      .mul(float(1.0).sub(smoothstep(0.25, 0.6, adaptLuma)));
+    const adaptAmount = midBlend.mul(uniformNodes.eyeAdapt).mul(float(1.0).sub(deepBlend.mul(0.5)));
+    color.addAssign(color.mul(midtoneMask).mul(adaptAmount));
+
+    const silhouetteLift = smoothstep(0.02, 0.25, dot(color, lumaWeights)).mul(0.028).mul(abyssBlend);
+    color.addAssign(vec3(silhouetteLift));
+
+    const grainStrength = uniformNodes.grading.z.add(depthBlend.mul(0.02))
+      .mul(float(1.0).sub(uniformNodes.reducedMode.mul(0.7)));
+    const grain = fract(
+      sin(dot(distortedUv.mul(uniformNodes.time).mul(0.01), vec2(12.9898, 78.233))).mul(43758.5453)
+    );
+    color.addAssign(vec3(grain.sub(0.5).mul(grainStrength)));
+
+    const dither = fract(
+      fract(dot(fragCoord, vec2(0.06711056, 0.00583715)).add(uniformNodes.time.mul(0.003))).mul(52.9829189)
+    );
+    const ditherStrength = mix(0.0016, 0.0065, abyssBlend)
+      .mul(float(1.0).sub(uniformNodes.reducedMode.mul(0.75)));
+    color.addAssign(vec3(dither.sub(0.5).mul(ditherStrength)));
+
+    const highlight = peakOf(color);
+    const neighborPeak = highlight.toVar();
+    If(uniformNodes.reducedMode.lessThan(0.5), () => {
+      const bloomProbe = max(vec2(1.0).div(uniformNodes.resolution), vec2(0.0006));
+
+      neighborPeak.assign(
+        samplePeak(distortedUv.add(vec2(bloomProbe.x, 0.0)))
+          .add(samplePeak(distortedUv.sub(vec2(bloomProbe.x, 0.0))))
+          .add(samplePeak(distortedUv.add(vec2(0.0, bloomProbe.y))))
+          .add(samplePeak(distortedUv.sub(vec2(0.0, bloomProbe.y))))
+          .mul(0.25)
+      );
+    });
+
+    const sparkleIsolated = smoothstep(0.04, 0.2, highlight.sub(neighborPeak))
+      .mul(float(1.0).sub(smoothstep(0.08, 0.3, neighborPeak)));
+    const bloomMask = smoothstep(uniformNodes.bloomParams.y, 1.0, highlight)
+      .mul(float(1.0).sub(sparkleIsolated.mul(0.85)));
+    const bloomLift = uniformNodes.bloomParams.x.mul(depthBlend.mul(0.22).add(0.18))
+      .mul(float(1.0).sub(sparkleIsolated.mul(0.65)));
+    color.addAssign(color.mul(bloomMask).mul(bloomLift));
+
+    const scanline = sin(distortedUv.y.mul(uniformNodes.resolution.y).mul(1.5)).mul(0.03).add(0.97);
+    const scanlineStrength = clamp(depthBlend, 0.0, 1.0)
+      .mul(uniformNodes.grading.w)
+      .mul(float(1.0).sub(uniformNodes.reducedMode.mul(0.9)));
+    color.assign(color.mul(mix(1.0, scanline, scanlineStrength)));
+
+    const peak = peakOf(color).toVar();
+    If(uniformNodes.flashlightActive.greaterThan(0.5), () => {
+      const beamCenterDistance = distance(distortedUv, vec2(0.5));
+      const beamInfluence = float(1.0).sub(smoothstep(0.0, 0.38, beamCenterDistance));
+      const localCompress = beamInfluence.mul(smoothstep(0.3, 0.75, peak)).mul(0.45);
+
+      color.assign(mix(color, color.div(color.mul(0.7).add(1.0)), localCompress));
+      peak.assign(peakOf(color));
+    });
+
+    const rollStart = max(0.45, uniformNodes.highlightRoll.x.sub(uniformNodes.exposure.mul(0.08)));
+    const rollBlend = smoothstep(rollStart, rollStart.add(uniformNodes.highlightRoll.y), peak)
+      .mul(uniformNodes.highlightRoll.z);
+    const rolled = color.div(color.add(1.0));
+
+    color.assign(mix(color, rolled, rollBlend));
+
+    return vec4(clamp(color, 0.0, 1.0), baseSample.a);
+  })();
+}
 
 export class UnderwaterEffect {
   constructor(renderer, scene, camera) {
@@ -308,13 +355,16 @@ export class UnderwaterEffect {
     this.camera = camera;
     this.time = 0;
 
-    // Phase 2b keeps the existing wrapper boundary intact while routing the
-    // scene through RenderPipeline. The underwater shader port lands in Phase 2c.
+    // Phase 2c keeps the existing wrapper boundary intact while porting the
+    // underwater post-processing chain to TSL nodes on the RenderPipeline.
     this._renderPipeline = new THREE.RenderPipeline(renderer);
     this._scenePass = pass(scene, camera);
     this._sceneColorNode = this._scenePass.getTextureNode('output');
     this._activeOutputNode = null;
     this._bloomRenderNode = null;
+    this._bloomRenderTextureNode = null;
+    this._underwaterSceneOutputNode = null;
+    this._underwaterBloomOutputNode = null;
     this._rendererSize = new THREE.Vector2();
     this._drawingBufferSize = new THREE.Vector2();
     this._effectiveBloomSize = new THREE.Vector2();
@@ -341,9 +391,7 @@ export class UnderwaterEffect {
     this._lastRenderMs = 0;
     this._consecutiveEmergencyFrames = 0;
 
-    this._setOutputNode(this._sceneColorNode, true);
-
-    this.underwaterPass = { uniforms: cloneUniforms(UnderwaterShader.uniforms) };
+    this.underwaterPass = { uniforms: cloneUniforms(UNDERWATER_UNIFORM_TEMPLATE) };
     this.underwaterPass.uniforms.resolution.value.set(window.innerWidth, window.innerHeight);
     this.underwaterPass.uniforms.depthThresholds.value.set(
       this.tuning.depthThresholds.mid,
@@ -379,6 +427,8 @@ export class UnderwaterEffect {
       this.tuning.bloom.surfaceThreshold,
       this.tuning.bloom.radius * 2.4
     );
+    this._underwaterUniformNodes = createUnderwaterUniformNodes(this.underwaterPass.uniforms);
+    this._underwaterSceneOutputNode = this._createUnderwaterOutputNode(this._sceneColorNode);
 
     // Bloom node for ultra tier
     this._bloomPass = null;
@@ -444,10 +494,32 @@ export class UnderwaterEffect {
     this._renderPipeline.needsUpdate = true;
   }
 
+  _createUnderwaterOutputNode(sourceNode) {
+    return convertToTexture(createUnderwaterPostColorNode(sourceNode, this._underwaterUniformNodes));
+  }
+
+  _updateUnderwaterNodeSizes(
+    width = this._appliedComposerWidth || this._getRendererSize().width,
+    height = this._appliedComposerHeight || this._getRendererSize().height,
+    pixelRatio = this._appliedComposerPixelRatio || this._nativeComposerPixelRatio,
+    scale = this._appliedComposerScale || this._composerScale || 1,
+  ) {
+    updateRttNodeScale(this._bloomRenderTextureNode, width, height, pixelRatio, scale);
+    updateRttNodeScale(this._underwaterSceneOutputNode, width, height, pixelRatio, scale);
+    updateRttNodeScale(this._underwaterBloomOutputNode, width, height, pixelRatio, scale);
+  }
+
+  _setReducedMode(enabled) {
+    this._reducedShaderMode = enabled;
+    const reducedModeValue = enabled ? 1.0 : 0.0;
+    this.underwaterPass.uniforms.reducedMode.value = reducedModeValue;
+    this._underwaterUniformNodes.reducedMode.value = reducedModeValue;
+  }
+
   _syncOutputNode(force = false) {
     const nextNode = this._bloomPass && !this._bloomSuspended
-      ? this._bloomRenderNode
-      : this._sceneColorNode;
+      ? this._underwaterBloomOutputNode
+      : this._underwaterSceneOutputNode;
     this._setOutputNode(nextNode, force);
   }
 
@@ -477,7 +549,7 @@ export class UnderwaterEffect {
 
   /**
    * Add or remove the bloom node based on quality tier.
-   * Ultra tier gets multi-pass bloom; other tiers stay pass-through in phase 2b.
+   * Ultra tier keeps the multi-pass bloom path upstream of the underwater TSL stage.
    */
   _setupBloom(tier) {
     if (tier === 'ultra' && !this._bloomPass) {
@@ -497,10 +569,16 @@ export class UnderwaterEffect {
       };
 
       this._bloomRenderNode = this._sceneColorNode.add(this._bloomPass);
+      this._bloomRenderTextureNode = convertToTexture(this._bloomRenderNode);
+      this._underwaterBloomOutputNode = this._createUnderwaterOutputNode(this._bloomRenderTextureNode);
     } else if (tier !== 'ultra' && this._bloomPass) {
       this._bloomPass.dispose();
       this._bloomPass = null;
+      disposeRttNode(this._underwaterBloomOutputNode);
+      disposeRttNode(this._bloomRenderTextureNode);
       this._bloomRenderNode = null;
+      this._bloomRenderTextureNode = null;
+      this._underwaterBloomOutputNode = null;
       this._bloomSuspended = false;
       this._bloomSuspendedUntil = 0;
     }
@@ -511,6 +589,8 @@ export class UnderwaterEffect {
       this._bloomPass.threshold.value = this.tuning.bloom.surfaceThreshold;
       this._updateBloomNodeSize();
     }
+
+    this._updateUnderwaterNodeSizes();
 
     this._syncOutputNode(true);
   }
@@ -651,8 +731,7 @@ export class UnderwaterEffect {
     this._setScaleIndex(this._findScaleIndex(targetScale), { force: true, skipCooldown: true, holdRecovery: true, now });
     this._stableRecoveryFrames = 0;
     this._moderatePressureFrames = 0;
-    this._reducedShaderMode = true;
-    this.underwaterPass.uniforms.reducedMode.value = 1.0;
+    this._setReducedMode(true);
     if (this._bloomPass && !this._bloomSuspended) {
       this._setBloomSuspended(true, now);
     }
@@ -728,6 +807,7 @@ export class UnderwaterEffect {
       width * pixelRatio * nextScale,
       height * pixelRatio * nextScale
     );
+    this._updateUnderwaterNodeSizes(width, height, pixelRatio, nextScale);
   }
 
   _updatePassState(depth, flashlightOn, exposure) {
@@ -739,6 +819,10 @@ export class UnderwaterEffect {
     this.underwaterPass.uniforms.depth.value = depth;
     this.underwaterPass.uniforms.exposure.value = exposure;
     this.underwaterPass.uniforms.flashlightActive.value = flashlightOn ? 1 : 0;
+    this._underwaterUniformNodes.time.value = this.time;
+    this._underwaterUniformNodes.depth.value = depth;
+    this._underwaterUniformNodes.exposure.value = exposure;
+    this._underwaterUniformNodes.flashlightActive.value = flashlightOn ? 1 : 0;
 
     // Item 4: quantize inputs — skip expensive bloom target recomputation when nothing meaningful
     // changed. The lerp convergence itself must still run every frame so bloom params converge
@@ -860,8 +944,7 @@ export class UnderwaterEffect {
       underPressure ||
       sustainedModeratePressure;
     if (shouldReduceShader !== this._reducedShaderMode) {
-      this._reducedShaderMode = shouldReduceShader;
-      this.underwaterPass.uniforms.reducedMode.value = shouldReduceShader ? 1.0 : 0.0;
+      this._setReducedMode(shouldReduceShader);
     }
 
     if (underPressure) {
@@ -1006,8 +1089,7 @@ export class UnderwaterEffect {
    */
   applySoftwareRendererPolicy() {
     this._isSoftwareRenderer = true;
-    this._reducedShaderMode = true;
-    this.underwaterPass.uniforms.reducedMode.value = 1.0;
+    this._setReducedMode(true);
     this._setScaleIndex(this._scaleLadder.length - 1, { force: true, skipCooldown: true });
     if (this._bloomPass && !this._bloomSuspended) {
       this._setBloomSuspended(true);
