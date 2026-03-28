@@ -449,7 +449,7 @@ export class Amalgam {
       emissive: 0x502040,
       emissiveIntensity: isFar ? 0 : 0.7,
       normalMap: fleshNormal,
-      normalScale: isNear ? new THREE.Vector2(0.6, 0.6) : undefined,
+      ...(isNear && { normalScale: new THREE.Vector2(0.6, 0.6) }),
       transmission: isNear ? 0.15 : 0,
       thickness: isNear ? 0.8 : 0,
     });
@@ -471,7 +471,7 @@ export class Amalgam {
       emissive: 0x504030,
       emissiveIntensity: isFar ? 0 : 0.5,
       normalMap: boneNormal,
-      normalScale: isNear ? new THREE.Vector2(0.5, 0.5) : undefined,
+      ...(isNear && { normalScale: new THREE.Vector2(0.5, 0.5) }),
     });
 
     let organMat = new THREE.MeshPhysicalMaterial({
