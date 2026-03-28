@@ -403,6 +403,7 @@ export class TubeCluster {
 
     const tubeData    = [];
     const frillMats   = [];
+    const frillGlow   = new Float32Array(tubeCount);
     const fringeMeshes = [];  // for fringe flutter animation
     const wormData    = [];
 
@@ -494,7 +495,7 @@ export class TubeCluster {
     if (tierName === 'near') this._wormData = wormData;
 
     return { group: tierGroup, tubeMesh, openMesh, tubeData, frillMats, fringeMeshes,
-             particles, base, profile };
+             frillGlow, particles, base, profile };
   }
 
   _buildFarTier(profile, tierGroup) {
@@ -580,6 +581,7 @@ transformed.z += cos(uFarTime * 0.5 + position.y * 1.6 + position.x * 0.6) * 0.0
       openMesh: null,
       tubeData: [],
       frillMats: [],
+      frillGlow: null,
       fringeMeshes: [],
       particles: null,
       base: farMesh,
@@ -869,8 +871,7 @@ totalEmissiveRadiance += vec3(0.2, 0.6, 1.0) * tcFresnel * 0.55;`
     }
 
     if (tierName === 'near') {
-      // Worm emergence/feeding/retraction
-      if (this._wormData.length > 0) this._updateWorms(dt, t, nearPlayer);
+      this._syncWormVisuals(t);
       this._updateFrillFeedingGlow(tier, t);
       // Fringe flutter
       this._updateFringe(t, tier);
@@ -948,9 +949,10 @@ totalEmissiveRadiance += vec3(0.2, 0.6, 1.0) * tcFresnel * 0.55;`
   }
 
   _updateFrillFeedingGlow(tier, t) {
-    if (!tier.frillMats.length) return;
+    if (!tier.frillMats.length || !tier.frillGlow) return;
 
-    const glowByTube = new Array(tier.frillMats.length).fill(0);
+    const glowByTube = tier.frillGlow;
+    for (let i = 0; i < glowByTube.length; i++) glowByTube[i] = 0;
 
     for (const wd of this._wormData) {
       if (wd.tubeIndex >= glowByTube.length || wd.state !== 'feeding') continue;
@@ -996,7 +998,28 @@ totalEmissiveRadiance += vec3(0.2, 0.6, 1.0) * tcFresnel * 0.55;`
 
   // ── Worm emergence state machine ──────────────────────────────────────────
 
-  _updateWorms(dt, t, nearPlayer, syncVisuals = true) {
+  _syncWormVisuals(t) {
+    for (let i = 0; i < this._wormData.length; i++) {
+      const wd = this._wormData[i];
+
+      if (wd.wormMat.userData.shaderUniforms) {
+        const u = wd.wormMat.userData.shaderUniforms;
+        u.uWormPhase.value = wd.emergencePhase;
+        u.uFeedingPhase.value = wd.feedingPhase;
+      }
+
+      wd.tipMesh.visible = wd.emergencePhase > 0.05;
+      if (wd.tipMesh.visible) {
+        wd.tipMesh.position.lerpVectors(wd.pts[0], wd.extTip, wd.emergencePhase);
+        const s = wd.emergencePhase;
+        wd.tipMesh.scale.set(s, s, s);
+        wd.tipMat.emissiveIntensity = 1.0 + wd.emergencePhase
+          * (0.8 + Math.sin(t * 3.1 + i) * 0.5);
+      }
+    }
+  }
+
+  _updateWorms(dt, t, nearPlayer) {
     for (let i = 0; i < this._wormData.length; i++) {
       const wd = this._wormData[i];
 
@@ -1030,26 +1053,6 @@ totalEmissiveRadiance += vec3(0.2, 0.6, 1.0) * tcFresnel * 0.55;`
             wd.pendingRecoilDelay = 0;
           }
           break;
-      }
-
-      if (syncVisuals) {
-        // Upload emergence/feeding uniforms
-        if (wd.wormMat.userData.shaderUniforms) {
-          const u = wd.wormMat.userData.shaderUniforms;
-          u.uWormPhase.value    = wd.emergencePhase;
-          u.uFeedingPhase.value = wd.feedingPhase;
-        }
-
-        // Animate bioluminescent tip: track along worm curve using emergencePhase
-        wd.tipMesh.visible = wd.emergencePhase > 0.05;
-        if (wd.tipMesh.visible) {
-          // Interpolate from pts[0] (base) toward extTip (fully extended)
-          wd.tipMesh.position.lerpVectors(wd.pts[0], wd.extTip, wd.emergencePhase);
-          const s = wd.emergencePhase;
-          wd.tipMesh.scale.set(s, s, s);
-          wd.tipMat.emissiveIntensity = 1.0 + wd.emergencePhase
-            * (0.8 + Math.sin(t * 3.1 + i) * 0.5);
-        }
       }
     }
   }
