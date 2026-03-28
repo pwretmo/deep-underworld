@@ -282,13 +282,15 @@ export class Terrain {
     return this.chunks.size;
   }
 
-  update(playerPos) {
+  update(playerPos, allowChunkWork = true) {
     const cx = Math.round(playerPos.x / this.chunkSize);
     const cz = Math.round(playerPos.z / this.chunkSize);
 
-    // Build/apply at most 1 chunk payload per frame and request at most 1 new chunk
-    this._applyReadyPayloads(1);
-    this._requestPendingChunks(1);
+    if (allowChunkWork) {
+      // Build/apply at most 1 chunk payload per streaming frame and request at most 1 new chunk
+      this._applyReadyPayloads(1);
+      this._requestPendingChunks(1);
+    }
 
     if (cx === this.lastChunkX && cz === this.lastChunkZ) return;
     this.lastChunkX = cx;

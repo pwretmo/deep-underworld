@@ -361,12 +361,14 @@ export class Flora {
     return this.groups.size;
   }
 
-  update(dt, playerPos) {
+  update(dt, playerPos, allowChunkWork = true) {
     this.time += dt;
 
-    // Build/apply at most 1 payload per frame and request at most 1 new chunk
-    this._applyReadyPayloads(1);
-    this._requestPendingChunks(1);
+    if (allowChunkWork) {
+      // Build/apply at most 1 payload per streaming frame and request at most 1 new chunk
+      this._applyReadyPayloads(1);
+      this._requestPendingChunks(1);
+    }
 
     // Chunk management
     const cx = Math.round(playerPos.x / this.chunkSize);

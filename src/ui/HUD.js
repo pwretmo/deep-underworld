@@ -66,6 +66,8 @@ export class HUD {
     this._diagLastUpdate = 0;
     this._diagStatusMemory = new Map();
     this._diagFlashUntil = new Map();
+    this._bgLoading = document.getElementById('bg-loading');
+    this._bgLoadingVisible = false;
 
     this.creatureList.addEventListener('click', (e) => {
       const entry = e.target.closest('.creature-entry');
@@ -448,6 +450,16 @@ export class HUD {
     return this.creatureTypes.length > 9
       ? 'Use Arrow keys to select and Enter to track. 1-9 track first nine, click any row to track the rest. 0 stops tracking.'
       : 'Use Arrow keys to select and Enter to track. 1-9 track, click any row to track with the mouse. 0 stops tracking.';
+  }
+
+  updateBackgroundLoading(active) {
+    if (active === this._bgLoadingVisible) return;
+    this._bgLoadingVisible = active;
+    if (active) {
+      this._bgLoading.classList.add('visible');
+    } else {
+      this._bgLoading.classList.remove('visible');
+    }
   }
 
   updateLocator(creaturesByType, playerPos, camera) {
