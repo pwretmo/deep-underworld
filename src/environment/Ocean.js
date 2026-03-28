@@ -103,7 +103,7 @@ function createParticleMaterial(geometry, snowTexture, baseSize, baseOpacity) {
   const coc = viewDist.sub(focusDist).abs().div(focusDist);
   const dofScale = float(1.0).add(coc.mul(0.35));
   const bokehScale = float(1.0).add(bokeh.mul(1.4));
-  const scatter = float(1.0).add(0.35.div(float(1.0).add(viewDist.mul(0.02))));
+  const scatter = float(1.0).add(float(0.35).div(float(1.0).add(viewDist.mul(0.02))));
   const bokehBright = float(1.0).add(bokeh.mul(2.0));
   const distFade = smoothstep(3.0, 14.0, viewDist);
 
