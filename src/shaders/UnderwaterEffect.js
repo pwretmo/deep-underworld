@@ -317,6 +317,7 @@ export class UnderwaterEffect {
     this._bloomRenderNode = null;
     this._rendererSize = new THREE.Vector2();
     this._drawingBufferSize = new THREE.Vector2();
+    this._effectiveBloomSize = new THREE.Vector2();
 
     this.tuning = RENDER_PIPELINE_TUNING;
     this._nativeComposerPixelRatio = Math.max(renderer.getPixelRatio(), 1);
@@ -450,6 +451,21 @@ export class UnderwaterEffect {
     this._setOutputNode(nextNode, force);
   }
 
+  _getEffectiveBloomSize(width, height) {
+    const scale = THREE.MathUtils.clamp(
+      this._appliedComposerScale || this._composerScale || 1,
+      this.tuning.performance.minScale,
+      1
+    );
+
+    this._effectiveBloomSize.set(
+      Math.max(1, Math.round(width * scale)),
+      Math.max(1, Math.round(height * scale))
+    );
+
+    return this._effectiveBloomSize;
+  }
+
   _updateBloomNodeSize() {
     if (!this._bloomPass) {
       return;
@@ -471,6 +487,15 @@ export class UnderwaterEffect {
         this.tuning.bloom.radius,
         this.tuning.bloom.surfaceThreshold
       );
+
+      // BloomNode sizes itself from the renderer drawing buffer every frame.
+      // Wrap the instance so its blur chain follows the adaptive composer scale.
+      const baseSetSize = this._bloomPass.setSize.bind(this._bloomPass);
+      this._bloomPass.setSize = (width, height) => {
+        const scaledSize = this._getEffectiveBloomSize(width, height);
+        baseSetSize(scaledSize.width, scaledSize.height);
+      };
+
       this._bloomRenderNode = this._sceneColorNode.add(this._bloomPass);
     } else if (tier !== 'ultra' && this._bloomPass) {
       this._bloomPass.dispose();
