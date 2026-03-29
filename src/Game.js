@@ -972,7 +972,7 @@ export class Game {
       if (this.flashlightOn) {
         this.player.updateFogUniforms(this._fog);
       }
-      this.ocean.update(dt, depth, this.player.position);
+      this.ocean.update(dt, depth, this.player.position, this.renderer);
 
       // Time terrain + flora chunk work so creature spawning can be deferred
       // when the frame is already heavy (prevents compounding expensive operations).
