@@ -1,4 +1,5 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
+import { abs, clamp, dot, materialEmissive, normalLocal, normalView, positionLocal, positionView, pow, sin, sub, uniform, uv, varying, vec3 } from 'three/tsl';
 import { LOD_NEAR_DISTANCE, LOD_MEDIUM_DISTANCE, toStandardMaterial } from './lodUtils.js';
 
 const TWO_PI = Math.PI * 2;
@@ -164,42 +165,29 @@ const _sharedTextures = new Set([sacNormalTex, proboscisNormalTex, veinEmissiveT
 // Maps LOD level indices to tier names (matches addLevel insertion order: 0, 42, 86)
 const TIER_NAMES = ['near', 'medium', 'far'];
 
-// ── Sac vertex shader chunks for per-vertex inflation waves ──
-const sacVertexPars = /* glsl */ `
-  uniform float uTime;
-  uniform float uHeartbeatPhase;
-  uniform float uInflation;
-  uniform float uProximityPulse;
-  varying vec3 vWorldNormal;
-  varying vec3 vViewDir;
-  varying vec2 vSacUv;
-`;
+// ── TSL sac shader — per-vertex inflation waves + Fresnel rim + vein glow ──
+function _applySacShader(mat, uniforms) {
+  mat.userData.shaderUniforms = uniforms;
 
-const sacVertexMain = /* glsl */ `
-  vSacUv = uv;
-  float wave = sin(position.y * 6.0 + uTime * 2.5 + uHeartbeatPhase) * 0.06;
-  wave += sin(position.x * 4.0 + position.z * 5.0 + uTime * 1.8) * 0.03;
-  wave += uProximityPulse * sin(position.y * 3.0 + uTime * 4.0) * 0.04;
-  float distension = sin(position.y * 2.0 + uTime * 0.7 + uHeartbeatPhase * 0.5) * 0.04 * uInflation;
-  transformed += normal * (wave + distension);
-`;
+  // TSL vertex: inflation pulsation wave
+  const vSacUv = varying(uv(), 'vSacUv');
+  const wave1 = sin(positionLocal.y.mul(6.0).add(uniforms.uTime.mul(2.5)).add(uniforms.uHeartbeatPhase)).mul(0.06);
+  const wave2 = sin(positionLocal.x.mul(4.0).add(positionLocal.z.mul(5.0)).add(uniforms.uTime.mul(1.8))).mul(0.03);
+  const proxWave = uniforms.uProximityPulse.mul(sin(positionLocal.y.mul(3.0).add(uniforms.uTime.mul(4.0)))).mul(0.04);
+  const distension = sin(positionLocal.y.mul(2.0).add(uniforms.uTime.mul(0.7)).add(uniforms.uHeartbeatPhase.mul(0.5))).mul(0.04).mul(uniforms.uInflation);
+  const totalDisp = wave1.add(wave2).add(proxWave).add(distension);
+  mat.positionNode = positionLocal.add(normalLocal.mul(totalDisp));
 
-const sacFragmentPars = /* glsl */ `
-  uniform float uTime;
-  uniform float uHeartbeatPhase;
-  uniform float uVeinPulse;
-  varying vec3 vWorldNormal;
-  varying vec3 vViewDir;
-  varying vec2 vSacUv;
-`;
+  // TSL fragment: Fresnel rim-light + heartbeat vein glow
+  const viewDir = positionView.negate().normalize();
+  const rim = pow(sub(1.0, abs(dot(normalView, viewDir))), 3.0);
+  const veinGlow = sin(vSacUv.y.mul(12.0).add(uniforms.uTime.mul(3.0)).add(uniforms.uHeartbeatPhase)).mul(0.5).add(0.5);
+  mat.emissiveNode = materialEmissive
+    .add(vec3(0.18, 0.06, 0.12).mul(rim).mul(1.5))
+    .add(vec3(0.25, 0.08, 0.15).mul(veinGlow).mul(uniforms.uVeinPulse).mul(0.4));
 
-const sacFragmentMain = /* glsl */ `
-  // Color constants are linear-space emissive contributions; OutputPass handles sRGB encoding
-  float fresnel = pow(1.0 - max(dot(vWorldNormal, vViewDir), 0.0), 3.0);
-  gl_FragColor.rgb += vec3(0.18, 0.06, 0.12) * fresnel * 1.5;
-  float veinGlow = sin(vSacUv.y * 12.0 + uTime * 3.0 + uHeartbeatPhase) * 0.5 + 0.5;
-  gl_FragColor.rgb += vec3(0.25, 0.08, 0.15) * veinGlow * uVeinPulse * 0.4;
-`;
+  mat.needsUpdate = true;
+}
 
 // Parasitic creature — pulsing translucent sacs with barbed proboscis, grasping tendrils, vein network
 export class Parasite {
@@ -270,41 +258,14 @@ export class Parasite {
       side: THREE.DoubleSide,
     });
 
-    const heartbeatPhase = this._heartbeatPhase;
-    const inflation = this._inflation;
-
-    mat.onBeforeCompile = (shader) => {
-      shader.uniforms.uTime = { value: 0 };
-      shader.uniforms.uHeartbeatPhase = { value: heartbeatPhase };
-      shader.uniforms.uInflation = { value: inflation };
-      shader.uniforms.uProximityPulse = { value: 0 };
-      shader.uniforms.uVeinPulse = { value: 0 };
-
-      shader.vertexShader = shader.vertexShader.replace(
-        '#include <common>',
-        '#include <common>\n' + sacVertexPars
-      );
-      shader.vertexShader = shader.vertexShader.replace(
-        '#include <begin_vertex>',
-        '#include <begin_vertex>\n' + sacVertexMain
-      );
-      // Compute vWorldNormal and vViewDir after model-view transform
-      shader.vertexShader = shader.vertexShader.replace(
-        '#include <worldpos_vertex>',
-        '#include <worldpos_vertex>\n  vWorldNormal = normalize(normalMatrix * objectNormal);\n  vViewDir = normalize(-mvPosition.xyz);\n'
-      );
-
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <common>',
-        '#include <common>\n' + sacFragmentPars
-      );
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <dithering_fragment>',
-        sacFragmentMain + '\n#include <dithering_fragment>'
-      );
-
-      mat.userData.shaderUniforms = shader.uniforms;
+    const sacUniforms = {
+      uTime: uniform(0),
+      uHeartbeatPhase: uniform(this._heartbeatPhase),
+      uInflation: uniform(this._inflation),
+      uProximityPulse: uniform(0),
+      uVeinPulse: uniform(0),
     };
+    _applySacShader(mat, sacUniforms);
 
     return mat;
   }

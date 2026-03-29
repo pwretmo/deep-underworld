@@ -1,4 +1,5 @@
-import * as THREE from "three";
+import * as THREE from 'three/webgpu';
+import { abs, attribute, cos, dot, float as tslFloat, materialColor, materialEmissive, max as tslMax, normalView, positionLocal, positionView, pow, sin, smoothstep as tslSmoothstep, sub, texture as tslTexture, uniform, uv, varying, vec2, vec3 } from 'three/tsl';
 
 const LOD_NEAR_DISTANCE = 30;
 const LOD_MEDIUM_DISTANCE = 80;
@@ -154,6 +155,82 @@ const bellNormalTexture = createBellNormalTexture();
 const veinTexture = createVeinTexture();
 const poreTexture = createPoreTexture();
 
+// ── TSL bell shader — per-vertex contraction wave + bioluminescent emissive ──
+
+function _applyBellShader(mat, uniforms) {
+  mat.userData.shaderUniforms = uniforms;
+
+  // TSL vertex: per-vertex bell contraction with wave propagation
+  const jellyUv = varying(uv(), 'vJellyUv');
+  const xz = vec2(positionLocal.x, positionLocal.z);
+  const radial = xz.length().div(tslMax(uniforms.uBellSize, 0.001));
+  const edge = tslSmoothstep(0.33, 1.0, radial);
+  const crown = sub(1.0, tslSmoothstep(0.0, 0.45, radial));
+  const contraction = tslMax(uniforms.uContractionPhase, 0.0);
+  const relax = tslMax(uniforms.uContractionPhase.negate(), 0.0);
+  const stretchMarks = sin(positionLocal.y.mul(34.0).add(radial.mul(16.0)).add(uniforms.uJellyTime.mul(2.2)))
+    .mul(contraction).mul(0.03).mul(uniforms.uBellSize);
+  const radialContract = contraction.mul(edge).mul(
+    tslFloat(0.2).add(sin(radial.mul(18.0).add(uniforms.uJellyTime.mul(3.1))).mul(0.02))
+  );
+  const factor = sub(1.0, radialContract).add(relax.mul(edge).mul(0.06));
+  const newX = positionLocal.x.mul(factor);
+  const newZ = positionLocal.z.mul(factor);
+
+  // Damage — localized bell deformation
+  const bellAngle = positionLocal.z.atan2(positionLocal.x);
+  const damageShape = uniforms.uDamage.mul(tslSmoothstep(0.15, 1.0, radial)).mul(0.24).mul(uniforms.uBellSize);
+  const damageOffset = damageShape.mul(tslMax(0.0, cos(bellAngle.sub(uniforms.uDamageSide))));
+
+  const newY = positionLocal.y
+    .add(crown.mul(contraction).mul(0.04).mul(uniforms.uBellSize))
+    .sub(edge.mul(contraction).mul(0.16).mul(uniforms.uBellSize))
+    .add(edge.mul(relax).mul(0.05).mul(uniforms.uBellSize))
+    .sub(damageOffset)
+    .add(stretchMarks);
+
+  const vBellEdge = varying(edge, 'vBellEdge');
+  const vBellTravel = varying(radial, 'vBellTravel');
+
+  mat.positionNode = vec3(newX, newY, newZ);
+
+  // TSL fragment: pulse wave + vein texture + Fresnel + contraction glow
+  const pulseHead = tslSmoothstep(uniforms.uPulseTravel.sub(0.2), uniforms.uPulseTravel.add(0.08), vBellTravel)
+    .mul(sub(1.0, tslSmoothstep(uniforms.uPulseTravel.add(0.08), uniforms.uPulseTravel.add(0.24), vBellTravel)));
+  const veins = tslTexture(veinTexture, vec2(jellyUv.x, jellyUv.y.mul(1.25))).r;
+  const viewDir = positionView.negate().normalize();
+  const fresnel = pow(sub(1.0, abs(dot(viewDir, normalView))), 2.6);
+  const contractionGlow = tslMax(uniforms.uContractionPhase, 0.0).mul(0.55);
+
+  mat.emissiveNode = materialEmissive.add(
+    materialColor.mul(
+      pulseHead.mul(1.25)
+        .add(veins.mul(0.2))
+        .add(fresnel.mul(0.32))
+        .add(contractionGlow.mul(vBellEdge).mul(0.34))
+    )
+  );
+
+  mat.needsUpdate = true;
+}
+
+// ── TSL nematocyst shader — instance pulse scaling + emissive boost ──
+
+function _applyNematocystShader(mat, uniforms) {
+  mat.userData.shaderUniforms = uniforms;
+
+  const instancePulseAttr = attribute('instancePulse');
+  const pulse = sin(uniforms.uPulseTime.mul(2.8).add(instancePulseAttr.mul(1.6))).mul(0.2).add(0.8);
+  mat.positionNode = positionLocal.mul(pulse);
+
+  const vPulse = varying(pulse, 'vPulse');
+  mat.emissiveNode = materialEmissive.add(
+    materialColor.mul(vPulse.sub(0.76)).mul(0.42)
+  );
+
+  mat.needsUpdate = true;
+}
+
 const LOD_PROFILE = {
   near: {
     bellWidthSegments: 64,
@@ -293,81 +370,15 @@ export class Jellyfish {
       normalScale: new THREE.Vector2(0.28 * detailScale, 0.42 * detailScale),
     });
 
-    mat.userData.shaderUniforms = {
-      uContractionPhase: { value: 0 },
-      uJellyTime: { value: 0 },
-      uPulseTravel: { value: 0 },
-      uDamage: { value: 0 },
-      uDamageSide: { value: 1 },
-      uBellSize: { value: size },
-      uVeinMap: { value: veinTexture },
+    const bellUniforms = {
+      uContractionPhase: uniform(0),
+      uJellyTime: uniform(0),
+      uPulseTravel: uniform(0),
+      uDamage: uniform(0),
+      uDamageSide: uniform(1),
+      uBellSize: uniform(size),
     };
-
-    mat.onBeforeCompile = (shader) => {
-      Object.assign(shader.uniforms, mat.userData.shaderUniforms);
-
-      shader.vertexShader = shader.vertexShader
-        .replace(
-          "#include <common>",
-          `#include <common>
-uniform float uContractionPhase;
-uniform float uJellyTime;
-uniform float uDamage;
-uniform float uDamageSide;
-uniform float uBellSize;
-varying float vBellEdge;
-varying float vBellHeight;
-varying float vBellTravel;
-varying vec2 vJellyUv;`,
-        )
-        .replace(
-          "#include <begin_vertex>",
-          `#include <begin_vertex>
-vJellyUv = uv;
-float radial = length(position.xz) / max(uBellSize, 0.001);
-float edge = smoothstep(0.33, 1.0, radial);
-float crown = 1.0 - smoothstep(0.0, 0.45, radial);
-float contraction = max(uContractionPhase, 0.0);
-float relax = max(-uContractionPhase, 0.0);
-float stretchMarks = sin(position.y * 34.0 + radial * 16.0 + uJellyTime * 2.2) * contraction * 0.03 * uBellSize;
-float radialContract = contraction * edge * (0.2 + sin(radial * 18.0 + uJellyTime * 3.1) * 0.02);
-transformed.xz *= (1.0 - radialContract + relax * edge * 0.06);
-transformed.y += crown * contraction * 0.04 * uBellSize;
-transformed.y -= edge * contraction * 0.16 * uBellSize;
-transformed.y += edge * relax * 0.05 * uBellSize;
-float damageShape = uDamage * smoothstep(0.15, 1.0, radial) * 0.24 * uBellSize;
-transformed.y -= damageShape * max(0.0, cos(atan(position.z, position.x) - uDamageSide));
-transformed.y += stretchMarks;
-vBellEdge = edge;
-vBellHeight = transformed.y;
-vBellTravel = radial;`,
-        );
-
-      shader.fragmentShader = shader.fragmentShader
-        .replace(
-          "#include <common>",
-          `#include <common>
-uniform float uContractionPhase;
-uniform float uJellyTime;
-uniform float uPulseTravel;
-uniform sampler2D uVeinMap;
-varying float vBellEdge;
-varying float vBellHeight;
-varying float vBellTravel;
-varying vec2 vJellyUv;`,
-        )
-        .replace(
-          "#include <emissivemap_fragment>",
-          `#include <emissivemap_fragment>
-float pulseHead = smoothstep(uPulseTravel - 0.2, uPulseTravel + 0.08, vBellTravel) * (1.0 - smoothstep(uPulseTravel + 0.08, uPulseTravel + 0.24, vBellTravel));
-float veins = texture2D(uVeinMap, vec2(vJellyUv.x, vJellyUv.y * 1.25)).r;
-float fresnel = pow(1.0 - abs(dot(normalize(vViewPosition), normal)), 2.6);
-float contractionGlow = max(uContractionPhase, 0.0) * 0.55;
-totalEmissiveRadiance += diffuseColor.rgb * (pulseHead * 1.25 + veins * 0.2 + fresnel * 0.32 + contractionGlow * vBellEdge * 0.34);`,
-        );
-
-      mat.userData.shader = shader;
-    };
+    _applyBellShader(mat, bellUniforms);
 
     return mat;
   }
@@ -647,41 +658,10 @@ totalEmissiveRadiance += diffuseColor.rgb * (pulseHead * 1.25 + veins * 0.2 + fr
     }
     geo.setAttribute("instancePulse", pulseAttribute);
 
-    mat.userData.shaderUniforms = {
-      uPulseTime: { value: 0 },
+    const nemaUniforms = {
+      uPulseTime: uniform(0),
     };
-
-    mat.onBeforeCompile = (shader) => {
-      Object.assign(shader.uniforms, mat.userData.shaderUniforms);
-      shader.vertexShader = shader.vertexShader
-        .replace(
-          "#include <common>",
-          `#include <common>
-attribute float instancePulse;
-uniform float uPulseTime;
-varying float vPulse;`,
-        )
-        .replace(
-          "#include <begin_vertex>",
-          `#include <begin_vertex>
-float pulse = 0.8 + 0.2 * sin(uPulseTime * 2.8 + instancePulse * 1.6);
-transformed *= pulse;
-vPulse = pulse;`,
-        );
-
-      shader.fragmentShader = shader.fragmentShader
-        .replace(
-          "#include <common>",
-          `#include <common>
-varying float vPulse;`,
-        )
-        .replace(
-          "#include <emissivemap_fragment>",
-          `#include <emissivemap_fragment>
-totalEmissiveRadiance += diffuseColor.rgb * (vPulse - 0.76) * 0.42;`,
-        );
-      mat.userData.shader = shader;
-    };
+    _applyNematocystShader(mat, nemaUniforms);
 
     group.add(mesh);
 

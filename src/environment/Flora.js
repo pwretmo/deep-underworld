@@ -1,4 +1,5 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
+import { abs, dot, materialColor, materialEmissive, normalView, positionView, pow, sub } from 'three/tsl';
 import { qualityManager } from '../QualityManager.js';
 
 export class Flora {
@@ -201,17 +202,11 @@ export class Flora {
       emissive: new THREE.Color(0.02, kelpData.green * 0.15, 0.01),
       emissiveIntensity: 0.5,
     });
-    mat.onBeforeCompile = (shader) => {
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <emissivemap_fragment>',
-        `#include <emissivemap_fragment>
-        {
-          float NdV = abs(dot(normal, normalize(vViewPosition)));
-          float rim = pow(1.0 - NdV, 2.0);
-          totalEmissiveRadiance += diffuseColor.rgb * rim * 0.15;
-        }`
-      );
-    };
+    // TSL: Fresnel rim-light on kelp
+    const viewDir = positionView.negate().normalize();
+    const NdV = abs(dot(normalView, viewDir));
+    const rim = pow(sub(1.0, NdV), 2.0);
+    mat.emissiveNode = materialEmissive.add(materialColor.mul(rim).mul(0.15));
 
     const kelp = new THREE.Mesh(geo, mat);
     kelp.position.set(kelpData.x, kelpData.y, kelpData.z);

@@ -1,4 +1,5 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
+import { abs, clamp, dot, float as tslFloat, materialEmissive, materialOpacity, normalLocal, normalView, positionLocal, positionView, pow, sin, sub, uniform, uv, varying, vec3 } from 'three/tsl';
 import { qualityManager } from '../QualityManager.js';
 
 const TWO_PI = Math.PI * 2;
@@ -122,51 +123,34 @@ const _sharedTextures = new Set([sacNormalTex, veinEmissiveTex]);
 // LOD addLevel insertion order → tier name
 const TIER_NAMES = ['near', 'medium', 'far'];
 
-// ── Vertex shader — radial pulsation wave + fluid slosh ──
-const _sacVertPars = /* glsl */ `
-  uniform float uTime;
-  uniform float uPulsePhase;
-  uniform float uPulseWaveSpeed;
-  uniform float uInflation;
-  uniform float uProximityPulse;
-  uniform vec3  uSloshOffset;
-  varying vec3  vBsWorldNormal;
-  varying vec3  vBsViewDir;
-  varying vec2  vBirthUv;
-`;
-const _sacVertMain = /* glsl */ `
-  vBirthUv = uv;
-  // Radial pulsation wave traveling across sac surface
-  float wave  = sin(position.y * 7.0 + uTime * uPulseWaveSpeed + uPulsePhase) * 0.07;
-  wave       += sin(position.x * 5.0 + position.z * 6.0 + uTime * 2.2)        * 0.04;
-  // Fluid distension — asymmetric bulge with breathing rhythm
-  float dist2  = sin(position.y * 2.5 + uTime * 0.8 + uPulsePhase * 0.5) * 0.045 * uInflation;
-  // Proximity: heartbeat acceleration
-  wave += uProximityPulse * sin(position.y * 4.0 + uTime * 5.0 + uPulsePhase) * 0.05;
-  // Fluid slosh — inertia-driven vertex shift
-  float slosh = dot(normal, uSloshOffset) * 0.10;
-  transformed += normal * (wave + dist2 + slosh);
-`;
-const _sacFragPars = /* glsl */ `
-  uniform float uTime;
-  uniform float uPulsePhase;
-  uniform float uVeinPulse;
-  varying vec3  vBsWorldNormal;
-  varying vec3  vBsViewDir;
-  varying vec2  vBirthUv;
-`;
-const _sacFragMain = /* glsl */ `
-  // Fresnel rim-light — sac silhouette visible in dark abyss water
-  // Color constants are linear-space emissive contributions; OutputPass handles sRGB encoding
-  float bsFres = pow(1.0 - max(dot(vBsWorldNormal, vBsViewDir), 0.0), 3.0);
-  gl_FragColor.rgb += vec3(0.22, 0.07, 0.14) * bsFres * 1.8;
-  // Heartbeat capillary glow through membrane
-  float bsVein = sin(vBirthUv.y * 14.0 + uTime * 3.5 + uPulsePhase) * 0.5 + 0.5;
-  gl_FragColor.rgb += vec3(0.30, 0.08, 0.18) * bsVein * uVeinPulse * 0.5;
-  // Opacity pulses with heartbeat
-  float bsOpPulse = sin(uTime * 1.0 + uPulsePhase) * 0.06;
-  gl_FragColor.a = clamp(gl_FragColor.a + bsOpPulse, 0.45, 0.95);
-`;
+// ── TSL sac shader application ──
+function _applySacShader(mat, uniforms) {
+  mat.userData.shaderUniforms = uniforms;
+
+  // TSL vertex: radial pulsation wave + fluid slosh
+  const vBirthUv = varying(uv(), 'vBirthUv');
+  const wave1 = sin(positionLocal.y.mul(7.0).add(uniforms.uTime.mul(uniforms.uPulseWaveSpeed)).add(uniforms.uPulsePhase)).mul(0.07);
+  const wave2 = sin(positionLocal.x.mul(5.0).add(positionLocal.z.mul(6.0)).add(uniforms.uTime.mul(2.2))).mul(0.04);
+  const dist2 = sin(positionLocal.y.mul(2.5).add(uniforms.uTime.mul(0.8)).add(uniforms.uPulsePhase.mul(0.5))).mul(0.045).mul(uniforms.uInflation);
+  const proxWave = uniforms.uProximityPulse.mul(sin(positionLocal.y.mul(4.0).add(uniforms.uTime.mul(5.0)).add(uniforms.uPulsePhase))).mul(0.05);
+  const slosh = dot(normalLocal, uniforms.uSloshOffset).mul(0.10);
+  const totalDisp = wave1.add(wave2).add(dist2).add(proxWave).add(slosh);
+  mat.positionNode = positionLocal.add(normalLocal.mul(totalDisp));
+
+  // TSL fragment: Fresnel rim-light + heartbeat capillary glow
+  const viewDir = positionView.negate().normalize();
+  const rim = pow(sub(1.0, abs(dot(normalView, viewDir))), 3.0);
+  const bsVein = sin(vBirthUv.y.mul(14.0).add(uniforms.uTime.mul(3.5)).add(uniforms.uPulsePhase)).mul(0.5).add(0.5);
+  mat.emissiveNode = materialEmissive
+    .add(vec3(0.22, 0.07, 0.14).mul(rim).mul(1.8))
+    .add(vec3(0.30, 0.08, 0.18).mul(bsVein).mul(uniforms.uVeinPulse).mul(0.5));
+
+  // Heartbeat opacity pulse
+  const bsOpPulse = sin(uniforms.uTime.mul(1.0).add(uniforms.uPulsePhase)).mul(0.06);
+  mat.opacityNode = clamp(materialOpacity.add(bsOpPulse), 0.45, 0.95);
+
+  mat.needsUpdate = true;
+}
 
 // Pulsating biomechanical egg sac cluster — per-vertex membrane deformation + fluid dynamics
 export class BirthSac {
@@ -249,38 +233,16 @@ export class BirthSac {
     const pulsePhase = this._heartbeatPhase;
     const inflation  = this._inflation;
 
-    mat.onBeforeCompile = (shader) => {
-      shader.uniforms.uTime           = { value: 0 };
-      shader.uniforms.uPulsePhase     = { value: pulsePhase };
-      shader.uniforms.uPulseWaveSpeed = { value: 2.5 };
-      shader.uniforms.uInflation      = { value: inflation };
-      shader.uniforms.uProximityPulse = { value: 0 };
-      shader.uniforms.uVeinPulse      = { value: 0 };
-      shader.uniforms.uSloshOffset    = { value: new THREE.Vector3() };
-
-      shader.vertexShader = shader.vertexShader.replace(
-        '#include <common>',
-        '#include <common>\n' + _sacVertPars
-      );
-      shader.vertexShader = shader.vertexShader.replace(
-        '#include <begin_vertex>',
-        '#include <begin_vertex>\n' + _sacVertMain
-      );
-      shader.vertexShader = shader.vertexShader.replace(
-        '#include <worldpos_vertex>',
-        '#include <worldpos_vertex>\n  vBsWorldNormal = normalize(normalMatrix * objectNormal);\n  vBsViewDir = normalize(-mvPosition.xyz);\n'
-      );
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <common>',
-        '#include <common>\n' + _sacFragPars
-      );
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <dithering_fragment>',
-        _sacFragMain + '\n#include <dithering_fragment>'
-      );
-
-      mat.userData.shaderUniforms = shader.uniforms;
+    const sacUniforms = {
+      uTime: uniform(0),
+      uPulsePhase: uniform(pulsePhase),
+      uPulseWaveSpeed: uniform(2.5),
+      uInflation: uniform(inflation),
+      uProximityPulse: uniform(0),
+      uVeinPulse: uniform(0),
+      uSloshOffset: uniform(new THREE.Vector3()),
     };
+    _applySacShader(mat, sacUniforms);
 
     return mat;
   }

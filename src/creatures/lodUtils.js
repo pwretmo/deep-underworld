@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
 
 export const LOD_NEAR_DISTANCE = 42;
 export const LOD_MEDIUM_DISTANCE = 86;

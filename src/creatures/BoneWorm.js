@@ -1,4 +1,5 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
+import { cos, positionLocal, sin, uniform, vec3 } from 'three/tsl';
 import { LOD_NEAR_DISTANCE, LOD_MEDIUM_DISTANCE, toStandardMaterial } from './lodUtils.js';
 import { qualityManager } from '../QualityManager.js';
 
@@ -151,40 +152,19 @@ function _createFleshNormalTexture() {
   return _fleshNormalTex;
 }
 
-// ── Vertex shader undulation (injected via onBeforeCompile) ─────────────────
+// ── TSL vertex shader undulation ────────────────────────────────────────────
 function _applyBodyWaveShader(material, uniformsRef, tierName) {
   const uniforms = {
-    uTime: { value: 0 },
-    uWavePhase: { value: 0 },
-    uAmplitude: { value: 0.12 },
-    uFrequency: { value: 2.5 },
+    uTime: uniform(0.0),
+    uWavePhase: uniform(0.0),
+    uAmplitude: uniform(0.12),
+    uFrequency: uniform(2.5),
   };
   uniformsRef.push({ uniforms, tierName });
 
-  material.onBeforeCompile = (shader) => {
-    shader.uniforms.uTime = uniforms.uTime;
-    shader.uniforms.uWavePhase = uniforms.uWavePhase;
-    shader.uniforms.uAmplitude = uniforms.uAmplitude;
-    shader.uniforms.uFrequency = uniforms.uFrequency;
-
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <common>',
-      `#include <common>
-       uniform float uTime;
-       uniform float uWavePhase;
-       uniform float uAmplitude;
-       uniform float uFrequency;
-      `
-    );
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <begin_vertex>',
-      `#include <begin_vertex>
-       float waveOffset = sin(uTime * uFrequency - uWavePhase) * uAmplitude;
-       transformed.y += waveOffset;
-       transformed.x += cos(uTime * uFrequency * 0.7 - uWavePhase) * uAmplitude * 0.3;
-      `
-    );
-  };
+  const waveOffset = sin(uniforms.uTime.mul(uniforms.uFrequency).sub(uniforms.uWavePhase)).mul(uniforms.uAmplitude);
+  const xOffset = cos(uniforms.uTime.mul(uniforms.uFrequency).mul(0.7).sub(uniforms.uWavePhase)).mul(uniforms.uAmplitude).mul(0.3);
+  material.positionNode = positionLocal.add(vec3(xOffset, waveOffset, 0));
   return material;
 }
 

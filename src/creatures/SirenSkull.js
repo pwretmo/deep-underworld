@@ -1,4 +1,5 @@
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
+import { abs, length, materialEmissive, positionLocal, sin, sub, uniform, uv, varying, vec3 } from "three/tsl";
 import { toStandardMaterial } from "./lodUtils.js";
 
 const SIREN_LOD_NEAR_DISTANCE = 30;
@@ -229,48 +230,31 @@ export class SirenSkull {
     }
 
     material.userData.shaderUniforms = {
-      uFlutterTime: { value: 0 },
-      uVelocity: { value: new THREE.Vector3() },
-      uPulse: { value: 0 },
+      uFlutterTime: uniform(0),
+      uVelocity: uniform(new THREE.Vector3()),
+      uPulse: uniform(0),
     };
+    const u = material.userData.shaderUniforms;
 
-    material.onBeforeCompile = (shader) => {
-      Object.assign(shader.uniforms, material.userData.shaderUniforms);
-      shader.vertexShader = shader.vertexShader
-        .replace(
-          "#include <common>",
-          `#include <common>
-uniform float uFlutterTime;
-uniform vec3 uVelocity;
-varying float vEdgeFlicker;`,
-        )
-        .replace(
-          "#include <begin_vertex>",
-          `#include <begin_vertex>
-float trail = 1.0 - uv.y;
-float edge = abs(uv.x * 2.0 - 1.0);
-float velocityMag = length(uVelocity);
-float wave = sin((position.y + uFlutterTime * 2.4) * 5.2 + uv.x * 10.5) * trail * (0.06 + velocityMag * 0.018);
-float flutter = sin(uFlutterTime * 11.0 + uv.y * 20.0 + uv.x * 13.0) * edge * trail * 0.02;
-transformed.z += wave + flutter;
-transformed.x += uVelocity.x * trail * 0.08;
-transformed.y -= abs(uVelocity.y) * trail * 0.04;
-vEdgeFlicker = edge * trail;`,
-        );
+    // TSL: vertex trail flutter displacement
+    const trail = sub(1.0, uv().y);
+    const edge = abs(uv().x.mul(2.0).sub(1.0));
+    const velocityMag = length(u.uVelocity);
+    const waveArg = positionLocal.y.add(u.uFlutterTime.mul(2.4)).mul(5.2).add(uv().x.mul(10.5));
+    const wave = sin(waveArg).mul(trail).mul(velocityMag.mul(0.018).add(0.06));
+    const flutterArg = u.uFlutterTime.mul(11.0).add(uv().y.mul(20.0)).add(uv().x.mul(13.0));
+    const flutter = sin(flutterArg).mul(edge).mul(trail).mul(0.02);
+    material.positionNode = vec3(
+      positionLocal.x.add(u.uVelocity.x.mul(trail).mul(0.08)),
+      positionLocal.y.sub(abs(u.uVelocity.y).mul(trail).mul(0.04)),
+      positionLocal.z.add(wave).add(flutter)
+    );
 
-      shader.fragmentShader = shader.fragmentShader
-        .replace(
-          "#include <common>",
-          `#include <common>
-uniform float uPulse;
-varying float vEdgeFlicker;`,
-        )
-        .replace(
-          "#include <emissivemap_fragment>",
-          `#include <emissivemap_fragment>
-totalEmissiveRadiance += vec3(0.22, 0.08, 0.12) * vEdgeFlicker * (0.5 + uPulse * 0.5);`,
-        );
-    };
+    // TSL: edge flicker emissive (varying bridge vertex→fragment)
+    const vEdgeFlicker = varying(edge.mul(trail), 'vEdgeFlicker');
+    material.emissiveNode = materialEmissive.add(
+      vec3(0.22, 0.08, 0.12).mul(vEdgeFlicker).mul(u.uPulse.mul(0.5).add(0.5))
+    );
 
     return material;
   }

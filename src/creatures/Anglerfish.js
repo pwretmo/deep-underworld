@@ -1,4 +1,5 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
+import { abs, clamp, dot, materialEmissive, normalLocal, normalView, positionLocal, positionView, pow, sin, smoothstep, sub, uniform, vec3 } from 'three/tsl';
 import { qualityManager } from '../QualityManager.js';
 
 let detailMaps = null;
@@ -483,111 +484,66 @@ export class Anglerfish {
 
   _applyBodyShader(material, intensityScale) {
     material.userData.shaderUniforms = {
-      uFishTime: { value: 0 },
-      uBodyFlex: { value: 0 },
-      uBreath: { value: 0 },
-      uFlexIntensity: { value: intensityScale },
+      uFishTime: uniform(0),
+      uBodyFlex: uniform(0),
+      uBreath: uniform(0),
+      uFlexIntensity: uniform(intensityScale),
     };
+    const u = material.userData.shaderUniforms;
 
-    material.onBeforeCompile = (shader) => {
-      Object.assign(shader.uniforms, material.userData.shaderUniforms);
+    // TSL: vertex body flex + breathing + scale relief
+    const bodyAxis = positionLocal.x.add(1.8).div(3.6);
+    const tailMask = smoothstep(0.15, 1.0, bodyAxis);
+    const flexWave = sin(positionLocal.x.mul(3.8).add(u.uFishTime.mul(6.2))).mul(u.uBodyFlex).mul(tailMask);
+    const breathDisp = sin(u.uFishTime.mul(2.2).add(bodyAxis.mul(6.0))).mul(0.04).mul(u.uBreath).mul(sub(1.0, tailMask.mul(0.5)));
+    const scaleRelief = sin(positionLocal.x.mul(25.0).add(positionLocal.y.mul(17.0)).add(positionLocal.z.mul(21.0))).mul(0.012).mul(u.uFlexIntensity);
+    material.positionNode = vec3(
+      positionLocal.x,
+      positionLocal.y.add(breathDisp),
+      positionLocal.z.add(flexWave.mul(0.2).mul(u.uFlexIntensity))
+    ).add(normalLocal.mul(scaleRelief));
 
-      shader.vertexShader = shader.vertexShader
-        .replace(
-          '#include <common>',
-          `#include <common>
-uniform float uFishTime;
-uniform float uBodyFlex;
-uniform float uBreath;
-uniform float uFlexIntensity;`
-        )
-        .replace(
-          '#include <begin_vertex>',
-          `#include <begin_vertex>
-float bodyAxis = (position.x + 1.8) / 3.6;
-float tailMask = smoothstep(0.15, 1.0, bodyAxis);
-float flexWave = sin(position.x * 3.8 + uFishTime * 6.2) * uBodyFlex * tailMask;
-transformed.z += flexWave * 0.2 * uFlexIntensity;
-transformed.y += sin(uFishTime * 2.2 + bodyAxis * 6.0) * 0.04 * uBreath * (1.0 - tailMask * 0.5);
-float scaleRelief = sin(position.x * 25.0 + position.y * 17.0 + position.z * 21.0) * 0.012;
-transformed += normal * scaleRelief * uFlexIntensity;`
-        );
-
-      shader.fragmentShader = shader.fragmentShader
-        .replace(
-          '#include <common>',
-          `#include <common>
-uniform float uBodyFlex;`
-        )
-        .replace(
-          '#include <emissivemap_fragment>',
-          `#include <emissivemap_fragment>
-float rim = pow(1.0 - abs(dot(normalize(vViewPosition), normal)), 2.3);
-totalEmissiveRadiance += vec3(0.06, 0.16, 0.12) * rim * (0.7 + uBodyFlex * 0.7);`
-        );
-
-      material.userData.shader = shader;
-    };
+    // TSL: fragment Fresnel rim
+    const viewDir = positionView.negate().normalize();
+    const rim = pow(sub(1.0, abs(dot(normalView, viewDir))), 2.3);
+    material.emissiveNode = materialEmissive.add(vec3(0.06, 0.16, 0.12).mul(rim).mul(u.uBodyFlex.mul(0.7).add(0.7)));
 
     material.needsUpdate = true;
   }
 
   _applyJawShader(material) {
     material.userData.shaderUniforms = {
-      uJawOpen: { value: 0 },
+      uJawOpen: uniform(0),
     };
 
-    material.onBeforeCompile = (shader) => {
-      Object.assign(shader.uniforms, material.userData.shaderUniforms);
-
-      shader.vertexShader = shader.vertexShader
-        .replace(
-          '#include <common>',
-          `#include <common>
-uniform float uJawOpen;`
-        )
-        .replace(
-          '#include <begin_vertex>',
-          `#include <begin_vertex>
-float jawTip = smoothstep(0.08, 1.18, position.x);
-float jawCurve = sin(position.x * 7.8 + abs(position.z) * 10.0) * 0.02;
-transformed.y -= jawTip * jawTip * uJawOpen * 0.6;
-transformed.z += jawCurve * uJawOpen;
-transformed.x += jawTip * uJawOpen * 0.03;`
-        );
-
-      material.userData.shader = shader;
-    };
+    // TSL: vertex jaw opening displacement
+    const jawTip = smoothstep(0.08, 1.18, positionLocal.x);
+    const jawCurve = sin(positionLocal.x.mul(7.8).add(positionLocal.z.abs().mul(10.0))).mul(0.02);
+    material.positionNode = vec3(
+      positionLocal.x.add(jawTip.mul(material.userData.shaderUniforms.uJawOpen).mul(0.03)),
+      positionLocal.y.sub(jawTip.mul(jawTip).mul(material.userData.shaderUniforms.uJawOpen).mul(0.6)),
+      positionLocal.z.add(jawCurve.mul(material.userData.shaderUniforms.uJawOpen))
+    );
 
     material.needsUpdate = true;
   }
 
   _applyFinShader(material) {
     material.userData.shaderUniforms = {
-      uFinTime: { value: 0 },
-      uFinWave: { value: 0 },
+      uFinTime: uniform(0),
+      uFinWave: uniform(0),
     };
+    const u = material.userData.shaderUniforms;
 
-    material.onBeforeCompile = (shader) => {
-      Object.assign(shader.uniforms, material.userData.shaderUniforms);
-
-      shader.vertexShader = shader.vertexShader
-        .replace(
-          '#include <common>',
-          `#include <common>
-uniform float uFinTime;
-uniform float uFinWave;`
-        )
-        .replace(
-          '#include <begin_vertex>',
-          `#include <begin_vertex>
-float finMask = smoothstep(-0.35, 0.45, position.x);
-transformed.z += sin(position.x * 10.0 + uFinTime * 8.2 + position.y * 12.0) * 0.06 * uFinWave * finMask;
-transformed.y += sin(position.x * 6.0 + uFinTime * 5.3) * 0.02 * uFinWave;`
-        );
-
-      material.userData.shader = shader;
-    };
+    // TSL: vertex fin flutter
+    const finMask = smoothstep(-0.35, 0.45, positionLocal.x);
+    const flutter = sin(positionLocal.x.mul(10.0).add(u.uFinTime.mul(8.2)).add(positionLocal.y.mul(12.0))).mul(0.06).mul(u.uFinWave).mul(finMask);
+    const yFlutter = sin(positionLocal.x.mul(6.0).add(u.uFinTime.mul(5.3))).mul(0.02).mul(u.uFinWave);
+    material.positionNode = vec3(
+      positionLocal.x,
+      positionLocal.y.add(yFlutter),
+      positionLocal.z.add(flutter)
+    );
 
     material.needsUpdate = true;
   }

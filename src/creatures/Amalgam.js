@@ -1,8 +1,9 @@
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import {
   LOD_NEAR_DISTANCE,
   toStandardMaterial,
 } from "./lodUtils.js";
+import { abs, dot, materialEmissive, normalLocal, normalView, positionLocal, positionView, pow, screenCoordinate, sin, sub, uniform, vec3 } from "three/tsl";
 import { qualityManager } from "../QualityManager.js";
 
 // -- Pre-allocated temps (zero per-frame allocations) -------------------------
@@ -281,85 +282,48 @@ function _createWebGeometry(start, mid, end) {
 // -- Vertex shader: core organic pulsation (near LOD only) --------------------
 function _applyCoreShader(material, uniformsOut) {
   const shaderUniforms = {
-    uTime: { value: 0 },
-    uPulse: { value: 0 },
-    uProximity: { value: 0 },
+    uTime: uniform(0),
+    uPulse: uniform(0),
+    uProximity: uniform(0),
   };
   uniformsOut.core = shaderUniforms;
 
-  material.onBeforeCompile = (shader) => {
-    shader.uniforms.uTime = shaderUniforms.uTime;
-    shader.uniforms.uPulse = shaderUniforms.uPulse;
-    shader.uniforms.uProximity = shaderUniforms.uProximity;
+  // TSL: vertex pulsation displacement
+  const dist = positionLocal.length();
+  const wave = sin(dist.mul(6.0).sub(shaderUniforms.uTime.mul(3.0))).mul(0.08).mul(shaderUniforms.uPulse);
+  const breathe = sin(shaderUniforms.uTime.mul(1.2).add(dist.mul(2.0))).mul(0.03);
+  const react = sin(shaderUniforms.uTime.mul(8.0).add(positionLocal.y.mul(5.0))).mul(0.04).mul(shaderUniforms.uProximity);
+  material.positionNode = positionLocal.add(normalLocal.mul(wave.add(breathe).add(react)));
 
-    shader.vertexShader = shader.vertexShader.replace(
-      "#include <common>",
-      `#include <common>
-uniform float uTime;
-uniform float uPulse;
-uniform float uProximity;`,
-    );
-    shader.vertexShader = shader.vertexShader.replace(
-      "#include <begin_vertex>",
-      `#include <begin_vertex>
-float dist = length(position);
-float wave = sin(dist * 6.0 - uTime * 3.0) * 0.08 * uPulse;
-float breathe = sin(uTime * 1.2 + dist * 2.0) * 0.03;
-float react = sin(uTime * 8.0 + position.y * 5.0) * 0.04 * uProximity;
-transformed += normal * (wave + breathe + react);`,
-    );
+  // TSL: fragment Fresnel rim + organ pulse
+  const viewDir = positionView.negate().normalize();
+  const rim = pow(sub(1.0, abs(dot(normalView, viewDir))), 2.5);
+  const organPulse = sin(shaderUniforms.uTime.mul(2.5).add(screenCoordinate.x.mul(0.02)).add(screenCoordinate.y.mul(0.015))).mul(0.5).add(0.5);
+  material.emissiveNode = materialEmissive
+    .add(vec3(0.18, 0.06, 0.12).mul(rim).mul(shaderUniforms.uProximity.mul(0.5).add(0.6)))
+    .add(vec3(0.12, 0.02, 0.06).mul(organPulse).mul(shaderUniforms.uPulse));
 
-    shader.fragmentShader = shader.fragmentShader.replace(
-      "#include <common>",
-      `#include <common>
-uniform float uTime;
-uniform float uPulse;
-uniform float uProximity;`,
-    );
-    shader.fragmentShader = shader.fragmentShader.replace(
-      "#include <emissivemap_fragment>",
-      `#include <emissivemap_fragment>
-float rim = pow(1.0 - abs(dot(normalize(vViewPosition), normal)), 2.5);
-totalEmissiveRadiance += vec3(0.18, 0.06, 0.12) * rim * (0.6 + uProximity * 0.5);
-float organPulse = sin(uTime * 2.5 + gl_FragCoord.x * 0.02 + gl_FragCoord.y * 0.015) * 0.5 + 0.5;
-totalEmissiveRadiance += vec3(0.12, 0.02, 0.06) * organPulse * uPulse;`,
-    );
-
-    material.userData.shader = shader;
-  };
   material.needsUpdate = true;
 }
 
 // -- Vertex shader: limb twitch (near LOD only) -------------------------------
 function _applyLimbShader(material, uniformsOut, limbIdx) {
   const shaderUniforms = {
-    uTime: { value: 0 },
-    uTwitch: { value: 0 },
+    uTime: uniform(0),
+    uTwitch: uniform(0),
   };
   if (!uniformsOut.limbs) uniformsOut.limbs = [];
   uniformsOut.limbs[limbIdx] = shaderUniforms;
 
-  material.onBeforeCompile = (shader) => {
-    shader.uniforms.uTime = shaderUniforms.uTime;
-    shader.uniforms.uTwitch = shaderUniforms.uTwitch;
+  // TSL: vertex limb twitch
+  const muscleWave = sin(positionLocal.y.mul(8.0).add(shaderUniforms.uTime.mul(4.0))).mul(0.015).mul(shaderUniforms.uTwitch);
+  const zTwitch = sin(positionLocal.y.mul(6.0).add(shaderUniforms.uTime.mul(3.0)).add(1.5)).mul(0.01).mul(shaderUniforms.uTwitch);
+  material.positionNode = vec3(
+    positionLocal.x.add(muscleWave),
+    positionLocal.y,
+    positionLocal.z.add(zTwitch)
+  );
 
-    shader.vertexShader = shader.vertexShader.replace(
-      "#include <common>",
-      `#include <common>
-uniform float uTime;
-uniform float uTwitch;`,
-    );
-    shader.vertexShader = shader.vertexShader.replace(
-      "#include <begin_vertex>",
-      `#include <begin_vertex>
-float limbAxis = position.y;
-float muscleWave = sin(limbAxis * 8.0 + uTime * 4.0) * 0.015 * uTwitch;
-transformed.x += muscleWave;
-transformed.z += sin(limbAxis * 6.0 + uTime * 3.0 + 1.5) * 0.01 * uTwitch;`,
-    );
-
-    material.userData.shader = shader;
-  };
   material.needsUpdate = true;
 }
 

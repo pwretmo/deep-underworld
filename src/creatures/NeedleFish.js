@@ -1,4 +1,5 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
+import { abs, clamp, dot, materialEmissive, normalLocal, normalView, positionLocal, positionView, pow, sin, smoothstep, sub, uniform, vec3 } from 'three/tsl';
 import { qualityManager } from '../QualityManager.js';
 
 // LOD distance thresholds
@@ -89,85 +90,43 @@ export class NeedleFish {
     this.group.scale.setScalar(s);
   }
 
-  /** Inject carangiform vertex wave + Fresnel rim + lateral-line threat glow. */
   _applyBodyShader(mat) {
     mat.userData.shaderUniforms = {
-      uSwimPhase: { value: 0 },
-      uBodyFlex:  { value: 0 },
-      uAmplitude: { value: this._dartAmplitude },
+      uSwimPhase: uniform(0),
+      uBodyFlex:  uniform(0),
+      uAmplitude: uniform(this._dartAmplitude),
     };
-    mat.onBeforeCompile = (shader) => {
-      Object.assign(shader.uniforms, mat.userData.shaderUniforms);
+    const u = mat.userData.shaderUniforms;
 
-      shader.vertexShader = shader.vertexShader
-        .replace(
-          '#include <common>',
-          `#include <common>
-uniform float uSwimPhase;
-uniform float uBodyFlex;
-uniform float uAmplitude;`
-        )
-        .replace(
-          '#include <begin_vertex>',
-          // Body is CylinderGeometry(height=4) rotated PI/2 around Z — BODY_HALF_LEN = 2.0
-          // Local Y: +2 = head end, -2 = tail end.
-          `#include <begin_vertex>
-float bodyT = clamp((-position.y + ${BODY_HALF_LEN.toFixed(1)}) / ${(BODY_HALF_LEN * 2).toFixed(1)}, 0.0, 1.0); // 0=head, 1=tail
-float ampRamp = bodyT * bodyT; // quadratic ramp — carangiform pattern
-float wave = sin(position.y * 2.8 - uSwimPhase) * ampRamp * uAmplitude * 0.11 * uBodyFlex;
-transformed.z += wave;
-// Micro scale-relief displacement
-float scaleDetail = sin(position.y * 23.0 + position.x * 17.0) * 0.007;
-transformed += normal * scaleDetail;`
-        );
+    // TSL: vertex carangiform wave + scale relief
+    const bodyT = clamp(positionLocal.y.negate().add(BODY_HALF_LEN).div(BODY_HALF_LEN * 2), 0.0, 1.0);
+    const ampRamp = bodyT.mul(bodyT);
+    const wave = sin(positionLocal.y.mul(2.8).sub(u.uSwimPhase)).mul(ampRamp).mul(u.uAmplitude).mul(0.11).mul(u.uBodyFlex);
+    const scaleDetail = sin(positionLocal.y.mul(23.0).add(positionLocal.x.mul(17.0))).mul(0.007);
+    mat.positionNode = vec3(positionLocal.x, positionLocal.y, positionLocal.z.add(wave)).add(normalLocal.mul(scaleDetail));
 
-      shader.fragmentShader = shader.fragmentShader
-        .replace(
-          '#include <common>',
-          `#include <common>
-uniform float uBodyFlex;`
-        )
-        .replace(
-          '#include <emissivemap_fragment>',
-          `#include <emissivemap_fragment>
-// Fresnel rim-light for silhouette visibility in dark water
-float rim = pow(1.0 - abs(dot(normalize(vViewPosition), normal)), 2.5);
-totalEmissiveRadiance += vec3(0.07, 0.03, 0.12) * rim * 0.6;
-// Lateral line threat glow
-totalEmissiveRadiance += vec3(0.35, 0.0, 0.25) * uBodyFlex * 0.25 * rim;`
-        );
+    // TSL: fragment Fresnel rim + lateral-line threat glow
+    const viewDir = positionView.negate().normalize();
+    const rim = pow(sub(1.0, abs(dot(normalView, viewDir))), 2.5);
+    mat.emissiveNode = materialEmissive
+      .add(vec3(0.07, 0.03, 0.12).mul(rim).mul(0.6))
+      .add(vec3(0.35, 0.0, 0.25).mul(u.uBodyFlex).mul(0.25).mul(rim));
 
-      mat.userData.shader = shader;
-    };
     mat.needsUpdate = true;
   }
 
-  /** Inject per-vertex caudal fin oscillation. */
   _applyTailShader(mat) {
     mat.userData.shaderUniforms = {
-      uSwimPhase: { value: 0 },
-      uBodyFlex:  { value: 0 },
+      uSwimPhase: uniform(0),
+      uBodyFlex:  uniform(0),
     };
-    mat.onBeforeCompile = (shader) => {
-      Object.assign(shader.uniforms, mat.userData.shaderUniforms);
+    const u = mat.userData.shaderUniforms;
 
-      shader.vertexShader = shader.vertexShader
-        .replace(
-          '#include <common>',
-          `#include <common>
-uniform float uSwimPhase;
-uniform float uBodyFlex;`
-        )
-        .replace(
-          '#include <begin_vertex>',
-          `#include <begin_vertex>
-// Tail fin edges oscillate; position.y spans fin height.
-float finEdge = smoothstep(0.0, 0.15, abs(position.y));
-transformed.z += sin(position.y * 9.0 - uSwimPhase * 1.6) * 0.045 * uBodyFlex * finEdge;`
-        );
+    // TSL: vertex caudal fin oscillation
+    const finEdge = smoothstep(0.0, 0.15, positionLocal.y.abs());
+    const tailFlutter = sin(positionLocal.y.mul(9.0).sub(u.uSwimPhase.mul(1.6))).mul(0.045).mul(u.uBodyFlex).mul(finEdge);
+    mat.positionNode = vec3(positionLocal.x, positionLocal.y, positionLocal.z.add(tailFlutter));
 
-      mat.userData.shader = shader;
-    };
     mat.needsUpdate = true;
   }
 

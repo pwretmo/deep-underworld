@@ -1,4 +1,5 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
+import { abs, clamp, dot, materialEmissive, normalView, positionLocal, positionView, pow, sin, smoothstep, sub, uniform, varying, vec3 } from 'three/tsl';
 
 // Shared body normal/panel texture (created once per application lifetime)
 let _sharedMaps = null;
@@ -400,123 +401,65 @@ export class GhostShark {
    */
   _applyBodyShader(material) {
     material.userData.shaderUniforms = {
-      uSwimTime:  { value: 0 },
-      uSwimAmp:   { value: 0.5 },
-      uTurnBend:  { value: 0 },
-      uProximity: { value: 0 },
-      uPhaseSpd:  { value: this.phaseShiftSpeed },
+      uSwimTime:  uniform(0),
+      uSwimAmp:   uniform(0.5),
+      uTurnBend:  uniform(0),
+      uProximity: uniform(0),
+      uPhaseSpd:  uniform(this.phaseShiftSpeed),
     };
+    const u = material.userData.shaderUniforms;
 
-    material.onBeforeCompile = (shader) => {
-      Object.assign(shader.uniforms, material.userData.shaderUniforms);
+    // TSL: vertex thunniform S-curve + turn bend + breathing
+    const axisT = clamp(positionLocal.x.add(2.5).div(5.0), 0.0, 1.0);
+    const tMask = sub(1.0, smoothstep(0.28, 0.82, axisT));
+    const sWave = sin(positionLocal.x.mul(2.2).sub(u.uSwimTime.mul(5.5))).mul(u.uSwimAmp).mul(tMask).mul(0.18);
+    const bMask = smoothstep(0.45, 1.0, sub(1.0, axisT));
+    const zDisp = sWave.add(u.uTurnBend.mul(bMask).mul(0.15));
+    const yDisp = sin(u.uSwimTime.mul(1.8).add(axisT.mul(4.0))).mul(0.012).mul(sub(1.0, tMask.mul(0.6)));
+    material.positionNode = vec3(positionLocal.x, positionLocal.y.add(yDisp), positionLocal.z.add(zDisp));
 
-      shader.vertexShader = shader.vertexShader
-        .replace(
-          '#include <common>',
-          `#include <common>
-uniform float uSwimTime;
-uniform float uSwimAmp;
-uniform float uTurnBend;
-varying float vBodyX;`,
-        )
-        .replace(
-          '#include <begin_vertex>',
-          `#include <begin_vertex>
-vBodyX = position.x;
-// Thunniform S-curve: amplitude grows from head toward tail
-float axisT  = clamp((position.x + 2.5) / 5.0, 0.0, 1.0);
-float tMask  = 1.0 - smoothstep(0.28, 0.82, axisT);
-float sWave  = sin(position.x * 2.2 - uSwimTime * 5.5) * uSwimAmp * tMask * 0.18;
-// Lateral bend from turns
-float bMask  = smoothstep(0.45, 1.0, 1.0 - axisT);
-transformed.z += sWave + uTurnBend * bMask * 0.15;
-// Subtle breathing swell
-transformed.y += sin(uSwimTime * 1.8 + axisT * 4.0) * 0.012 * (1.0 - tMask * 0.6);`,
-        );
+    // TSL: varying for body X
+    const vBodyX = varying(positionLocal.x, 'vBodyX');
 
-      shader.fragmentShader = shader.fragmentShader
-        .replace(
-          '#include <common>',
-          `#include <common>
-varying float vBodyX;
-uniform float uSwimTime;
-uniform float uProximity;
-uniform float uPhaseSpd;`,
-        )
-        .replace(
-          '#include <emissivemap_fragment>',
-          `#include <emissivemap_fragment>
-// Fresnel rim-light: ghostly silhouette glow
-float rim = pow(1.0 - abs(dot(normalize(vViewPosition), normal)), 2.5);
-totalEmissiveRadiance += vec3(0.15, 0.70, 0.40) * rim * (0.75 + uProximity * 0.55);
-// Animated emissive phase-shift pulse traveling head-to-tail
-float pWave = sin(uSwimTime * uPhaseSpd - vBodyX * 1.3) * 0.5 + 0.5;
-totalEmissiveRadiance += vec3(0.10, 0.42, 0.22) * pWave * 0.35;`,
-        );
+    // TSL: fragment Fresnel rim + phase-shift pulse
+    const viewDir = positionView.negate().normalize();
+    const rim = pow(sub(1.0, abs(dot(normalView, viewDir))), 2.5);
+    const pWave = sin(u.uSwimTime.mul(u.uPhaseSpd).sub(vBodyX.mul(1.3))).mul(0.5).add(0.5);
+    material.emissiveNode = materialEmissive
+      .add(vec3(0.15, 0.70, 0.40).mul(rim).mul(u.uProximity.mul(0.55).add(0.75)))
+      .add(vec3(0.10, 0.42, 0.22).mul(pWave).mul(0.35));
 
-      material.userData.shader = shader;
-    };
     material.needsUpdate = true;
   }
 
-  /** Simplified medium-LOD body shader: thunniform S-curve only (no fragment injection) */
   _applyBodyShaderSimple(material) {
     material.userData.shaderUniforms = {
-      uSwimTime: { value: 0 },
-      uSwimAmp:  { value: 0.5 },
+      uSwimTime: uniform(0),
+      uSwimAmp:  uniform(0.5),
     };
+    const u = material.userData.shaderUniforms;
 
-    material.onBeforeCompile = (shader) => {
-      Object.assign(shader.uniforms, material.userData.shaderUniforms);
+    // TSL: simplified thunniform S-curve (medium LOD)
+    const axisT = clamp(positionLocal.x.add(2.5).div(5.0), 0.0, 1.0);
+    const tMask = sub(1.0, smoothstep(0.28, 0.82, axisT));
+    const zDisp = sin(positionLocal.x.mul(2.2).sub(u.uSwimTime.mul(5.5))).mul(u.uSwimAmp).mul(tMask).mul(0.14);
+    material.positionNode = vec3(positionLocal.x, positionLocal.y, positionLocal.z.add(zDisp));
 
-      shader.vertexShader = shader.vertexShader
-        .replace(
-          '#include <common>',
-          `#include <common>
-uniform float uSwimTime;
-uniform float uSwimAmp;`,
-        )
-        .replace(
-          '#include <begin_vertex>',
-          `#include <begin_vertex>
-float axisT = clamp((position.x + 2.5) / 5.0, 0.0, 1.0);
-float tMask = 1.0 - smoothstep(0.28, 0.82, axisT);
-transformed.z += sin(position.x * 2.2 - uSwimTime * 5.5) * uSwimAmp * tMask * 0.14;`,
-        );
-
-      material.userData.shader = shader;
-    };
     material.needsUpdate = true;
   }
 
-  /** Dorsal fin flutter shader: per-vertex sinusoidal wave, tip flutters more than base */
   _applyFinShader(material) {
     material.userData.shaderUniforms = {
-      uFinTime: { value: 0 },
-      uFinWave: { value: 0.5 },
+      uFinTime: uniform(0),
+      uFinWave: uniform(0.5),
     };
+    const u = material.userData.shaderUniforms;
 
-    material.onBeforeCompile = (shader) => {
-      Object.assign(shader.uniforms, material.userData.shaderUniforms);
+    // TSL: fin flutter
+    const tipMask = smoothstep(-0.25, 0.55, positionLocal.y);
+    const flutter = sin(positionLocal.x.mul(9.0).add(u.uFinTime.mul(7.5)).add(positionLocal.y.mul(11.0))).mul(0.05).mul(u.uFinWave).mul(tipMask);
+    material.positionNode = vec3(positionLocal.x, positionLocal.y, positionLocal.z.add(flutter));
 
-      shader.vertexShader = shader.vertexShader
-        .replace(
-          '#include <common>',
-          `#include <common>
-uniform float uFinTime;
-uniform float uFinWave;`,
-        )
-        .replace(
-          '#include <begin_vertex>',
-          `#include <begin_vertex>
-// Fin flutter — tip (high position.y) flutters more than base
-float tipMask = smoothstep(-0.25, 0.55, position.y);
-float flutter = sin(position.x * 9.0 + uFinTime * 7.5 + position.y * 11.0) * 0.05 * uFinWave * tipMask;
-transformed.z += flutter;`,
-        );
-
-      material.userData.shader = shader;
-    };
     material.needsUpdate = true;
   }
 
