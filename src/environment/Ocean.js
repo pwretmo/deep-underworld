@@ -1,10 +1,12 @@
-import * as THREE from 'three/webgpu';
+import * as THREE from "three/webgpu";
 import {
   clamp,
   dot,
   exp,
+  exponentialHeightFogFactor,
   float,
   floor,
+  fog,
   fract,
   instancedBufferAttribute,
   instancedDynamicBufferAttribute,
@@ -22,8 +24,8 @@ import {
   varying,
   vec2,
   vec3,
-} from 'three/tsl';
-import { qualityManager } from '../QualityManager.js';
+} from "three/tsl";
+import { qualityManager } from "../QualityManager.js";
 
 function cloneUniformValue(value) {
   return value?.clone ? value.clone() : value;
@@ -52,7 +54,9 @@ function hash2D(point) {
 function noise2D(point) {
   const cell = floor(point);
   const fraction = fract(point);
-  const smoothedFraction = fraction.mul(fraction).mul(vec2(3.0).sub(fraction.mul(2.0)));
+  const smoothedFraction = fraction
+    .mul(fraction)
+    .mul(vec2(3.0).sub(fraction.mul(2.0)));
 
   const a = hash2D(cell);
   const b = hash2D(cell.add(vec2(1.0, 0.0)));
@@ -86,27 +90,54 @@ function createParticleMaterial(geometry, snowTexture, baseSize, baseOpacity) {
     baseSize,
     baseOpacity,
   });
-  const centerNode = instancedDynamicBufferAttribute(geometry.getAttribute('particleCenter'), 'vec3');
-  const sizeNode = instancedBufferAttribute(geometry.getAttribute('particleSize'), 'float');
-  const colorNode = instancedBufferAttribute(geometry.getAttribute('particleColor'), 'vec3');
-  const seedNode = instancedBufferAttribute(geometry.getAttribute('particleSeed'), 'float');
-  const phaseNode = instancedBufferAttribute(geometry.getAttribute('particlePhase'), 'float');
+  const centerNode = instancedDynamicBufferAttribute(
+    geometry.getAttribute("particleCenter"),
+    "vec3",
+  );
+  const sizeNode = instancedBufferAttribute(
+    geometry.getAttribute("particleSize"),
+    "float",
+  );
+  const colorNode = instancedBufferAttribute(
+    geometry.getAttribute("particleColor"),
+    "vec3",
+  );
+  const seedNode = instancedBufferAttribute(
+    geometry.getAttribute("particleSeed"),
+    "float",
+  );
+  const phaseNode = instancedBufferAttribute(
+    geometry.getAttribute("particlePhase"),
+    "float",
+  );
   const material = new THREE.PointsNodeMaterial();
-  const driftedCenter = centerNode.add(vec3(
-    sin(uniforms.time.mul(0.1).add(seedNode).add(phaseNode)).mul(1.5),
-    sin(uniforms.time.mul(0.08).add(phaseNode)).mul(0.6),
-    uniforms.time.mul(0.1).add(seedNode).add(phaseNode).mul(0.7).cos().mul(1.5)
-  ));
+  const driftedCenter = centerNode.add(
+    vec3(
+      sin(uniforms.time.mul(0.1).add(seedNode).add(phaseNode)).mul(1.5),
+      sin(uniforms.time.mul(0.08).add(phaseNode)).mul(0.6),
+      uniforms.time
+        .mul(0.1)
+        .add(seedNode)
+        .add(phaseNode)
+        .mul(0.7)
+        .cos()
+        .mul(1.5),
+    ),
+  );
   material.positionNode = driftedCenter;
   material.sizeAttenuation = true;
 
   const viewDist = positionView.z.negate();
-  const bokeh = varying(step(0.95, fract(seedNode.mul(127.1).add(phaseNode.mul(311.7)))));
+  const bokeh = varying(
+    step(0.95, fract(seedNode.mul(127.1).add(phaseNode.mul(311.7)))),
+  );
   const focusDist = 30.0;
   const coc = viewDist.sub(focusDist).abs().div(focusDist);
   const dofScale = float(1.0).add(coc.mul(0.35));
   const bokehScale = float(1.0).add(bokeh.mul(1.4));
-  const scatter = float(1.0).add(float(0.35).div(float(1.0).add(viewDist.mul(0.02))));
+  const scatter = float(1.0).add(
+    float(0.35).div(float(1.0).add(viewDist.mul(0.02))),
+  );
   const bokehBright = float(1.0).add(bokeh.mul(2.0));
   const distFade = smoothstep(3.0, 14.0, viewDist);
 
@@ -119,8 +150,12 @@ function createParticleMaterial(geometry, snowTexture, baseSize, baseOpacity) {
     0.5,
     16.0,
   );
-  material.colorNode = varying(pow(colorNode, vec3(2.2))).mul(scatter).mul(bokehBright);
-  material.opacityNode = texture(snowTexture, uv()).a.mul(uniforms.baseOpacity).mul(distFade);
+  material.colorNode = varying(pow(colorNode, vec3(2.2)))
+    .mul(scatter)
+    .mul(bokehBright);
+  material.opacityNode = texture(snowTexture, uv())
+    .a.mul(uniforms.baseOpacity)
+    .mul(distFade);
   material.transparent = true;
   material.blending = THREE.AdditiveBlending;
   material.depthWrite = false;
@@ -142,15 +177,21 @@ function createGodRayMaterial(seedValue) {
   const cx = uvNode.x.sub(0.5).mul(2.0);
   const baseRadial = exp(cx.mul(cx).mul(-8.0));
   const timeNode = uniforms.time.mul(0.06);
-  const edgeNoise = fbm2D(vec2(
-    worldPos.y.mul(0.03).add(uniforms.seed.mul(13.7)).add(timeNode),
-    worldPos.x.mul(0.02).add(uniforms.seed.mul(7.3))
-  )).mul(2.0).sub(1.0);
+  const edgeNoise = fbm2D(
+    vec2(
+      worldPos.y.mul(0.03).add(uniforms.seed.mul(13.7)).add(timeNode),
+      worldPos.x.mul(0.02).add(uniforms.seed.mul(7.3)),
+    ),
+  )
+    .mul(2.0)
+    .sub(1.0);
   const radial = smoothstep(0.05, 0.55, baseRadial.add(edgeNoise.mul(0.3)));
-  const shimmer = fbm2D(vec2(
-    worldPos.x.mul(0.05).add(timeNode.mul(0.8)).add(uniforms.seed.mul(3.1)),
-    worldPos.y.mul(0.04).sub(timeNode.mul(0.5))
-  ));
+  const shimmer = fbm2D(
+    vec2(
+      worldPos.x.mul(0.05).add(timeNode.mul(0.8)).add(uniforms.seed.mul(3.1)),
+      worldPos.y.mul(0.04).sub(timeNode.mul(0.5)),
+    ),
+  );
   const intensity = float(0.55).add(shimmer.mul(0.55));
   const alpha = axial.mul(radial).mul(intensity).mul(uniforms.opacity);
   const warm = pow(vec3(0.5, 0.7, 0.85), vec3(2.2));
@@ -208,12 +249,21 @@ export class Ocean {
     // God rays
     this._createGodRays();
 
-    // Initial fog
-    scene.fog = new THREE.Fog(0x006994, 5, 300);
+    // Exponential height fog via TSL fogNode.
+    // fogHeight = 0.0 is the water surface (Y = 0). Fragments at negative Y
+    // (underwater) produce a positive distance (0 - positionWorld.y), so fog
+    // correctly increases with ocean depth.
+    this.fogDensity = uniform(0.0015);
+    this.fogHeight = uniform(0.0);
+    this.fogColorNode = uniform(new THREE.Color(0x006994));
+    scene.fogNode = fog(
+      this.fogColorNode,
+      exponentialHeightFogFactor(this.fogDensity, this.fogHeight),
+    );
     scene.background = new THREE.Color(0x006994);
 
     // React to quality tier changes for shadow map size
-    window.addEventListener('qualitychange', (e) => {
+    window.addEventListener("qualitychange", (e) => {
       const size = e.detail.settings.shadowMapSize || 1024;
       this.sunLight.shadow.mapSize.set(size, size);
       if (this.sunLight.shadow.map) {
@@ -268,22 +318,41 @@ export class Ocean {
 
     const centerAttr = new THREE.InstancedBufferAttribute(positions, 3);
     centerAttr.setUsage(THREE.DynamicDrawUsage);
-    geo.setAttribute('particleCenter', centerAttr);
-    geo.setAttribute('particleSize', new THREE.InstancedBufferAttribute(sizes, 1));
-    geo.setAttribute('particleColor', new THREE.InstancedBufferAttribute(colors, 3));
-    geo.setAttribute('particleSeed', new THREE.InstancedBufferAttribute(seeds, 1));
-    geo.setAttribute('particlePhase', new THREE.InstancedBufferAttribute(phases, 1));
+    geo.setAttribute("particleCenter", centerAttr);
+    geo.setAttribute(
+      "particleSize",
+      new THREE.InstancedBufferAttribute(sizes, 1),
+    );
+    geo.setAttribute(
+      "particleColor",
+      new THREE.InstancedBufferAttribute(colors, 3),
+    );
+    geo.setAttribute(
+      "particleSeed",
+      new THREE.InstancedBufferAttribute(seeds, 1),
+    );
+    geo.setAttribute(
+      "particlePhase",
+      new THREE.InstancedBufferAttribute(phases, 1),
+    );
 
     // Soft circular particle texture
     const pSize = 32;
-    const canvas = document.createElement('canvas');
+    const canvas = document.createElement("canvas");
     canvas.width = pSize;
     canvas.height = pSize;
-    const ctx = canvas.getContext('2d');
-    const gradient = ctx.createRadialGradient(pSize / 2, pSize / 2, 0, pSize / 2, pSize / 2, pSize / 2);
-    gradient.addColorStop(0, 'rgba(255,255,255,1)');
-    gradient.addColorStop(0.3, 'rgba(255,255,255,0.5)');
-    gradient.addColorStop(1, 'rgba(255,255,255,0)');
+    const ctx = canvas.getContext("2d");
+    const gradient = ctx.createRadialGradient(
+      pSize / 2,
+      pSize / 2,
+      0,
+      pSize / 2,
+      pSize / 2,
+      pSize / 2,
+    );
+    gradient.addColorStop(0, "rgba(255,255,255,1)");
+    gradient.addColorStop(0.3, "rgba(255,255,255,0.5)");
+    gradient.addColorStop(1, "rgba(255,255,255,0)");
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, pSize, pSize);
     const snowTexture = new THREE.CanvasTexture(canvas);
@@ -292,7 +361,12 @@ export class Ocean {
     this.particleSeeds = seeds;
     this.particlePhases = phases;
 
-    const mat = createParticleMaterial(geo, snowTexture, this.particleBaseSize, this.particleBaseOpacity);
+    const mat = createParticleMaterial(
+      geo,
+      snowTexture,
+      this.particleBaseSize,
+      this.particleBaseOpacity,
+    );
 
     // WebGPU honors textured particle sizing for PointsNodeMaterial on instanced Sprites.
     this.particleSystem = new THREE.Sprite(mat);
@@ -306,11 +380,11 @@ export class Ocean {
     this.causticLights = [];
     for (let i = 0; i < 10; i++) {
       const light = new THREE.PointLight(0x88ccff, 0.5, 70);
-      light.userData.duwCategory = 'flora_decor';
+      light.userData.duwCategory = "flora_decor";
       light.position.set(
         (Math.random() - 0.5) * 50,
         -3 - Math.random() * 18,
-        (Math.random() - 0.5) * 50
+        (Math.random() - 0.5) * 50,
       );
       this.scene.add(light);
       this.causticLights.push({
@@ -343,7 +417,7 @@ export class Ocean {
       mesh.position.set(
         Math.sin(angle) * dist,
         -height * 0.3,
-        Math.cos(angle) * dist
+        Math.cos(angle) * dist,
       );
 
       // Slight random tilt for variety
@@ -367,16 +441,21 @@ export class Ocean {
       const baseY = this.waterVertices[i * 3 + 2]; // z in original is y after rotation
       const x = this.waterVertices[i * 3];
       const z = this.waterVertices[i * 3 + 1];
-      posAttr.array[i * 3 + 2] = baseY +
+      posAttr.array[i * 3 + 2] =
+        baseY +
         Math.sin(x * 0.05 + this.time * 0.5) * 0.5 +
         Math.cos(z * 0.03 + this.time * 0.3) * 0.3;
     }
     posAttr.needsUpdate = true;
 
     // Dynamic surface emissive: shimmer strongest in shallow water
-    const emissivePulse = 0.12 + Math.sin(this.time * 0.7) * 0.06 + Math.sin(this.time * 1.3 + 0.5) * 0.03;
+    const emissivePulse =
+      0.12 +
+      Math.sin(this.time * 0.7) * 0.06 +
+      Math.sin(this.time * 1.3 + 0.5) * 0.03;
     const surfaceEmissiveFade = 1.0 - THREE.MathUtils.smoothstep(depth, 30, 80);
-    this.waterSurface.material.emissiveIntensity = emissivePulse * surfaceEmissiveFade;
+    this.waterSurface.material.emissiveIntensity =
+      emissivePulse * surfaceEmissiveFade;
 
     // Update GPU particle time uniform
     this.particleSystem.material.uniforms.time.value = this.time;
@@ -415,23 +494,38 @@ export class Ocean {
     }
 
     // Denser, slightly larger snow in mid/deep water, then tighten in abyss for readability.
-    const deepOpacity = THREE.MathUtils.lerp(this.particleBaseOpacity * 0.68, this.particleBaseOpacity * 1.55, depthBlend);
+    const deepOpacity = THREE.MathUtils.lerp(
+      this.particleBaseOpacity * 0.68,
+      this.particleBaseOpacity * 1.55,
+      depthBlend,
+    );
     const abyssFade = THREE.MathUtils.lerp(1.0, 0.86, abyssBlend);
-    this.particleSystem.material.uniforms.baseOpacity.value = deepOpacity * abyssFade;
+    this.particleSystem.material.uniforms.baseOpacity.value =
+      deepOpacity * abyssFade;
 
-    const deepSize = THREE.MathUtils.lerp(this.particleBaseSize * 0.9, this.particleBaseSize * 1.45, depthBlend);
+    const deepSize = THREE.MathUtils.lerp(
+      this.particleBaseSize * 0.9,
+      this.particleBaseSize * 1.45,
+      depthBlend,
+    );
     const abyssSizeClamp = THREE.MathUtils.lerp(1.0, 0.9, abyssBlend);
-    this.particleSystem.material.uniforms.baseSize.value = deepSize * abyssSizeClamp;
+    this.particleSystem.material.uniforms.baseSize.value =
+      deepSize * abyssSizeClamp;
 
     // Animate caustic lights (only near surface)
     for (const c of this.causticLights) {
       const causticFade = 1.0 - THREE.MathUtils.smoothstep(depth, 40, 100);
-      c.light.intensity = causticFade > 0
-        ? c.baseIntensity * (1 + Math.sin(this.time * c.speed + c.offset) * 0.6) * causticFade
-        : 0;
+      c.light.intensity =
+        causticFade > 0
+          ? c.baseIntensity *
+            (1 + Math.sin(this.time * c.speed + c.offset) * 0.6) *
+            causticFade
+          : 0;
       // Follow player horizontally
-      c.light.position.x = playerPos.x + Math.sin(c.offset + this.time * 0.2) * 20;
-      c.light.position.z = playerPos.z + Math.cos(c.offset + this.time * 0.15) * 20;
+      c.light.position.x =
+        playerPos.x + Math.sin(c.offset + this.time * 0.2) * 20;
+      c.light.position.z =
+        playerPos.z + Math.cos(c.offset + this.time * 0.15) * 20;
     }
 
     // God rays: billboard each plane toward camera, update uniforms
@@ -458,4 +552,3 @@ export class Ocean {
     this.sunLight.intensity = sunFade;
   }
 }
-

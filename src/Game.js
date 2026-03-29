@@ -1063,8 +1063,16 @@ export class Game {
   }
 
   _initEnvironmentColors() {
+    // Keep legacy Fog object as a data carrier for volumetric beam uniforms
+    // (fog.color/near/far are read by Player.updateFogUniforms each frame).
+    // Scene rendering uses the TSL fogNode set by Ocean.
     this._fog = new THREE.Fog(0x006994, 5, 300);
-    this.scene.fog = this._fog;
+
+    // Connect Ocean's fogNode uniforms to LightingPolicy for per-frame updates
+    this.lightingPolicy.setFogNodeUniforms(
+      this.ocean.fogDensity,
+      this.ocean.fogColorNode,
+    );
 
     // Generate a minimal IBL environment so metallic PBR surfaces have something
     // to reflect instead of rendering solid black in the deep ocean.
