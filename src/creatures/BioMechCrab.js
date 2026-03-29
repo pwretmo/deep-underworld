@@ -1,4 +1,5 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
+import { normalLocal, positionLocal, sin, uniform } from 'three/tsl';
 import { LOD_NEAR_DISTANCE, LOD_MEDIUM_DISTANCE, toStandardMaterial } from './lodUtils.js';
 import { qualityManager } from '../QualityManager.js';
 
@@ -191,23 +192,13 @@ export class BioMechCrab {
 
     const mat = new THREE.MeshPhysicalMaterial(props);
 
-    // Vertex shader carapace displacement (near tier only)
+    // TSL: vertex shader carapace displacement (near tier only)
     if (isNear) {
-      mat.onBeforeCompile = (shader) => {
-        shader.uniforms.uCrabTime = { value: 0 };
-        shader.vertexShader = shader.vertexShader.replace(
-          '#include <common>',
-          '#include <common>\nuniform float uCrabTime;'
-        );
-        shader.vertexShader = shader.vertexShader.replace(
-          '#include <begin_vertex>',
-          `#include <begin_vertex>
-          float disp = sin(position.x * 8.0 + uCrabTime * 0.5) * 0.012
-                     + sin(position.z * 6.0 + uCrabTime * 0.3) * 0.008;
-          transformed += normal * disp;`
-        );
-        mat.userData.shaderUniforms = shader.uniforms;
-      };
+      const uCrabTime = uniform(0.0);
+      mat.userData.shaderUniforms = { uCrabTime };
+      const disp = sin(positionLocal.x.mul(8.0).add(uCrabTime.mul(0.5))).mul(0.012)
+        .add(sin(positionLocal.z.mul(6.0).add(uCrabTime.mul(0.3))).mul(0.008));
+      mat.positionNode = positionLocal.add(normalLocal.mul(disp));
     }
 
     if (tierName === 'far') { const std = toStandardMaterial(mat); mat.dispose(); return std; }

@@ -1,4 +1,5 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
+import { abs, cos, dot, materialEmissive, normalView, positionLocal, positionView, pow, sin, sub, uniform, uv, vec3 } from 'three/tsl';
 import { LOD_NEAR_DISTANCE, LOD_MEDIUM_DISTANCE, toStandardMaterial } from './lodUtils.js';
 import { qualityManager } from '../QualityManager.js';
 
@@ -48,18 +49,11 @@ function _makeTentacleCurve() {
   return new THREE.CatmullRomCurve3(pts);
 }
 
-/** Apply Fresnel rim-light via onBeforeCompile (issue 9). */
+/** Apply Fresnel rim-light via TSL emissiveNode (issue 9). */
 function _applyFresnelShader(mat) {
-  const prev = mat.onBeforeCompile;
-  mat.onBeforeCompile = (shader) => {
-    if (prev) prev(shader);
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <emissivemap_fragment>',
-      `#include <emissivemap_fragment>
-float _fresnel = pow(1.0 - abs(dot(normalize(vViewPosition), normal)), 3.0);
-totalEmissiveRadiance += vec3(0.12, 0.20, 0.35) * _fresnel * 0.6;`
-    );
-  };
+  const viewDir = positionView.negate().normalize();
+  const rim = pow(sub(1.0, abs(dot(normalView, viewDir))), 3.0);
+  mat.emissiveNode = materialEmissive.add(vec3(0.12, 0.20, 0.35).mul(rim).mul(0.6));
 }
 
 // Biomechanical octopus with industrial tentacles, riveted dome, suction cups as mechanical clamps
@@ -385,26 +379,16 @@ export class MechOctopus {
     }
     geo.computeVertexNormals();
 
-    // Issue 6: material with per-segment curl vertex shader
+    // Issue 6: material with per-segment curl vertex shader (TSL)
     const mat = tentMat.clone();
-    const shaderRef = { uniforms: null };
-    const origOnBeforeCompile = mat.onBeforeCompile;
-    mat.onBeforeCompile = (shader) => {
-      if (origOnBeforeCompile) origOnBeforeCompile(shader);
-      shader.uniforms.uCurlPhase = { value: 0 };
-      shader.uniforms.uCurlAmount = { value: 0.15 };
-      shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', `#include <common>
-uniform float uCurlPhase;
-uniform float uCurlAmount;`)
-        .replace('#include <begin_vertex>', `#include <begin_vertex>
-float _t = uv.x;
-float _curl = sin(uCurlPhase - _t * 6.2832) * uCurlAmount * _t;
-transformed.y += _curl;
-float _curlZ = cos(uCurlPhase * 0.7 - _t * 4.0) * uCurlAmount * _t * 0.6;
-transformed.z += _curlZ;`);
-      shaderRef.uniforms = shader.uniforms;
-    };
+    const uCurlPhase = uniform(0);
+    const uCurlAmount = uniform(0.15);
+    const shaderRef = { uniforms: { uCurlPhase, uCurlAmount } };
+
+    const t = uv().x;
+    const curl = sin(uCurlPhase.sub(t.mul(6.2832))).mul(uCurlAmount).mul(t);
+    const curlZ = cos(uCurlPhase.mul(0.7).sub(t.mul(4.0))).mul(uCurlAmount).mul(t).mul(0.6);
+    mat.positionNode = vec3(positionLocal.x, positionLocal.y.add(curl), positionLocal.z.add(curlZ));
 
     const mesh = new THREE.Mesh(geo, mat);
     tentGroup.add(mesh);

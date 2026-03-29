@@ -1,4 +1,5 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
+import { attribute, clamp as tslClamp, cos, dot, float as tslFloat, materialEmissive, max as tslMax, mix as tslMix, normalView, pointUV, positionLocal, positionView, pow, sin, sub, uniform, vec2, vec3, vec4 } from 'three/tsl';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { LOD_NEAR_DISTANCE, LOD_MEDIUM_DISTANCE, toStandardMaterial } from './lodUtils.js';
 import { qualityManager } from '../QualityManager.js';
@@ -538,29 +539,24 @@ export class TubeCluster {
 
     let farUniforms = null;
     if (profile.animInterval < 9999) {
-      farUniforms = { uFarTime: { value: 0 } };
+      farUniforms = { uFarTime: uniform(0) };
       farMat.userData.shaderUniforms = farUniforms;
-      farMat.onBeforeCompile = (shader) => {
-        Object.assign(shader.uniforms, farUniforms);
-        shader.vertexShader = shader.vertexShader
-          .replace(
-            '#include <common>',
-            `#include <common>
-uniform float uFarTime;`
-          )
-          .replace(
-            '#include <begin_vertex>',
-            `#include <begin_vertex>
-float tcHeight = max(position.y, 0.0);
-float tcPulse = 1.0 + sin(uFarTime * 0.55) * 0.012;
-transformed.xz *= tcPulse;
-transformed.x += sin(uFarTime * 0.7 + position.y * 1.8 + position.z * 0.6) * 0.018 * tcHeight;
-transformed.z += cos(uFarTime * 0.5 + position.y * 1.6 + position.x * 0.6) * 0.018 * tcHeight;`
-          );
-        farMat.userData.shader = shader;
-      };
-      // Increment version suffix whenever the injected shader code above changes
-      farMat.customProgramCacheKey = () => 'tc-far-ultra-v1';
+
+      const tcHeight = tslMax(positionLocal.y, 0.0);
+      const tcPulse = sin(farUniforms.uFarTime.mul(0.55)).mul(0.012).add(1.0);
+      const swayX = sin(farUniforms.uFarTime.mul(0.7)
+        .add(positionLocal.y.mul(1.8)).add(positionLocal.z.mul(0.6)))
+        .mul(0.018).mul(tcHeight);
+      const swayZ = cos(farUniforms.uFarTime.mul(0.5)
+        .add(positionLocal.y.mul(1.6)).add(positionLocal.x.mul(0.6)))
+        .mul(0.018).mul(tcHeight);
+
+      farMat.positionNode = vec3(
+        positionLocal.x.mul(tcPulse).add(swayX),
+        positionLocal.y,
+        positionLocal.z.mul(tcPulse).add(swayZ)
+      );
+      farMat.needsUpdate = true;
     }
 
     const farMesh = new THREE.Mesh(mergedGeo, farMat);
@@ -599,33 +595,27 @@ transformed.z += cos(uFarTime * 0.5 + position.y * 1.6 + position.x * 0.6) * 0.0
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geo.setAttribute('aPhase',   new THREE.BufferAttribute(phases, 1));
 
-    const uniforms = { uTime: { value: 0 } };
-    const mat = new THREE.ShaderMaterial({
-      uniforms,
-      vertexShader: /* glsl */`
-        uniform float uTime;
-        attribute float aPhase;
-        void main() {
-          vec3 pos = position;
-          pos.y += sin(uTime * 0.4  + aPhase) * 0.04;
-          pos.x += cos(uTime * 0.3  + aPhase * 1.3) * 0.03;
-          pos.z += sin(uTime * 0.25 + aPhase * 0.7) * 0.03;
-          vec4 mvPos = modelViewMatrix * vec4(pos, 1.0);
-          gl_PointSize = max(1.5, 2.5 / (-mvPos.z));
-          gl_Position = projectionMatrix * mvPos;
-        }
-      `,
-      fragmentShader: /* glsl */`
-        void main() {
-          float d = length(gl_PointCoord - 0.5);
-          if (d > 0.5) discard;
-          // sRGB-authored color linearized for OutputPass (approx. pow 2.2)
-          gl_FragColor = vec4(pow(vec3(0.4, 0.5, 0.6), vec3(2.2)), 0.5 - d);
-        }
-      `,
+    const uniforms = { uTime: uniform(0) };
+    const aPhaseAttr = attribute('aPhase');
+
+    const mat = new THREE.PointsMaterial({
+      size: 2.5,
+      sizeAttenuation: true,
       transparent: true,
       depthWrite: false,
+      alphaTest: 0.01,
     });
+
+    // Vertex: bob animation
+    mat.positionNode = positionLocal.add(vec3(
+      cos(uniforms.uTime.mul(0.3).add(aPhaseAttr.mul(1.3))).mul(0.03),
+      sin(uniforms.uTime.mul(0.4).add(aPhaseAttr)).mul(0.04),
+      sin(uniforms.uTime.mul(0.25).add(aPhaseAttr.mul(0.7))).mul(0.03)
+    ));
+
+    // Fragment: soft disc with linearized color
+    mat.colorNode = pow(vec3(0.4, 0.5, 0.6), vec3(2.2));
+    mat.opacityNode = tslFloat(0.5).sub(pointUV.sub(0.5).length());
 
     return { mesh: new THREE.Points(geo, mat), uniforms };
   }
@@ -634,8 +624,8 @@ transformed.z += cos(uFarTime * 0.5 + position.y * 1.6 + position.x * 0.6) * 0.0
 
   _createFrillMaterial(tierName, tubeIdx) {
     const uniforms = {
-      uFrillTime:  { value: 0.0 },
-      uFrillPhase: { value: tubeIdx * 1.7 },
+      uFrillTime:  uniform(0.0),
+      uFrillPhase: uniform(tubeIdx * 1.7),
     };
     const baseEmissiveIntensity = 0.55;
 
@@ -650,26 +640,13 @@ transformed.z += cos(uFarTime * 0.5 + position.y * 1.6 + position.x * 0.6) * 0.0
     mat.userData.shaderUniforms = uniforms;
     mat.userData.baseEmissiveIntensity = baseEmissiveIntensity;
 
-    mat.onBeforeCompile = (shader) => {
-      Object.assign(shader.uniforms, uniforms);
-      shader.vertexShader = shader.vertexShader
-        .replace(
-          '#include <common>',
-          `#include <common>
-uniform float uFrillTime;
-uniform float uFrillPhase;`
-        )
-        .replace(
-          '#include <begin_vertex>',
-          `#include <begin_vertex>
-float frillDist = length(position.xz);
-float wave = sin(frillDist * 10.0 - uFrillTime * 4.2 + uFrillPhase) * 0.026 * frillDist;
-transformed.y += wave;`
-        );
-      mat.userData.shader = shader;
-    };
+    // TSL vertex: radial wave displacement on Y
+    const frillDist = vec2(positionLocal.x, positionLocal.z).length();
+    const wave = sin(frillDist.mul(10.0).sub(uniforms.uFrillTime.mul(4.2)).add(uniforms.uFrillPhase))
+      .mul(0.026).mul(frillDist);
+    mat.positionNode = vec3(positionLocal.x, positionLocal.y.add(wave), positionLocal.z);
+    mat.needsUpdate = true;
 
-    mat.customProgramCacheKey = () => `tc-frill-${tierName}`;
     return mat;
   }
 
@@ -711,9 +688,9 @@ transformed.y += wave;`
     wormGeo.setAttribute('aRetPos', new THREE.BufferAttribute(retArr, 3));
 
     const wormUniforms = {
-      uWormPhase:    { value: 0.0 },
-      uFeedingPhase: { value: 0.0 },
-      uWormLength:   { value: wormLen },
+      uWormPhase:    uniform(0.0),
+      uFeedingPhase: uniform(0.0),
+      uWormLength:   uniform(wormLen),
     };
 
     const wormMat = new THREE.MeshPhysicalMaterial({
@@ -728,48 +705,34 @@ transformed.y += wave;`
 
     wormMat.userData.shaderUniforms = wormUniforms;
 
-    wormMat.onBeforeCompile = (shader) => {
-      Object.assign(shader.uniforms, wormUniforms);
+    // TSL vertex: emergence blending + figure-8 feeding sweep
+    const aExtPos = attribute('aExtPos');
+    const aRetPos = attribute('aRetPos');
 
-      // Vertex shader: emergence blending + figure-8 feeding sweep
-      shader.vertexShader = shader.vertexShader
-        .replace(
-          '#include <common>',
-          `#include <common>
-attribute vec3 aExtPos;
-attribute vec3 aRetPos;
-uniform float uWormPhase;
-uniform float uFeedingPhase;
-uniform float uWormLength;`
-        )
-        .replace(
-          '#include <begin_vertex>',
-          `// Blend from retracted (inside tube) to extended (emerged) position
-vec3 transformed = mix(aRetPos, aExtPos, uWormPhase);
-// Tip emerges first: apply larger phase to upper vertices
-float tipFactor = clamp(transformed.y / max(uWormLength, 0.001), 0.0, 1.0);
-transformed = mix(aRetPos, aExtPos,
-  clamp(uWormPhase * (1.0 + tipFactor * 0.6), 0.0, 1.0));
-// Figure-8 feeding sweep concentrated at extended tip
-float sweep = tipFactor * tipFactor * uWormPhase;
-transformed.x += sin(uFeedingPhase)               * 0.09 * sweep;
-transformed.z += sin(uFeedingPhase * 2.0 + 1.0)   * 0.06 * sweep;`
-        );
+    // First blend to compute tip factor
+    const blend1 = tslMix(aRetPos, aExtPos, wormUniforms.uWormPhase);
+    const tipFactor = tslClamp(
+      blend1.y.div(tslMax(wormUniforms.uWormLength, 0.001)), 0.0, 1.0
+    );
 
-      // Fragment shader: Fresnel rim-light (blue-teal silhouette in dark zone)
-      shader.fragmentShader = shader.fragmentShader
-        .replace(
-          '#include <emissivemap_fragment>',
-          `#include <emissivemap_fragment>
-float tcFresnel = pow(1.0 - max(dot(normalize(normal), normalize(vViewPosition)), 0.0), 3.0);
-totalEmissiveRadiance += vec3(0.2, 0.6, 1.0) * tcFresnel * 0.55;`
-        );
+    // Second blend with tip-adjusted phase (tip emerges first)
+    const adjustedPhase = tslClamp(
+      wormUniforms.uWormPhase.mul(tslFloat(1.0).add(tipFactor.mul(0.6))), 0.0, 1.0
+    );
+    const blended = tslMix(aRetPos, aExtPos, adjustedPhase);
 
-      wormMat.userData.shader = shader;
-    };
+    // Figure-8 feeding sweep concentrated at extended tip
+    const sweep = tipFactor.mul(tipFactor).mul(wormUniforms.uWormPhase);
+    const feedX = sin(wormUniforms.uFeedingPhase).mul(0.09).mul(sweep);
+    const feedZ = sin(wormUniforms.uFeedingPhase.mul(2.0).add(1.0)).mul(0.06).mul(sweep);
 
-    // Shared cache key so all worms use the same compiled program
-    wormMat.customProgramCacheKey = () => 'tc-worm-v1';
+    wormMat.positionNode = blended.add(vec3(feedX, 0.0, feedZ));
+
+    // TSL fragment: Fresnel rim-light (blue-teal silhouette in dark zone)
+    const viewDir = positionView.negate().normalize();
+    const tcFresnel = pow(sub(1.0, tslMax(dot(normalView, viewDir), 0.0)), 3.0);
+    wormMat.emissiveNode = materialEmissive.add(vec3(0.2, 0.6, 1.0).mul(tcFresnel).mul(0.55));
+    wormMat.needsUpdate = true;
 
     const mesh = new THREE.Mesh(wormGeo, wormMat);
     mesh.position.set(posX, openY, posZ);

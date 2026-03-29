@@ -1,4 +1,5 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
+import { abs, dot, materialEmissive, normalView, positionLocal, positionView, pow, sin, sub, uniform, uv, vec3 } from 'three/tsl';
 import { LOD_NEAR_DISTANCE, LOD_MEDIUM_DISTANCE } from './lodUtils.js';
 
 // ─── constants ────────────────────────────────────────────────────────────────
@@ -122,9 +123,9 @@ function _buildBodyTube(tubularSegs, radialSegs) {
 function _buildBodyMat(useFarMat, useDisplacement) {
   // Per-instance uniform objects — each tier gets its own set
   const shaderUniforms = {
-    uWavePhase:  { value: 0.0 },
-    uWaveNumber: { value: 2.5 },
-    uAmplitude:  { value: 0.18 },
+    uWavePhase:  uniform(0.0),
+    uWaveNumber: uniform(2.5),
+    uAmplitude:  uniform(0.18),
   };
 
   let mat;
@@ -148,39 +149,22 @@ function _buildBodyMat(useFarMat, useDisplacement) {
     mat = new THREE.MeshPhysicalMaterial(props);
   }
 
-  mat.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, shaderUniforms);
+  // TSL: GPU anguilliform body wave + peristaltic bulge (all tiers)
+  const bodyT = uv().x;
+  const bulge = sin(shaderUniforms.uWavePhase.mul(2.0).sub(bodyT.mul(8.0))).mul(0.08);
+  const wave = sin(shaderUniforms.uWavePhase.sub(bodyT.mul(shaderUniforms.uWaveNumber).mul(6.2832))).mul(shaderUniforms.uAmplitude).mul(bodyT);
+  mat.positionNode = vec3(
+    positionLocal.x,
+    positionLocal.y.mul(bulge.add(1.0)),
+    positionLocal.z.add(wave)
+  );
 
-    // Vertex shader: GPU anguilliform body wave + peristaltic bulge (all tiers)
-    shader.vertexShader = shader.vertexShader
-      .replace(
-        '#include <common>',
-        `#include <common>
-uniform float uWavePhase;
-uniform float uWaveNumber;
-uniform float uAmplitude;`
-      )
-      .replace(
-        '#include <begin_vertex>',
-        `#include <begin_vertex>
-float _bodyT = uv.x;
-float _bulge = sin(uWavePhase * 2.0 - _bodyT * 8.0) * 0.08;
-transformed.y *= 1.0 + _bulge;
-float _wave = sin(uWavePhase - _bodyT * uWaveNumber * 6.2832) * uAmplitude * _bodyT;
-transformed.z += _wave;`
-      );
-
-    // Fragment shader: Fresnel rim-light (non-far tiers only)
-    if (!useFarMat) {
-      shader.fragmentShader = shader.fragmentShader
-        .replace(
-          '#include <emissivemap_fragment>',
-          `#include <emissivemap_fragment>
-float _fresnel = pow(1.0 - abs(dot(normalize(vViewPosition), normal)), 3.0);
-totalEmissiveRadiance += vec3(0.25, 0.10, 0.35) * _fresnel * 0.55;`
-        );
-    }
-  };
+  // TSL: Fresnel rim-light (non-far tiers only)
+  if (!useFarMat) {
+    const viewDir = positionView.negate().normalize();
+    const rim = pow(sub(1.0, abs(dot(normalView, viewDir))), 3.0);
+    mat.emissiveNode = materialEmissive.add(vec3(0.25, 0.10, 0.35).mul(rim).mul(0.55));
+  }
 
   return { mat, shaderUniforms, isFar: useFarMat };
 }

@@ -1,4 +1,5 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
+import { abs, cos, dot, materialEmissive, normalLocal, normalView, positionLocal, positionView, pow, sin, sub, uniform, vec3 } from 'three/tsl';
 import { LOD_NEAR_DISTANCE, LOD_MEDIUM_DISTANCE, toStandardMaterial } from './lodUtils.js';
 
 // ── Module-level pre-allocated temporaries — zero per-frame GC allocation ────
@@ -138,41 +139,22 @@ function _getCowlNormalTex() {
 
 /**
  * Injects body creep (slow surface displacement waves) and Fresnel rim-light
- * into a MeshPhysicalMaterial via onBeforeCompile.
+ * into a MeshPhysicalMaterial via TSL positionNode / emissiveNode.
  * Returns the uniforms object so callers can update uCreepTime each frame.
  */
 function _applyBodyShader(material) {
-  const uniforms = { uCreepTime: { value: 0.0 } };
-  material.onBeforeCompile = (shader) => {
-    shader.uniforms.uCreepTime = uniforms.uCreepTime;
+  const uniforms = { uCreepTime: uniform(0.0) };
 
-    // Vertex: time-driven surface displacement waves (body creep animation)
-    shader.vertexShader = shader.vertexShader
-      .replace(
-        '#include <common>',
-        `#include <common>
-uniform float uCreepTime;`,
-      )
-      .replace(
-        '#include <begin_vertex>',
-        `#include <begin_vertex>
-// Slow surface displacement waves — body creep animation
-float creep = sin(position.x * 4.0 + position.z * 3.0 + uCreepTime * 0.45) * 0.022
-            + cos(position.y * 6.0 + position.z * 2.5 + uCreepTime * 0.30) * 0.016;
-transformed += normal * creep;`,
-      );
+  // TSL: vertex surface displacement waves — body creep animation
+  const creep = sin(positionLocal.x.mul(4.0).add(positionLocal.z.mul(3.0)).add(uniforms.uCreepTime.mul(0.45))).mul(0.022)
+    .add(cos(positionLocal.y.mul(6.0).add(positionLocal.z.mul(2.5)).add(uniforms.uCreepTime.mul(0.30))).mul(0.016));
+  material.positionNode = positionLocal.add(normalLocal.mul(creep));
 
-    // Fragment: Fresnel rim-light for dark cowled silhouette in deep water
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <emissivemap_fragment>',
-      `#include <emissivemap_fragment>
-float rim = pow(1.0 - abs(dot(normalize(vViewPosition), normal)), 2.5);
-totalEmissiveRadiance += vec3(0.04, 0.12, 0.22) * rim * 0.7;`,
-    );
+  // TSL: Fresnel rim-light for dark cowled silhouette in deep water
+  const viewDir = positionView.negate().normalize();
+  const rim = pow(sub(1.0, abs(dot(normalView, viewDir))), 2.5);
+  material.emissiveNode = materialEmissive.add(vec3(0.04, 0.12, 0.22).mul(rim).mul(0.7));
 
-    material.userData.shader = shader;
-  };
-  material.needsUpdate = true;
   return uniforms;
 }
 

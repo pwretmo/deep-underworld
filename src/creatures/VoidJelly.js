@@ -1,4 +1,5 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
+import { abs, cos, dot, float as tslFloat, materialEmissive, max as tslMax, mix as tslMix, normalView, positionLocal, positionView, pow, sin, smoothstep as tslSmoothstep, sub, texture as tslTexture, uniform, uv, varying, vec2, vec3 } from 'three/tsl';
 
 // ─── Dark jellyfish that absorbs light — inverse bioluminescence with void tendrils ───
 // Photorealistic 3-tier LOD creature with per-vertex bell contraction,
@@ -103,6 +104,66 @@ function createVeinTexture() {
 const _glowTexture = createGlowTexture();
 const _bellNormalTexture = createBellNormalTexture();
 const _veinTexture = createVeinTexture();
+
+// ─── LOD Profiles ──────────────────────────────────────────────────────────────
+
+// ─── TSL bell shader — per-vertex contraction wave + void glow emissive ────────
+
+function _applyBellShader(mat, uniforms) {
+  mat.userData.shaderUniforms = uniforms;
+
+  // TSL vertex: per-vertex bell contraction with wave propagation from apex to margin
+  const bellUv = varying(uv(), 'vVoidUv');
+  const xz = vec2(positionLocal.x, positionLocal.z);
+  const radial = xz.length();
+  const edge = tslSmoothstep(0.3, 1.0, radial);
+  const crown = sub(1.0, tslSmoothstep(0.0, 0.4, radial));
+  const contraction = tslMax(uniforms.uContractionPhase, 0.0);
+  const relax = tslMax(uniforms.uContractionPhase.negate(), 0.0);
+  const muscleStrain = sin(positionLocal.y.mul(28.0).add(radial.mul(14.0)).add(uniforms.uVoidTime.mul(1.8)))
+    .mul(contraction).mul(0.025);
+  const waveDelay = radial.mul(0.6);
+  const wavePh = sin(uniforms.uVoidTime.mul(3.0).sub(waveDelay.mul(6.28))).mul(0.5).add(0.5);
+  const localContraction = contraction.mul(tslMix(tslFloat(0.3), tslFloat(1.0), wavePh));
+  const radialContract = localContraction.mul(edge).mul(
+    tslFloat(0.18).add(sin(radial.mul(16.0).add(uniforms.uVoidTime.mul(2.6))).mul(0.015))
+  );
+  const factor = sub(1.0, radialContract).add(relax.mul(edge).mul(0.05));
+  const newX = positionLocal.x.mul(factor);
+  const newZ = positionLocal.z.mul(factor);
+  const newY = positionLocal.y
+    .add(crown.mul(localContraction).mul(0.035))
+    .sub(edge.mul(localContraction).mul(0.14))
+    .add(edge.mul(relax).mul(0.04))
+    .add(muscleStrain);
+
+  // Pass varying data for fragment
+  const vBellEdge = varying(edge, 'vBellEdge');
+  const vBellTravel = varying(radial, 'vBellTravel');
+
+  mat.positionNode = vec3(newX, newY, newZ);
+
+  // TSL fragment: void bioluminescent pulse wave + Fresnel rim + contraction flash
+  const pulseHead = tslSmoothstep(uniforms.uPulseTravel.sub(0.22), uniforms.uPulseTravel.add(0.06), vBellTravel)
+    .mul(sub(1.0, tslSmoothstep(uniforms.uPulseTravel.add(0.06), uniforms.uPulseTravel.add(0.22), vBellTravel)));
+  const veins = tslTexture(_veinTexture, vec2(bellUv.x, bellUv.y.mul(1.2))).r;
+  const viewDir = positionView.negate().normalize();
+  const fresnel = pow(sub(1.0, abs(dot(viewDir, normalView))), 2.8);
+  const contractionGlow = tslMax(uniforms.uContractionPhase, 0.0).mul(0.5);
+  const flash = uniforms.uFlashWave.mul(tslSmoothstep(0.0, 0.5, vBellEdge)).mul(0.8);
+  const voidGlow = vec3(0.08, 0.02, 0.16);
+  mat.emissiveNode = materialEmissive.add(
+    voidGlow.mul(
+      pulseHead.mul(1.4)
+        .add(veins.mul(0.25))
+        .add(fresnel.mul(0.45))
+        .add(contractionGlow.mul(vBellEdge).mul(0.4))
+        .add(flash)
+    )
+  );
+
+  mat.needsUpdate = true;
+}
 
 // ─── LOD Profiles ──────────────────────────────────────────────────────────────
 
@@ -225,91 +286,13 @@ export class VoidJelly {
       normalScale: new THREE.Vector2(0.32 * detailScale, 0.48 * detailScale),
     });
 
-    mat.userData.shaderUniforms = {
-      uContractionPhase: { value: 0 },
-      uVoidTime: { value: 0 },
-      uPulseTravel: { value: 0 },
-      uFlashWave: { value: 0 },
-      uVeinMap: { value: _veinTexture },
+    const bellUniforms = {
+      uContractionPhase: uniform(0),
+      uVoidTime: uniform(0),
+      uPulseTravel: uniform(0),
+      uFlashWave: uniform(0),
     };
-
-    mat.onBeforeCompile = (shader) => {
-      Object.assign(shader.uniforms, mat.userData.shaderUniforms);
-
-      // Vertex: per-vertex bell contraction with wave propagation from apex to margin
-      shader.vertexShader = shader.vertexShader
-        .replace(
-          '#include <common>',
-          `#include <common>
-uniform float uContractionPhase;
-uniform float uVoidTime;
-varying float vBellEdge;
-varying float vBellHeight;
-varying float vBellTravel;
-varying vec2 vVoidUv;`
-        )
-        .replace(
-          '#include <begin_vertex>',
-          `#include <begin_vertex>
-vVoidUv = uv;
-float radial = length(position.xz);
-float edge = smoothstep(0.3, 1.0, radial);
-float crown = 1.0 - smoothstep(0.0, 0.4, radial);
-float contraction = max(uContractionPhase, 0.0);
-float relax = max(-uContractionPhase, 0.0);
-// Radial muscle fiber displacement
-float muscleStrain = sin(position.y * 28.0 + radial * 14.0 + uVoidTime * 1.8) * contraction * 0.025;
-// Wave propagation: contraction travels from apex to margin
-float waveDelay = radial * 0.6;
-float wavePhase = sin(uVoidTime * 3.0 - waveDelay * 6.28) * 0.5 + 0.5;
-float localContraction = contraction * mix(0.3, 1.0, wavePhase);
-float radialContract = localContraction * edge * (0.18 + sin(radial * 16.0 + uVoidTime * 2.6) * 0.015);
-transformed.xz *= (1.0 - radialContract + relax * edge * 0.05);
-transformed.y += crown * localContraction * 0.035;
-transformed.y -= edge * localContraction * 0.14;
-transformed.y += edge * relax * 0.04;
-transformed.y += muscleStrain;
-vBellEdge = edge;
-vBellHeight = transformed.y;
-vBellTravel = radial;`
-        );
-
-      // Fragment: Fresnel rim-light, void glow pulse, contraction flash wave
-      shader.fragmentShader = shader.fragmentShader
-        .replace(
-          '#include <common>',
-          `#include <common>
-uniform float uContractionPhase;
-uniform float uVoidTime;
-uniform float uPulseTravel;
-uniform float uFlashWave;
-uniform sampler2D uVeinMap;
-varying float vBellEdge;
-varying float vBellHeight;
-varying float vBellTravel;
-varying vec2 vVoidUv;`
-        )
-        .replace(
-          '#include <emissivemap_fragment>',
-          `#include <emissivemap_fragment>
-// Void bioluminescent pulse wave
-float pulseHead = smoothstep(uPulseTravel - 0.22, uPulseTravel + 0.06, vBellTravel)
-                * (1.0 - smoothstep(uPulseTravel + 0.06, uPulseTravel + 0.22, vBellTravel));
-// Gastrovascular canal veins
-float veins = texture2D(uVeinMap, vec2(vVoidUv.x, vVoidUv.y * 1.2)).r;
-// Fresnel rim-light for dark water silhouette visibility
-float fresnel = pow(1.0 - abs(dot(normalize(vViewPosition), normal)), 2.8);
-// Contraction stress flash
-float contractionGlow = max(uContractionPhase, 0.0) * 0.5;
-float flash = uFlashWave * smoothstep(0.0, 0.5, vBellEdge) * 0.8;
-// Combine all emissive contributions — void glow palette
-vec3 voidGlow = vec3(0.08, 0.02, 0.16);
-totalEmissiveRadiance += voidGlow * (pulseHead * 1.4 + veins * 0.25 + fresnel * 0.45
-  + contractionGlow * vBellEdge * 0.4 + flash);`
-        );
-
-      mat.userData.shader = shader;
-    };
+    _applyBellShader(mat, bellUniforms);
 
     return mat;
   }

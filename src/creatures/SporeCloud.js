@@ -1,4 +1,5 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
+import { attribute, materialEmissive, sin, uniform, varying } from 'three/tsl';
 import { LOD_NEAR_DISTANCE, LOD_MEDIUM_DISTANCE } from './lodUtils.js';
 
 // Pre-allocated module-level temporaries — zero per-frame allocations
@@ -26,43 +27,22 @@ const RESPAWN_RADIUS = 80;
 // must be set on the geometry before the first render.
 function _patchBioMaterial(mat, coreMode) {
   mat.userData.shaderUniforms = {
-    uTime:       { value: 0 },
-    uPulseSpeed: { value: coreMode ? 2.2 : 1.8 },
-    uPulseAmt:   { value: coreMode ? 1.0 : 0.5 },
-    uCascAmt:    { value: coreMode ? 3.0 : 2.0 },
+    uTime:       uniform(0.0),
+    uPulseSpeed: uniform(coreMode ? 2.2 : 1.8),
+    uPulseAmt:   uniform(coreMode ? 1.0 : 0.5),
+    uCascAmt:    uniform(coreMode ? 3.0 : 2.0),
   };
+  const u = mat.userData.shaderUniforms;
 
-  mat.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, mat.userData.shaderUniforms);
+  // TSL: pass instance attributes through varying to fragment
+  const vPulsePhase = varying(attribute('instancePulsePhase', 'float'));
+  const vCascade = varying(attribute('instanceCascade', 'float'));
 
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>',
-        `#include <common>
-attribute float instancePulsePhase;
-attribute float instanceCascade;
-varying float vPulsePhase;
-varying float vCascade;`)
-      .replace('#include <begin_vertex>',
-        `#include <begin_vertex>
-vPulsePhase = instancePulsePhase;
-vCascade = instanceCascade;`);
-
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>',
-        `#include <common>
-uniform float uTime;
-uniform float uPulseSpeed;
-uniform float uPulseAmt;
-uniform float uCascAmt;
-varying float vPulsePhase;
-varying float vCascade;`)
-      .replace('#include <emissivemap_fragment>',
-        `#include <emissivemap_fragment>
-float _pulse = 0.5 + 0.5 * sin(uTime * uPulseSpeed + vPulsePhase);
-totalEmissiveRadiance += totalEmissiveRadiance * (_pulse * uPulseAmt + vCascade * uCascAmt);`);
-
-    mat.userData.shader = shader;
-  };
+  // TSL: emissive pulse per-instance
+  const pulse = sin(u.uTime.mul(u.uPulseSpeed).add(vPulsePhase)).mul(0.5).add(0.5);
+  mat.emissiveNode = materialEmissive.add(
+    materialEmissive.mul(pulse.mul(u.uPulseAmt).add(vCascade.mul(u.uCascAmt)))
+  );
 }
 
 // Radial glow texture used by the far-LOD billboard

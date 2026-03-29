@@ -1,4 +1,5 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
+import { abs, clamp as tslClamp, cos, dot, exp, float as tslFloat, materialEmissive, max as tslMax, normalView, positionLocal, positionView, pow, sin, sub, uniform, uv, varying, vec3 } from 'three/tsl';
 import { qualityManager } from '../QualityManager.js';
 
 const TWO_PI = Math.PI * 2;
@@ -193,105 +194,85 @@ function _getFinDisplacementTexture() {
 
 function _applyOrganicShader(material, uniformRefs, options = {}) {
   const uniforms = {
-    uTime: { value: 0 },
-    uWavePhase: { value: 0 },
-    uAmplitude: { value: options.amplitude ?? 0.16 },
-    uRotAmplitude: { value: options.rotAmplitude ?? 0.22 },
-    uSwimSpeed: { value: options.swimSpeed ?? 4.0 },
-    uFrequency: { value: options.frequency ?? 10.0 },
-    uCoilStrength: { value: 0 },
-    uMuscle: { value: options.muscle ?? 0.8 },
-    uGlowPulse: { value: 1.0 },
-    uFinFlutter: { value: options.finFlutter ?? 0 },
-    uRimStrength: { value: options.rimStrength ?? 0.75 },
-    uJawGlow: { value: options.jawGlow ?? 0 },
-    uLength: { value: options.length ?? 1 },
+    uTime: uniform(0),
+    uWavePhase: uniform(0),
+    uAmplitude: uniform(options.amplitude ?? 0.16),
+    uRotAmplitude: uniform(options.rotAmplitude ?? 0.22),
+    uSwimSpeed: uniform(options.swimSpeed ?? 4.0),
+    uFrequency: uniform(options.frequency ?? 10.0),
+    uCoilStrength: uniform(0),
+    uMuscle: uniform(options.muscle ?? 0.8),
+    uGlowPulse: uniform(1.0),
+    uFinFlutter: uniform(options.finFlutter ?? 0),
+    uRimStrength: uniform(options.rimStrength ?? 0.75),
+    uJawGlow: uniform(options.jawGlow ?? 0),
+    uLength: uniform(options.length ?? 1),
   };
   uniformRefs.push(uniforms);
 
-  material.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, uniforms);
+  // TSL vertex: undulation + 2D rotation + muscle bulge + coil + fin flutter
+  const eelUv = varying(uv(), 'vEelUv');
+  const eelProgress = tslClamp(positionLocal.x.negate().div(tslMax(uniforms.uLength, 0.001)), 0.0, 1.0);
+  const vEelProgress = varying(eelProgress, 'vEelProgress');
 
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <common>',
-      `#include <common>
-       uniform float uTime;
-       uniform float uWavePhase;
-       uniform float uAmplitude;
-       uniform float uRotAmplitude;
-       uniform float uSwimSpeed;
-       uniform float uFrequency;
-       uniform float uCoilStrength;
-       uniform float uMuscle;
-       uniform float uFinFlutter;
-       uniform float uLength;
-       varying vec3 vEelWorldNormal;
-       varying vec3 vEelViewDir;
-       varying vec2 vEelUv;
-       varying float vEelProgress;
-      `
-    );
+  const eelWave = sin(uniforms.uTime.mul(uniforms.uSwimSpeed)
+    .sub(eelProgress.mul(uniforms.uFrequency)).add(uniforms.uWavePhase));
+  const eelCross = cos(uniforms.uTime.mul(uniforms.uSwimSpeed.mul(0.75))
+    .sub(eelProgress.mul(uniforms.uFrequency.mul(0.82))).add(uniforms.uWavePhase.mul(0.63)));
 
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <begin_vertex>',
-      `#include <begin_vertex>
-       vEelUv = uv;
-       float eelProgress = clamp(-position.x / max(uLength, 0.001), 0.0, 1.0);
-       vEelProgress = eelProgress;
-       float eelWave = sin(uTime * uSwimSpeed - eelProgress * uFrequency + uWavePhase);
-       float eelCross = cos(uTime * (uSwimSpeed * 0.75) - eelProgress * (uFrequency * 0.82) + uWavePhase * 0.63);
-       float eelRot = eelWave * uRotAmplitude * (0.14 + eelProgress);
-       mat2 eelRotMat = mat2(cos(eelRot), -sin(eelRot), sin(eelRot), cos(eelRot));
-       transformed.yz = eelRotMat * transformed.yz;
-       transformed.y += eelWave * uAmplitude * (0.22 + eelProgress * 1.15);
-       transformed.z += eelCross * uAmplitude * 0.38 * (0.15 + eelProgress);
-       float eelBulge = sin(uTime * 3.1 - eelProgress * 17.0 + uWavePhase);
-       transformed.yz *= 1.0 + eelBulge * uMuscle * 0.05;
-       float eelCoil = sin(uTime * 2.1 + eelProgress * 12.0 + uWavePhase) * uCoilStrength * pow(1.0 - eelProgress, 1.65);
-       transformed.y += sin(eelProgress * 9.0 + uTime * 2.25) * eelCoil;
-       transformed.z += cos(eelProgress * 9.0 + uTime * 2.05) * eelCoil * 0.8;
-       transformed.z += sin(uTime * 7.0 + uv.x * 10.0 + uv.y * 5.0 + uWavePhase) * uFinFlutter * uv.y;
-      `
-    );
+  // 2D rotation in YZ plane (manual mat2 equivalent)
+  const eelRot = eelWave.mul(uniforms.uRotAmplitude).mul(tslFloat(0.14).add(eelProgress));
+  const cosR = cos(eelRot);
+  const sinR = sin(eelRot);
+  const rotatedY = positionLocal.y.mul(cosR).sub(positionLocal.z.mul(sinR));
+  const rotatedZ = positionLocal.y.mul(sinR).add(positionLocal.z.mul(cosR));
 
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <worldpos_vertex>',
-      `#include <worldpos_vertex>
-       vEelWorldNormal = normalize(normalMatrix * objectNormal);
-       vEelViewDir = normalize(-mvPosition.xyz);
-      `
-    );
+  // Undulation displacement
+  const undulY = eelWave.mul(uniforms.uAmplitude).mul(tslFloat(0.22).add(eelProgress.mul(1.15)));
+  const undulZ = eelCross.mul(uniforms.uAmplitude).mul(0.38).mul(tslFloat(0.15).add(eelProgress));
 
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <common>',
-      `#include <common>
-       uniform float uTime;
-       uniform float uGlowPulse;
-       uniform float uRimStrength;
-       uniform float uJawGlow;
-       varying vec3 vEelWorldNormal;
-       varying vec3 vEelViewDir;
-       varying vec2 vEelUv;
-       varying float vEelProgress;
-      `
-    );
+  // Muscle bulge
+  const eelBulge = sin(uniforms.uTime.mul(3.1).sub(eelProgress.mul(17.0)).add(uniforms.uWavePhase));
+  const muscleScale = tslFloat(1.0).add(eelBulge.mul(uniforms.uMuscle).mul(0.05));
 
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <dithering_fragment>',
-      `float eelRim = pow(1.0 - max(dot(normalize(vEelWorldNormal), normalize(vEelViewDir)), 0.0), 3.0);
-       float eelStripe = exp(-pow(vEelUv.y - 0.24, 2.0) * 180.0) + exp(-pow(vEelUv.y - 0.76, 2.0) * 180.0);
-       float eelJawPulse = (1.0 - vEelProgress) * (0.5 + 0.5 * sin(uTime * 5.0));
-       // Color constants are linear-space emissive contributions; OutputPass handles sRGB encoding
-       vec3 eelGlowColor = vec3(0.08, 0.55, 0.4) * eelStripe * uGlowPulse;
-       eelGlowColor += vec3(0.16, 0.22, 0.08) * eelJawPulse * uJawGlow;
-       gl_FragColor.rgb += eelGlowColor + eelRim * (vec3(0.08, 0.2, 0.16) * uRimStrength + eelGlowColor * 0.35);
-       #include <dithering_fragment>`
-    );
-  };
+  // Coil
+  const coilBase = sin(uniforms.uTime.mul(2.1).add(eelProgress.mul(12.0)).add(uniforms.uWavePhase));
+  const coilFactor = coilBase.mul(uniforms.uCoilStrength).mul(pow(sub(1.0, eelProgress), 1.65));
+  const coilY = sin(eelProgress.mul(9.0).add(uniforms.uTime.mul(2.25))).mul(coilFactor);
+  const coilZ = cos(eelProgress.mul(9.0).add(uniforms.uTime.mul(2.05))).mul(coilFactor).mul(0.8);
 
-  // Static key: all organic shader variants use identical GLSL — differences
-  // are uniform values only, so there is no need for per-tier shader variants.
-  material.customProgramCacheKey = () => 'organicShader_v1';
+  // Fin flutter
+  const flutter = sin(uniforms.uTime.mul(7.0).add(eelUv.x.mul(10.0)).add(eelUv.y.mul(5.0)).add(uniforms.uWavePhase))
+    .mul(uniforms.uFinFlutter).mul(eelUv.y);
+
+  const finalY = rotatedY.mul(muscleScale).add(undulY).add(coilY);
+  const finalZ = rotatedZ.mul(muscleScale).add(undulZ).add(coilZ).add(flutter);
+
+  material.positionNode = vec3(positionLocal.x, finalY, finalZ);
+
+  // TSL fragment: Fresnel rim + stripe glow + jaw pulse
+  const viewDir = positionView.negate().normalize();
+  const rim = pow(sub(1.0, tslMax(dot(normalView, viewDir), 0.0)), 3.0);
+
+  // Stripe glow: Gaussian peaks at UV.y = 0.24 and 0.76
+  const stripe1 = exp(pow(eelUv.y.sub(0.24), 2.0).mul(-180.0));
+  const stripe2 = exp(pow(eelUv.y.sub(0.76), 2.0).mul(-180.0));
+  const stripe = stripe1.add(stripe2);
+
+  // Jaw pulse: stronger near head (eelProgress = 0)
+  const jawPulse = sub(1.0, vEelProgress).mul(
+    sin(uniforms.uTime.mul(5.0)).mul(0.5).add(0.5)
+  );
+
+  const glowColor = vec3(0.08, 0.55, 0.4).mul(stripe).mul(uniforms.uGlowPulse);
+  const jawColor = vec3(0.16, 0.22, 0.08).mul(jawPulse).mul(uniforms.uJawGlow);
+
+  material.emissiveNode = materialEmissive
+    .add(glowColor).add(jawColor)
+    .add(vec3(0.08, 0.2, 0.16).mul(rim).mul(uniforms.uRimStrength))
+    .add(glowColor.add(jawColor).mul(rim).mul(0.35));
+
+  material.needsUpdate = true;
 
   return material;
 }

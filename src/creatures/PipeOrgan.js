@@ -1,4 +1,5 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
+import { attribute, clamp, cos, max, normalLocal, positionLocal, sin, uniform, vec3 } from 'three/tsl';
 import { LOD_NEAR_DISTANCE, LOD_MEDIUM_DISTANCE } from './lodUtils.js';
 
 // Pre-allocated temps — zero per-frame allocations
@@ -86,65 +87,32 @@ function _getMembraneNormalTex() {
  * Shared uniforms: uTime, uResA (base amplitude), uRetractT.
  */
 function _applyResonanceShaderInstanced(mat, uTime, uResA, uRetractT) {
-  mat.onBeforeCompile = shader => {
-    shader.uniforms.uTime     = uTime;
-    shader.uniforms.uResA     = uResA;
-    shader.uniforms.uRetractT = uRetractT;
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <common>',
-      [
-        '#include <common>',
-        'uniform float uTime;',
-        'uniform float uResA;',
-        'uniform float uRetractT;',
-        'attribute float aResFreq;',
-        'attribute float aPhase;',
-        'attribute float aRadius;',
-      ].join('\n')
-    );
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <begin_vertex>',
-      /* glsl */`
-      vec3 transformed = position;
-      // Standing wave on unit cylinder: y in [-0.5, 0.5]
-      float normY = clamp(position.y + 0.5, 0.0, 1.0);
-      float breath = 1.0 + sin(uTime * 0.75 + aPhase) * 0.18;
-      float amp = uResA * breath * (1.0 - uRetractT * 0.92) / max(aRadius, 0.01);
-      float w1    = sin(normY * 3.14159265) * cos(uTime * aResFreq * 6.28318530);
-      float w2    = sin(normY * 6.28318530) * cos(uTime * aResFreq * 12.5663706 + 0.7);
-      float disp  = (w1 * 0.7 + w2 * 0.3) * amp;
-      transformed.x += normal.x * disp;
-      transformed.z += normal.z * disp;
-      `
-    );
-  };
-  mat.customProgramCacheKey = () => 'pipeorgan-resonance-instanced';
+  const aResFreq = attribute('aResFreq', 'float');
+  const aPhase = attribute('aPhase', 'float');
+  const aRadius = attribute('aRadius', 'float');
+
+  // TSL: standing-wave resonance on unit cylinder
+  const normY = clamp(positionLocal.y.add(0.5), 0.0, 1.0);
+  const breath = sin(uTime.mul(0.75).add(aPhase)).mul(0.18).add(1.0);
+  const amp = uResA.mul(breath).mul(uRetractT.mul(0.92).negate().add(1.0)).div(max(aRadius, 0.01));
+  const w1 = sin(normY.mul(Math.PI)).mul(cos(uTime.mul(aResFreq).mul(Math.PI * 2)));
+  const w2 = sin(normY.mul(Math.PI * 2)).mul(cos(uTime.mul(aResFreq).mul(Math.PI * 4).add(0.7)));
+  const disp = w1.mul(0.7).add(w2.mul(0.3)).mul(amp);
+  mat.positionNode = vec3(
+    positionLocal.x.add(normalLocal.x.mul(disp)),
+    positionLocal.y,
+    positionLocal.z.add(normalLocal.z.mul(disp))
+  );
 }
 
 /**
  * Inject cloth-like membrane flutter into a MeshPhysicalMaterial vertex shader.
  */
 function _applyMembraneShader(mat, uTime, uPhase, uAmp) {
-  mat.onBeforeCompile = shader => {
-    shader.uniforms.uTime  = uTime;
-    shader.uniforms.uMemPh = uPhase;
-    shader.uniforms.uMemA  = uAmp;
-    shader.vertexShader = [
-      'uniform float uTime;',
-      'uniform float uMemPh;',
-      'uniform float uMemA;',
-      shader.vertexShader,
-    ].join('\n').replace(
-      '#include <begin_vertex>',
-      /* glsl */`
-      vec3 transformed = position;
-      float flutter = sin(position.x * 3.8 + uTime * 2.5 + uMemPh)
-                    * cos(position.y * 2.9 + uTime * 1.6) * uMemA;
-      transformed.z += flutter;
-      `
-    );
-  };
-  mat.customProgramCacheKey = () => 'pipeorgan-membrane';
+  // TSL: cloth-like membrane flutter
+  const flutter = sin(positionLocal.x.mul(3.8).add(uTime.mul(2.5)).add(uPhase))
+    .mul(cos(positionLocal.y.mul(2.9).add(uTime.mul(1.6)))).mul(uAmp);
+  mat.positionNode = vec3(positionLocal.x, positionLocal.y, positionLocal.z.add(flutter));
 }
 
 // ── PipeOrgan ─────────────────────────────────────────────────────────────────
@@ -157,9 +125,9 @@ export class PipeOrgan {
     this.time  = Math.random() * 100;
 
     // Shared uniforms for GPU shaders
-    this._uTime     = { value: this.time };
-    this._uResA     = { value: 0.013 };
-    this._uRetractT = { value: 0 };
+    this._uTime     = uniform(this.time);
+    this._uResA     = uniform(0.013);
+    this._uRetractT = uniform(0);
 
     // Hydraulic state machine: idle → retracting → retracted → extending → idle
     this._state    = 'idle';
@@ -471,8 +439,8 @@ export class PipeOrgan {
         }
         memGeo.computeVertexNormals();
         const mMat  = memSrcMat.clone();
-        const mAmp  = { value: 0.065 };
-        const mPh   = { value: d.phase };
+        const mAmp  = uniform(0.065);
+        const mPh   = uniform(d.phase);
         _applyMembraneShader(mMat, this._uTime, mPh, mAmp);
         const membrane = new THREE.Mesh(memGeo, mMat);
         membrane.position.set(d.x + 0.19, fH * 0.5, 0);

@@ -1,4 +1,5 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
+import { abs, atan, dot, length, materialEmissive, mix, normalLocal, normalView, normalize, positionLocal, positionView, pow, sin, smoothstep, step, sub, uniform, uv, varying, vec2, vec3 } from 'three/tsl';
 import { LOD_NEAR_DISTANCE, LOD_MEDIUM_DISTANCE, toStandardMaterial } from './lodUtils.js';
 
 // ── Pre-allocated temps (zero per-frame allocations) ────────────────────────
@@ -113,58 +114,33 @@ function _createThroatNormalTexture() {
 function _applyThroatShader(material, uniforms) {
   material.userData.shaderUniforms = uniforms;
 
-  material.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, uniforms);
+  // TSL: vertex peristaltic wave + breathing + proximity pulse + fiber detail
+  const throatAxis = positionLocal.y.add(2.0).div(4.0);
+  const vThroatDepth = varying(throatAxis, 'vThroatDepth');
+  const wave = sin(throatAxis.mul(PERISTALTIC_WAVE_NUMBER).sub(uniforms.uPeristalticPhase)).mul(PERISTALTIC_AMPLITUDE)
+    .mul(smoothstep(0.0, 0.6, throatAxis));
+  const breath = sin(uniforms.uMawTime.mul(BREATHING_SPEED)).mul(BREATHING_AMPLITUDE);
+  const proximityPulse = uniforms.uPlayerProximity.mul(sin(uniforms.uMawTime.mul(4.2).add(throatAxis.mul(8.0)))).mul(0.03);
+  const xz = vec2(positionLocal.x, positionLocal.z);
+  const radial = length(xz);
+  const radDir = mix(vec2(0.0, 1.0), normalize(xz), step(0.001, radial));
+  const radDisp = radDir.mul(wave.add(breath).add(proximityPulse).mul(uniforms.uBreathScale));
+  const fiberAngle = atan(positionLocal.z, positionLocal.x);
+  const fiberDetail = sin(positionLocal.y.mul(34.0).add(fiberAngle.mul(12.0)).add(uniforms.uMawTime.mul(1.8))).mul(0.008);
+  material.positionNode = vec3(
+    positionLocal.x.add(radDisp.x),
+    positionLocal.y,
+    positionLocal.z.add(radDisp.y)
+  ).add(normalLocal.mul(fiberDetail));
 
-    shader.vertexShader = shader.vertexShader
-      .replace(
-        '#include <common>',
-        `#include <common>
-uniform float uMawTime;
-uniform float uPeristalticPhase;
-uniform float uBreathScale;
-uniform float uPlayerProximity;
-varying float vThroatDepth;
-varying vec2 vMawUv;`
-      )
-      .replace(
-        '#include <begin_vertex>',
-        `#include <begin_vertex>
-vMawUv = uv;
-float throatAxis = (position.y + 2.0) / 4.0;
-vThroatDepth = throatAxis;
-float wave = sin(throatAxis * ${PERISTALTIC_WAVE_NUMBER.toFixed(1)} - uPeristalticPhase) * ${PERISTALTIC_AMPLITUDE.toFixed(3)};
-wave *= smoothstep(0.0, 0.6, throatAxis);
-float breath = sin(uMawTime * ${BREATHING_SPEED.toFixed(1)}) * ${BREATHING_AMPLITUDE.toFixed(3)};
-float proximityPulse = uPlayerProximity * sin(uMawTime * 4.2 + throatAxis * 8.0) * 0.03;
-float radial = length(position.xz);
-vec2 radDir = radial > 0.001 ? normalize(position.xz) : vec2(0.0, 1.0);
-transformed.xz += radDir * (wave + breath + proximityPulse) * uBreathScale;
-float fiberDetail = sin(position.y * 34.0 + atan(position.z, position.x) * 12.0 + uMawTime * 1.8) * 0.008;
-transformed += normal * fiberDetail;`
-      );
-
-    shader.fragmentShader = shader.fragmentShader
-      .replace(
-        '#include <common>',
-        `#include <common>
-uniform float uMawTime;
-uniform float uPlayerProximity;
-varying float vThroatDepth;
-varying vec2 vMawUv;`
-      )
-      .replace(
-        '#include <emissivemap_fragment>',
-        `#include <emissivemap_fragment>
-float rim = pow(1.0 - abs(dot(normalize(vViewPosition), normal)), 2.6);
-totalEmissiveRadiance += vec3(0.18, 0.04, 0.12) * rim * 0.8;
-float depthGlow = smoothstep(0.2, 0.9, vThroatDepth);
-float glowPulse = 0.5 + 0.5 * sin(uMawTime * 2.0 + vThroatDepth * 6.0);
-totalEmissiveRadiance += vec3(0.5, 0.02, 0.08) * depthGlow * glowPulse * (0.6 + uPlayerProximity * 0.4);`
-      );
-
-    material.userData.shader = shader;
-  };
+  // TSL: fragment Fresnel rim + depth glow pulse
+  const viewDir = positionView.negate().normalize();
+  const rim = pow(sub(1.0, abs(dot(normalView, viewDir))), 2.6);
+  const depthGlow = smoothstep(0.2, 0.9, vThroatDepth);
+  const glowPulse = sin(uniforms.uMawTime.mul(2.0).add(vThroatDepth.mul(6.0))).mul(0.5).add(0.5);
+  material.emissiveNode = materialEmissive
+    .add(vec3(0.18, 0.04, 0.12).mul(rim).mul(0.8))
+    .add(vec3(0.5, 0.02, 0.08).mul(depthGlow).mul(glowPulse).mul(uniforms.uPlayerProximity.mul(0.4).add(0.6)));
 
   material.needsUpdate = true;
 }
@@ -173,42 +149,25 @@ totalEmissiveRadiance += vec3(0.5, 0.02, 0.08) * depthGlow * glowPulse * (0.6 + 
 function _applyLipShader(material, uniforms) {
   material.userData.shaderUniforms = uniforms;
 
-  material.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, uniforms);
+  // TSL: vertex lip dilation + angular wave
+  const angle = atan(positionLocal.z, positionLocal.x);
+  const radialWave = sin(angle.mul(5.0).add(uniforms.uMawTime.mul(LIP_DILATION_SPEED))).mul(LIP_DILATION_AMPLITUDE);
+  const dilation = uniforms.uLipDilation.mul(radialWave.add(1.0));
+  const xz = vec2(positionLocal.x, positionLocal.z);
+  const radial = length(xz);
+  const radDir = mix(vec2(1.0, 0.0), normalize(xz), step(0.001, radial));
+  const lipDisp = radDir.mul(dilation);
+  const detail = normalLocal.mul(sin(angle.mul(18.0).add(positionLocal.y.mul(12.0))).mul(0.005));
+  material.positionNode = vec3(
+    positionLocal.x.add(lipDisp.x),
+    positionLocal.y,
+    positionLocal.z.add(lipDisp.y)
+  ).add(detail);
 
-    shader.vertexShader = shader.vertexShader
-      .replace(
-        '#include <common>',
-        `#include <common>
-uniform float uMawTime;
-uniform float uLipDilation;`
-      )
-      .replace(
-        '#include <begin_vertex>',
-        `#include <begin_vertex>
-float angle = atan(position.z, position.x);
-float radialWave = sin(angle * 5.0 + uMawTime * ${LIP_DILATION_SPEED.toFixed(1)}) * ${LIP_DILATION_AMPLITUDE.toFixed(3)};
-float dilation = uLipDilation * (1.0 + radialWave);
-vec2 radDir = length(position.xz) > 0.001 ? normalize(position.xz) : vec2(1.0, 0.0);
-transformed.xz += radDir * dilation;
-transformed += normal * sin(angle * 18.0 + position.y * 12.0) * 0.005;`
-      );
-
-    shader.fragmentShader = shader.fragmentShader
-      .replace(
-        '#include <common>',
-        `#include <common>
-uniform float uMawTime;`
-      )
-      .replace(
-        '#include <emissivemap_fragment>',
-        `#include <emissivemap_fragment>
-float rim = pow(1.0 - abs(dot(normalize(vViewPosition), normal)), 3.0);
-totalEmissiveRadiance += vec3(0.25, 0.03, 0.05) * rim * 0.6;`
-      );
-
-    material.userData.shader = shader;
-  };
+  // TSL: fragment Fresnel rim
+  const viewDir = positionView.negate().normalize();
+  const rim = pow(sub(1.0, abs(dot(normalView, viewDir))), 3.0);
+  material.emissiveNode = materialEmissive.add(vec3(0.25, 0.03, 0.05).mul(rim).mul(0.6));
 
   material.needsUpdate = true;
 }
@@ -326,11 +285,11 @@ export class AbyssalMaw {
 
     // ── Shared shader uniforms for throat + lip ──────────────────────────
     const sharedUniforms = {
-      uMawTime: { value: 0 },
-      uPeristalticPhase: { value: 0 },
-      uBreathScale: { value: 1.0 },
-      uLipDilation: { value: 0 },
-      uPlayerProximity: { value: 0 },
+      uMawTime: uniform(0),
+      uPeristalticPhase: uniform(0),
+      uBreathScale: uniform(1.0),
+      uLipDilation: uniform(0),
+      uPlayerProximity: uniform(0),
     };
 
     if (profile.hasShader) {
