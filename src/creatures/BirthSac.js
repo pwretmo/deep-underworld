@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { abs, clamp, dot, materialEmissive, normalLocal, normalView, positionLocal, positionView, pow, sin, sub, uniform, uv, varying, vec3 } from 'three/tsl';
+import { abs, clamp, dot, float as tslFloat, materialEmissive, materialOpacity, normalLocal, normalView, positionLocal, positionView, pow, sin, sub, uniform, uv, varying, vec3 } from 'three/tsl';
 import { qualityManager } from '../QualityManager.js';
 
 const TWO_PI = Math.PI * 2;
@@ -144,6 +144,10 @@ function _applySacShader(mat, uniforms) {
   mat.emissiveNode = materialEmissive
     .add(vec3(0.22, 0.07, 0.14).mul(rim).mul(1.8))
     .add(vec3(0.30, 0.08, 0.18).mul(bsVein).mul(uniforms.uVeinPulse).mul(0.5));
+
+  // Heartbeat opacity pulse
+  const bsOpPulse = sin(uniforms.uTime.mul(1.0).add(uniforms.uPulsePhase)).mul(0.06);
+  mat.opacityNode = clamp(materialOpacity.add(bsOpPulse), 0.45, 0.95);
 
   mat.needsUpdate = true;
 }
