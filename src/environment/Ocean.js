@@ -50,17 +50,20 @@ function hash2D(point) {
 }
 
 function noise2D(point) {
-  const cell = floor(point).toVar();
-  const fraction = fract(point).toVar();
-
-  fraction.assign(fraction.mul(fraction).mul(vec2(3.0).sub(fraction.mul(2.0))));
+  const cell = floor(point);
+  const fraction = fract(point);
+  const smoothedFraction = fraction.mul(fraction).mul(vec2(3.0).sub(fraction.mul(2.0)));
 
   const a = hash2D(cell);
   const b = hash2D(cell.add(vec2(1.0, 0.0)));
   const c = hash2D(cell.add(vec2(0.0, 1.0)));
   const d = hash2D(cell.add(vec2(1.0, 1.0)));
 
-  return mix(mix(a, b, fraction.x), mix(c, d, fraction.x), fraction.y);
+  return mix(
+    mix(a, b, smoothedFraction.x),
+    mix(c, d, smoothedFraction.x),
+    smoothedFraction.y,
+  );
 }
 
 function fbm2D(point) {
@@ -103,7 +106,7 @@ function createParticleMaterial(geometry, snowTexture, baseSize, baseOpacity) {
   const coc = viewDist.sub(focusDist).abs().div(focusDist);
   const dofScale = float(1.0).add(coc.mul(0.35));
   const bokehScale = float(1.0).add(bokeh.mul(1.4));
-  const scatter = float(1.0).add(0.35.div(float(1.0).add(viewDist.mul(0.02))));
+  const scatter = float(1.0).add(float(0.35).div(float(1.0).add(viewDist.mul(0.02))));
   const bokehBright = float(1.0).add(bokeh.mul(2.0));
   const distFade = smoothstep(3.0, 14.0, viewDist);
 

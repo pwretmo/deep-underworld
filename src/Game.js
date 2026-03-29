@@ -13,8 +13,60 @@ import { qualityManager } from "./QualityManager.js";
 import { PhysicsWorld } from "./physics/PhysicsWorld.js";
 import { LightingPolicy } from "./lighting/LightingPolicy.js";
 
+const DEFAULT_RENDERER_OPTIONS = Object.freeze({
+  antialias: true,
+  powerPreference: "high-performance",
+});
+
+async function resolveRendererOptions() {
+  const rendererOptions = { ...DEFAULT_RENDERER_OPTIONS };
+
+  if (typeof navigator === "undefined") {
+    return rendererOptions;
+  }
+
+  if (!navigator.gpu?.requestAdapter) {
+    rendererOptions.forceWebGL = true;
+    return rendererOptions;
+  }
+
+  try {
+    const adapter = await navigator.gpu.requestAdapter({
+      powerPreference: rendererOptions.powerPreference,
+      featureLevel: "compatibility",
+    });
+
+    if (!adapter) {
+      rendererOptions.forceWebGL = true;
+      return rendererOptions;
+    }
+  } catch (_) {
+    rendererOptions.forceWebGL = true;
+    return rendererOptions;
+  }
+
+  if (typeof document === "undefined") {
+    return rendererOptions;
+  }
+
+  try {
+    const probeCanvas = document.createElement("canvas");
+    if (!probeCanvas.getContext("webgpu")) {
+      rendererOptions.forceWebGL = true;
+    }
+  } catch (_) {
+    rendererOptions.forceWebGL = true;
+  }
+
+  return rendererOptions;
+}
+
 export class Game {
-  constructor() {
+  static async resolveRendererOptions() {
+    return resolveRendererOptions();
+  }
+
+  constructor(rendererOptions = {}) {
     this.clock = new THREE.Timer();
     this.clock.connect(document);
     this.scene = new THREE.Scene();
@@ -25,8 +77,8 @@ export class Game {
 
     // Renderer
     this.renderer = new THREE.WebGPURenderer({
-      antialias: true,
-      powerPreference: "high-performance",
+      ...DEFAULT_RENDERER_OPTIONS,
+      ...rendererOptions,
     });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
