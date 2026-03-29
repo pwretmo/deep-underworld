@@ -1,23 +1,28 @@
 import * as THREE from "three/webgpu";
 import {
   clamp,
+  compute,
+  cos,
   dot,
   exp,
   exponentialHeightFogFactor,
   float,
   floor,
   fog,
+  Fn,
   fract,
+  If,
   instancedBufferAttribute,
-  instancedDynamicBufferAttribute,
+  instanceIndex,
   max,
   mix,
   positionView,
   positionWorld,
   pow,
-  smoothstep,
   sin,
+  smoothstep,
   step,
+  storage,
   texture,
   uniform,
   uv,
@@ -84,46 +89,23 @@ function fbm2D(point) {
   return octave0.add(octave1).add(octave2).add(octave3).add(octave4);
 }
 
-function createParticleMaterial(geometry, snowTexture, baseSize, baseOpacity) {
+function createParticleMaterial(geometry, snowTexture, baseSize, baseOpacity, posStorageNode) {
   const uniforms = createUniformMap({
     time: 0,
     baseSize,
     baseOpacity,
   });
-  const centerNode = instancedDynamicBufferAttribute(
-    geometry.getAttribute("particleCenter"),
-    "vec3",
-  );
-  const sizeNode = instancedBufferAttribute(
-    geometry.getAttribute("particleSize"),
-    "float",
-  );
-  const colorNode = instancedBufferAttribute(
-    geometry.getAttribute("particleColor"),
-    "vec3",
-  );
-  const seedNode = instancedBufferAttribute(
-    geometry.getAttribute("particleSeed"),
-    "float",
-  );
-  const phaseNode = instancedBufferAttribute(
-    geometry.getAttribute("particlePhase"),
-    "float",
-  );
+  const centerNode = posStorageNode.element(instanceIndex).toVec3();
+  const sizeNode = instancedBufferAttribute(geometry.getAttribute('particleSize'), 'float');
+  const colorNode = instancedBufferAttribute(geometry.getAttribute('particleColor'), 'vec3');
+  const seedNode = instancedBufferAttribute(geometry.getAttribute('particleSeed'), 'float');
+  const phaseNode = instancedBufferAttribute(geometry.getAttribute('particlePhase'), 'float');
   const material = new THREE.PointsNodeMaterial();
-  const driftedCenter = centerNode.add(
-    vec3(
-      sin(uniforms.time.mul(0.1).add(seedNode).add(phaseNode)).mul(1.5),
-      sin(uniforms.time.mul(0.08).add(phaseNode)).mul(0.6),
-      uniforms.time
-        .mul(0.1)
-        .add(seedNode)
-        .add(phaseNode)
-        .mul(0.7)
-        .cos()
-        .mul(1.5),
-    ),
-  );
+  const driftedCenter = centerNode.add(vec3(
+    sin(uniforms.time.mul(0.1).add(seedNode).add(phaseNode)).mul(1.5),
+    sin(uniforms.time.mul(0.08).add(phaseNode)).mul(0.6),
+    cos(uniforms.time.mul(0.1).add(seedNode).add(phaseNode).mul(0.7)).mul(1.5)
+  ));
   material.positionNode = driftedCenter;
   material.sizeAttenuation = true;
 
@@ -316,25 +298,64 @@ export class Ocean {
       colors[i * 3 + 2] = 0.8 + Math.random() * 0.2;
     }
 
-    const centerAttr = new THREE.InstancedBufferAttribute(positions, 3);
-    centerAttr.setUsage(THREE.DynamicDrawUsage);
-    geo.setAttribute("particleCenter", centerAttr);
-    geo.setAttribute(
-      "particleSize",
-      new THREE.InstancedBufferAttribute(sizes, 1),
-    );
-    geo.setAttribute(
-      "particleColor",
-      new THREE.InstancedBufferAttribute(colors, 3),
-    );
-    geo.setAttribute(
-      "particleSeed",
-      new THREE.InstancedBufferAttribute(seeds, 1),
-    );
-    geo.setAttribute(
-      "particlePhase",
-      new THREE.InstancedBufferAttribute(phases, 1),
-    );
+    // Storage buffer for positions — updated by GPU compute shader
+    const posStorageAttr = new THREE.StorageInstancedBufferAttribute(positions, 3);
+    const seedStorageAttr = new THREE.StorageInstancedBufferAttribute(seeds, 1);
+    const phaseStorageAttr = new THREE.StorageInstancedBufferAttribute(phases, 1);
+
+    geo.setAttribute('particleCenter', posStorageAttr);
+    geo.setAttribute('particleSize', new THREE.InstancedBufferAttribute(sizes, 1));
+    geo.setAttribute('particleColor', new THREE.InstancedBufferAttribute(colors, 3));
+    geo.setAttribute('particleSeed', new THREE.InstancedBufferAttribute(seeds.slice(), 1));
+    geo.setAttribute('particlePhase', new THREE.InstancedBufferAttribute(phases.slice(), 1));
+
+    // TSL storage buffer nodes for the compute shader
+    const posBuffer = storage(posStorageAttr, 'vec3', count);
+    const seedBuffer = storage(seedStorageAttr, 'float', count).toReadOnly();
+    const phaseBuffer = storage(phaseStorageAttr, 'float', count).toReadOnly();
+
+    // Compute shader uniforms
+    this._computeUniforms = {
+      dt: uniform(0.016),
+      time: uniform(0.0),
+      playerPos: uniform(new THREE.Vector3(0, 0, 0)),
+      respawnRadius: uniform(140.0),
+      respawnVertical: uniform(95.0),
+      respawnOffset: uniform(8.0),
+    };
+
+    // GPU compute kernel — updates particle positions each frame
+    const computeFn = Fn(() => {
+      const pos = posBuffer.element(instanceIndex);
+      const seed = seedBuffer.element(instanceIndex).toFloat();
+      const phase = phaseBuffer.element(instanceIndex).toFloat();
+
+      // Upward drift
+      pos.y.addAssign(this._computeUniforms.dt.mul(0.2));
+
+      // Distance check for respawn
+      const dx = pos.x.sub(this._computeUniforms.playerPos.x);
+      const dy = pos.y.sub(this._computeUniforms.playerPos.y);
+      const dz = pos.z.sub(this._computeUniforms.playerPos.z);
+      const distSq = dx.mul(dx).add(dy.mul(dy)).add(dz.mul(dz));
+
+      // Respawn when too far (>100 units) or above water surface
+      If(distSq.greaterThan(10000.0).or(pos.y.greaterThan(0.0)), () => {
+        // Deterministic hash-based pseudo-random using seed + time
+        const t = this._computeUniforms.time;
+        const rx = fract(sin(seed.mul(12.9898).add(t.mul(0.1))).mul(43758.5453)).sub(0.5);
+        const ry = fract(sin(seed.mul(78.233).add(t.mul(0.07))).mul(43758.5453));
+        const rz = fract(sin(seed.mul(45.164).add(t.mul(0.13))).mul(43758.5453)).sub(0.5);
+
+        pos.x.assign(this._computeUniforms.playerPos.x.add(rx.mul(this._computeUniforms.respawnRadius)));
+        pos.y.assign(this._computeUniforms.playerPos.y.sub(
+          ry.mul(this._computeUniforms.respawnVertical).add(this._computeUniforms.respawnOffset)
+        ));
+        pos.z.assign(this._computeUniforms.playerPos.z.add(rz.mul(this._computeUniforms.respawnRadius)));
+      });
+    });
+
+    this.particleCompute = computeFn().compute(count);
 
     // Soft circular particle texture
     const pSize = 32;
@@ -357,16 +378,9 @@ export class Ocean {
     ctx.fillRect(0, 0, pSize, pSize);
     const snowTexture = new THREE.CanvasTexture(canvas);
 
-    this.particleCenters = positions;
-    this.particleSeeds = seeds;
-    this.particlePhases = phases;
-
-    const mat = createParticleMaterial(
-      geo,
-      snowTexture,
-      this.particleBaseSize,
-      this.particleBaseOpacity,
-    );
+    // Material reads positions from the same storage buffer
+    const posReadNode = storage(posStorageAttr, 'vec3', count).toReadOnly();
+    const mat = createParticleMaterial(geo, snowTexture, this.particleBaseSize, this.particleBaseOpacity, posReadNode);
 
     // WebGPU honors textured particle sizing for PointsNodeMaterial on instanced Sprites.
     this.particleSystem = new THREE.Sprite(mat);
@@ -430,7 +444,7 @@ export class Ocean {
     this.scene.add(this.godRayGroup);
   }
 
-  update(dt, depth, playerPos) {
+  update(dt, depth, playerPos, renderer) {
     this.time += dt;
     const depthBlend = THREE.MathUtils.smoothstep(depth, 45, 320);
     const abyssBlend = THREE.MathUtils.smoothstep(depth, 380, 760);
@@ -460,38 +474,14 @@ export class Ocean {
     // Update GPU particle time uniform
     this.particleSystem.material.uniforms.time.value = this.time;
 
-    // CPU respawn: only update particles that drift too far from the player
-    const ppos = this.particleCenters;
-    const seeds = this.particleSeeds;
-    const phases = this.particlePhases;
-    let respawned = false;
-    for (let i = 0; i < ppos.length; i += 3) {
-      const pi = i / 3;
-      // Estimate GPU-displaced position for distance check
-      const idx = seeds[pi] + phases[pi];
-      const ex = ppos[i] + Math.sin(this.time * 0.1 + idx) * 1.5;
-      const ey = ppos[i + 1] + Math.sin(this.time * 0.08 + phases[pi]) * 0.6;
-      const ez = ppos[i + 2] + Math.cos(this.time * 0.1 + idx * 0.7) * 1.5;
-
-      // Also apply upward drift on CPU (slow float up)
-      ppos[i + 1] += dt * 0.2;
-
-      const dx = ex - playerPos.x;
-      const dy = ey - playerPos.y;
-      const dz = ez - playerPos.z;
-      if (dx * dx + dy * dy + dz * dz > 10000 || ppos[i + 1] > 0) {
-        const horizontalRadius = THREE.MathUtils.lerp(140, 85, depthBlend);
-        const verticalSpan = THREE.MathUtils.lerp(95, 180, depthBlend);
-        const abyssOffset = THREE.MathUtils.lerp(8, 30, abyssBlend);
-        ppos[i] = playerPos.x + (Math.random() - 0.5) * horizontalRadius;
-        ppos[i + 1] = playerPos.y - Math.random() * verticalSpan - abyssOffset;
-        ppos[i + 2] = playerPos.z + (Math.random() - 0.5) * horizontalRadius;
-        respawned = true;
-      }
-    }
-    if (respawned) {
-      this.particleSystem.geometry.attributes.particleCenter.needsUpdate = true;
-    }
+    // Update compute shader uniforms and dispatch GPU particle update
+    this._computeUniforms.dt.value = dt;
+    this._computeUniforms.time.value = this.time;
+    this._computeUniforms.playerPos.value.copy(playerPos);
+    this._computeUniforms.respawnRadius.value = THREE.MathUtils.lerp(140, 85, depthBlend);
+    this._computeUniforms.respawnVertical.value = THREE.MathUtils.lerp(95, 180, depthBlend);
+    this._computeUniforms.respawnOffset.value = THREE.MathUtils.lerp(8, 30, abyssBlend);
+    renderer.computeAsync(this.particleCompute);
 
     // Denser, slightly larger snow in mid/deep water, then tighten in abyss for readability.
     const deepOpacity = THREE.MathUtils.lerp(
