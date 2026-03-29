@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from "three";
 
 /**
  * Authoritative depth-zone thresholds shared by the lighting policy and
@@ -29,8 +29,18 @@ export const DEPTH_ZONE_PROFILES = Object.freeze({
       darkZone: Object.freeze({ start: 170, end: 520 }),
       abyss: Object.freeze({ start: 430, end: 900 }),
     }),
-    near: Object.freeze({ surface: 5.0, twilight: 3.0, darkZone: 1.5, abyss: 0.5 }),
-    far: Object.freeze({ surface: 240, twilight: 160, darkZone: 85, abyss: 55 }),
+    near: Object.freeze({
+      surface: 5.0,
+      twilight: 3.0,
+      darkZone: 1.5,
+      abyss: 0.5,
+    }),
+    far: Object.freeze({
+      surface: 240,
+      twilight: 160,
+      darkZone: 85,
+      abyss: 55,
+    }),
   }),
   ambient: Object.freeze({
     surface: 0.24,
@@ -40,7 +50,7 @@ export const DEPTH_ZONE_PROFILES = Object.freeze({
   }),
   exposure: Object.freeze({
     surface: 0.76,
-    mid: 0.70,
+    mid: 0.7,
     deep: 0.65,
     abyss: 0.62,
     flashlightBoost: 0.12,
@@ -93,7 +103,7 @@ export class LightingPolicy {
     this._targetExposure = DEPTH_ZONE_PROFILES.exposure.surface;
     this._lastDepth = 0;
     this._lastFlashlightOn = false;
-    this._lastZoneName = 'surface';
+    this._lastZoneName = "surface";
     this._lastBlends = {
       twilight: 0,
       darkZone: 0,
@@ -168,13 +178,15 @@ export class LightingPolicy {
         ambient: this._baseAmbient,
       },
       targetExposure: this._targetExposure,
-      modifiers: Array.from(this._modifiers.entries()).map(([id, modifier]) => ({
-        id,
-        weight: THREE.MathUtils.clamp(modifier.weight ?? 0, 0, 1),
-        fogNear: modifier.fogNear,
-        fogFar: modifier.fogFar,
-        ambientIntensity: modifier.ambientIntensity,
-      })),
+      modifiers: Array.from(this._modifiers.entries()).map(
+        ([id, modifier]) => ({
+          id,
+          weight: THREE.MathUtils.clamp(modifier.weight ?? 0, 0, 1),
+          fogNear: modifier.fogNear,
+          fogFar: modifier.fogFar,
+          ambientIntensity: modifier.ambientIntensity,
+        }),
+      ),
     };
   }
 
@@ -183,9 +195,25 @@ export class LightingPolicy {
    * Use when no encounter/modifier needs to read the base between evaluation
    * and application (e.g. during preload warm-up).
    */
-  update(depth, flashlightOn, fog, ambientLight, sceneBackground, renderer, underwaterEffect) {
+  update(
+    depth,
+    flashlightOn,
+    fog,
+    ambientLight,
+    sceneBackground,
+    renderer,
+    underwaterEffect,
+  ) {
     this.evaluateBase(depth, flashlightOn);
-    this.applyToScene(depth, flashlightOn, fog, ambientLight, sceneBackground, renderer, underwaterEffect);
+    this.applyToScene(
+      depth,
+      flashlightOn,
+      fog,
+      ambientLight,
+      sceneBackground,
+      renderer,
+      underwaterEffect,
+    );
   }
 
   /**
@@ -201,8 +229,15 @@ export class LightingPolicy {
    * Phase 2: blend modifiers onto the base and write fog, ambient,
    * background, exposure, and depth-scale cap to the scene.
    */
-  applyToScene(depth, flashlightOn, fog, ambientLight, sceneBackground, renderer, underwaterEffect) {
-
+  applyToScene(
+    depth,
+    flashlightOn,
+    fog,
+    ambientLight,
+    sceneBackground,
+    renderer,
+    underwaterEffect,
+  ) {
     // 2. Start with base values
     let fogNear = this._baseFogNear;
     let fogFar = this._baseFogFar;
@@ -212,9 +247,12 @@ export class LightingPolicy {
     for (const mod of this._modifiers.values()) {
       const w = THREE.MathUtils.clamp(mod.weight ?? 0, 0, 1);
       if (w === 0) continue;
-      if (mod.fogNear !== undefined) fogNear = THREE.MathUtils.lerp(fogNear, mod.fogNear, w);
-      if (mod.fogFar !== undefined) fogFar = THREE.MathUtils.lerp(fogFar, mod.fogFar, w);
-      if (mod.ambientIntensity !== undefined) ambient = THREE.MathUtils.lerp(ambient, mod.ambientIntensity, w);
+      if (mod.fogNear !== undefined)
+        fogNear = THREE.MathUtils.lerp(fogNear, mod.fogNear, w);
+      if (mod.fogFar !== undefined)
+        fogFar = THREE.MathUtils.lerp(fogFar, mod.fogFar, w);
+      if (mod.ambientIntensity !== undefined)
+        ambient = THREE.MathUtils.lerp(ambient, mod.ambientIntensity, w);
     }
 
     // 4. Write to scene state
@@ -227,10 +265,12 @@ export class LightingPolicy {
     this._effectiveFogFar = fogFar;
     this._effectiveAmbient = ambient;
 
-    // 4b. Update fogNode uniforms (exponential height fog density)
+    // 4b. Update fogNode uniforms (exponential height fog density).
+    // density = sqrt(3) / fogFar gives ~95% opacity at fogFar distance.
+    // fogFar already scales per depth zone (240 surface → 55 abyss),
+    // so no additional depth division is needed.
     if (this._fogDensityNode) {
-      const safeDepth = Math.max(depth, 1);
-      this._fogDensityNode.value = Math.sqrt(3.0) / (safeDepth * fogFar);
+      this._fogDensityNode.value = Math.sqrt(3.0) / fogFar;
     }
     if (this._fogColorNode) {
       this._fogColorNode.value.copy(this._fogColor);
@@ -251,9 +291,21 @@ export class LightingPolicy {
     this._lastDepth = depth;
     this._lastFlashlightOn = flashlightOn;
 
-    const twilight = THREE.MathUtils.smoothstep(depth, bands.twilight.start, bands.twilight.end);
-    const darkZone = THREE.MathUtils.smoothstep(depth, bands.darkZone.start, bands.darkZone.end);
-    const abyss = THREE.MathUtils.smoothstep(depth, bands.abyss.start, bands.abyss.end);
+    const twilight = THREE.MathUtils.smoothstep(
+      depth,
+      bands.twilight.start,
+      bands.twilight.end,
+    );
+    const darkZone = THREE.MathUtils.smoothstep(
+      depth,
+      bands.darkZone.start,
+      bands.darkZone.end,
+    );
+    const abyss = THREE.MathUtils.smoothstep(
+      depth,
+      bands.abyss.start,
+      bands.abyss.end,
+    );
     const zoneWeights = {
       surface: THREE.MathUtils.clamp(1 - twilight, 0, 1),
       twilight: THREE.MathUtils.clamp(twilight - darkZone, 0, 1),
@@ -261,7 +313,7 @@ export class LightingPolicy {
       abyss: THREE.MathUtils.clamp(abyss, 0, 1),
     };
 
-    let zoneName = 'surface';
+    let zoneName = "surface";
     let zoneWeight = zoneWeights.surface;
     for (const [candidate, weight] of Object.entries(zoneWeights)) {
       if (weight > zoneWeight) {
@@ -291,25 +343,65 @@ export class LightingPolicy {
     this._fogColor.lerp(this._colorD, abyss);
 
     // Fog near / far
-    const nearTwilight = THREE.MathUtils.lerp(p.fog.near.surface, p.fog.near.twilight, twilight);
-    const nearDark = THREE.MathUtils.lerp(nearTwilight, p.fog.near.darkZone, darkZone);
+    const nearTwilight = THREE.MathUtils.lerp(
+      p.fog.near.surface,
+      p.fog.near.twilight,
+      twilight,
+    );
+    const nearDark = THREE.MathUtils.lerp(
+      nearTwilight,
+      p.fog.near.darkZone,
+      darkZone,
+    );
     let fogNear = THREE.MathUtils.lerp(nearDark, p.fog.near.abyss, abyss);
 
-    const farTwilight = THREE.MathUtils.lerp(p.fog.far.surface, p.fog.far.twilight, twilight);
-    const farDark = THREE.MathUtils.lerp(farTwilight, p.fog.far.darkZone, darkZone);
+    const farTwilight = THREE.MathUtils.lerp(
+      p.fog.far.surface,
+      p.fog.far.twilight,
+      twilight,
+    );
+    const farDark = THREE.MathUtils.lerp(
+      farTwilight,
+      p.fog.far.darkZone,
+      darkZone,
+    );
     let fogFar = THREE.MathUtils.lerp(farDark, p.fog.far.abyss, abyss);
 
     // Ambient
-    const ambientTwilight = THREE.MathUtils.lerp(p.ambient.surface, p.ambient.twilight, twilight);
-    const ambientDark = THREE.MathUtils.lerp(ambientTwilight, p.ambient.darkZone, darkZone);
-    const ambientIntensity = THREE.MathUtils.lerp(ambientDark, p.ambient.abyss, abyss);
+    const ambientTwilight = THREE.MathUtils.lerp(
+      p.ambient.surface,
+      p.ambient.twilight,
+      twilight,
+    );
+    const ambientDark = THREE.MathUtils.lerp(
+      ambientTwilight,
+      p.ambient.darkZone,
+      darkZone,
+    );
+    const ambientIntensity = THREE.MathUtils.lerp(
+      ambientDark,
+      p.ambient.abyss,
+      abyss,
+    );
 
     // Flashlight fog push
     if (flashlightOn) {
       const push = p.flashlightFogPush;
-      const pushStrength = THREE.MathUtils.smoothstep(depth, push.depthRange.start, push.depthRange.end);
-      fogNear += THREE.MathUtils.lerp(push.nearAdd.min, push.nearAdd.max, pushStrength);
-      fogFar += THREE.MathUtils.lerp(push.farAdd.min, push.farAdd.max, pushStrength);
+      const pushStrength = THREE.MathUtils.smoothstep(
+        depth,
+        push.depthRange.start,
+        push.depthRange.end,
+      );
+      fogNear += THREE.MathUtils.lerp(
+        push.nearAdd.min,
+        push.nearAdd.max,
+        pushStrength,
+      );
+      fogFar += THREE.MathUtils.lerp(
+        push.farAdd.min,
+        push.farAdd.max,
+        pushStrength,
+      );
     }
 
     this._baseFogNear = fogNear;
@@ -327,7 +419,11 @@ export class LightingPolicy {
     let target = THREE.MathUtils.lerp(exp.surface, exp.mid, midBlend);
     target = THREE.MathUtils.lerp(target, exp.deep, deepBlend);
 
-    const abyssBlend = THREE.MathUtils.smoothstep(depth, t.abyss, t.abyss + 280);
+    const abyssBlend = THREE.MathUtils.smoothstep(
+      depth,
+      t.abyss,
+      t.abyss + 280,
+    );
     target = THREE.MathUtils.lerp(target, exp.abyss, abyssBlend);
 
     if (flashlightOn) {
