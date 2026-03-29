@@ -85,6 +85,10 @@ export class LightingPolicy {
     this._effectiveFogFar = 300;
     this._effectiveAmbient = 0.24;
 
+    // fogNode uniform references (set via setFogNodeUniforms)
+    this._fogDensityNode = null;
+    this._fogColorNode = null;
+
     // Exposure state
     this._targetExposure = DEPTH_ZONE_PROFILES.exposure.surface;
     this._lastDepth = 0;
@@ -116,6 +120,15 @@ export class LightingPolicy {
 
   removeModifier(id) {
     this._modifiers.delete(id);
+  }
+
+  /**
+   * Connect the TSL fogNode uniform references so applyToScene can
+   * update density and color each frame.
+   */
+  setFogNodeUniforms(densityNode, colorNode) {
+    this._fogDensityNode = densityNode;
+    this._fogColorNode = colorNode;
   }
 
   /**
@@ -213,6 +226,15 @@ export class LightingPolicy {
     this._effectiveFogNear = fogNear;
     this._effectiveFogFar = fogFar;
     this._effectiveAmbient = ambient;
+
+    // 4b. Update fogNode uniforms (exponential height fog density)
+    if (this._fogDensityNode) {
+      const safeDepth = Math.max(depth, 1);
+      this._fogDensityNode.value = Math.sqrt(3.0) / (safeDepth * fogFar);
+    }
+    if (this._fogColorNode) {
+      this._fogColorNode.value.copy(this._fogColor);
+    }
 
     // 5. Update exposure
     this._updateExposure(depth, flashlightOn, renderer);

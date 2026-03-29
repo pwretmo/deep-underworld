@@ -3,8 +3,10 @@ import {
   clamp,
   dot,
   exp,
+  exponentialHeightFogFactor,
   float,
   floor,
+  fog,
   fract,
   instancedBufferAttribute,
   instancedDynamicBufferAttribute,
@@ -208,8 +210,11 @@ export class Ocean {
     // God rays
     this._createGodRays();
 
-    // Initial fog
-    scene.fog = new THREE.Fog(0x006994, 5, 300);
+    // Exponential height fog via TSL fogNode
+    this.fogDensity = uniform(0.0015);
+    this.fogHeight = uniform(0.0);
+    this.fogColorNode = uniform(new THREE.Color(0x006994));
+    scene.fogNode = fog(this.fogColorNode, exponentialHeightFogFactor(this.fogDensity, this.fogHeight));
     scene.background = new THREE.Color(0x006994);
 
     // React to quality tier changes for shadow map size
