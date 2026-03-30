@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { abs, attribute, cos, dot, float as tslFloat, materialColor, materialEmissive, max as tslMax, normalView, positionLocal, positionView, pow, sin, smoothstep as tslSmoothstep, sub, texture as tslTexture, uniform, uv, varying, vec2, vec3 } from 'three/tsl';
+import { abs, atan, attribute, cos, dot, float as tslFloat, materialColor, materialEmissive, max as tslMax, normalView, positionLocal, positionView, pow, sin, smoothstep as tslSmoothstep, sub, texture as tslTexture, uniform, uv, varying, vec2, vec3 } from 'three/tsl';
 
 const LOD_NEAR_DISTANCE = 30;
 const LOD_MEDIUM_DISTANCE = 80;
@@ -178,7 +178,7 @@ function _applyBellShader(mat, uniforms) {
   const newZ = positionLocal.z.mul(factor);
 
   // Damage — localized bell deformation
-  const bellAngle = positionLocal.z.atan2(positionLocal.x);
+  const bellAngle = atan(positionLocal.z, positionLocal.x);
   const damageShape = uniforms.uDamage.mul(tslSmoothstep(0.15, 1.0, radial)).mul(0.24).mul(uniforms.uBellSize);
   const damageOffset = damageShape.mul(tslMax(0.0, cos(bellAngle.sub(uniforms.uDamageSide))));
 

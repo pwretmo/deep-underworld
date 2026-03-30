@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { attribute, clamp as tslClamp, cos, dot, float as tslFloat, materialEmissive, max as tslMax, mix as tslMix, normalView, pointUV, positionLocal, positionView, pow, sin, sub, uniform, vec2, vec3, vec4 } from 'three/tsl';
+import { attribute, clamp as tslClamp, cos, dot, float as tslFloat, materialEmissive, max as tslMax, mix as tslMix, normalView, positionLocal, positionView, pow, sin, sub, uniform, uv, vec2, vec3, vec4 } from 'three/tsl';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { LOD_NEAR_DISTANCE, LOD_MEDIUM_DISTANCE, toStandardMaterial } from './lodUtils.js';
 import { qualityManager } from '../QualityManager.js';
@@ -577,47 +577,49 @@ export class TubeCluster {
     };
   }
 
-  // ── Substrate particles — vertex-shader driven, no CPU buffer updates ─────
+  // ── Substrate particles — instanced billboard quads (WebGPU-safe) ──────────
 
   _buildParticles() {
     const count = 28;
-    const positions = new Float32Array(count * 3);
-    const phases    = new Float32Array(count);
+
+    const quadGeo = new THREE.PlaneGeometry(0.12, 0.12);
+    const offsets = new Float32Array(count * 3);
+    const phases  = new Float32Array(count);
     for (let i = 0; i < count; i++) {
       const a = Math.random() * TWO_PI;
       const r = 0.4 + Math.random() * 1.6;
-      positions[i * 3]     = Math.cos(a) * r;
-      positions[i * 3 + 1] = -0.35 + Math.random() * 0.5;
-      positions[i * 3 + 2] = Math.sin(a) * r;
+      offsets[i * 3]     = Math.cos(a) * r;
+      offsets[i * 3 + 1] = -0.35 + Math.random() * 0.5;
+      offsets[i * 3 + 2] = Math.sin(a) * r;
       phases[i] = Math.random() * TWO_PI;
     }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geo.setAttribute('aPhase',   new THREE.BufferAttribute(phases, 1));
+    quadGeo.setAttribute('aOffset', new THREE.InstancedBufferAttribute(offsets, 3));
+    quadGeo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(phases, 1));
 
     const uniforms = { uTime: uniform(0) };
     const aPhaseAttr = attribute('aPhase');
+    const aOffsetAttr = attribute('aOffset');
 
-    const mat = new THREE.PointsMaterial({
-      size: 2.5,
-      sizeAttenuation: true,
+    const mat = new THREE.MeshBasicMaterial({
       transparent: true,
       depthWrite: false,
       alphaTest: 0.01,
+      side: THREE.DoubleSide,
     });
 
-    // Vertex: bob animation
-    mat.positionNode = positionLocal.add(vec3(
+    // Vertex: billboard offset + bob animation
+    mat.positionNode = positionLocal.add(aOffsetAttr).add(vec3(
       cos(uniforms.uTime.mul(0.3).add(aPhaseAttr.mul(1.3))).mul(0.03),
       sin(uniforms.uTime.mul(0.4).add(aPhaseAttr)).mul(0.04),
       sin(uniforms.uTime.mul(0.25).add(aPhaseAttr.mul(0.7))).mul(0.03)
     ));
 
-    // Fragment: soft disc with linearized color
+    // Fragment: soft disc using mesh UVs instead of gl_PointCoord-derived pointUV.
     mat.colorNode = pow(vec3(0.4, 0.5, 0.6), vec3(2.2));
-    mat.opacityNode = tslFloat(0.5).sub(pointUV.sub(0.5).length());
+    mat.opacityNode = tslFloat(0.5).sub(uv().sub(0.5).length());
 
-    return { mesh: new THREE.Points(geo, mat), uniforms };
+    const mesh = new THREE.InstancedMesh(quadGeo, mat, count);
+    return { mesh, uniforms };
   }
 
   // ── Crown frill material with radial wave vertex shader ───────────────────

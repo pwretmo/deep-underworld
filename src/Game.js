@@ -519,84 +519,125 @@ export class Game {
     if (this.running || this.startPreparing || this.gameOver) return;
 
     const startupToken = ++this._startupToken;
-    this.startPreparing = true;
-    this._startTransition.startRequested = false;
-    this._startTransition.started = true;
-    this.pendingStart = false;
-    this.menuOverlay.classList.add("hidden");
-    this.gameOverOverlay.classList.remove("visible");
-    this.pauseOverlay.classList.remove("visible");
+    let primeSummary = null;
 
-    this.descentOverlay.classList.add("visible");
-    this.descentOverlay.classList.remove("fade-out");
-    this.descentProgressBar.style.width = "0%";
-    this._descentActive = true;
-    this._descentPhase = "physics";
-    this._descentLastCreatureCount = 0;
-    this._descentLastTeaseTime = 0;
-    this._descentItems.innerHTML = "";
-    this._descentTease.innerHTML = "";
-    this._updateDescentProgress();
-    this.underwaterEffect.beginStartupGuard();
+    try {
+      this.startPreparing = true;
+      this._startTransition.startRequested = false;
+      this._startTransition.started = true;
+      this.pendingStart = false;
+      this.menuOverlay.classList.add("hidden");
+      this.gameOverOverlay.classList.remove("visible");
+      this.pauseOverlay.classList.remove("visible");
 
-    // Initialize Rapier WASM physics before terrain/player use it
-    const physicsWorld = new PhysicsWorld();
-    await physicsWorld.init();
-    if (startupToken !== this._startupToken) return;
-
-    this.physicsWorld = physicsWorld;
-    this.terrain.setPhysicsWorld(physicsWorld);
-    this.player.setPhysicsWorld(physicsWorld);
-
-    this._descentPhase = "shaders";
-    this._updateDescentProgress();
-
-    const primeSummary = await this.preload.primeStartBaseline({
-      onProgress: (data) => {
-        if (startupToken === this._startupToken) {
-          this._updateDescentProgress(data);
-        }
-      },
-    });
-
-    if (startupToken !== this._startupToken) return;
-    if (this.gameOver) {
-      this.startPreparing = false;
-      return;
-    }
-
-    this.preload.startDescentAssistFromSnapshot();
-
-    this.running = true;
-    this.startPreparing = false;
-
-    if (this._lockLostDuringDescent) {
-      this._lockLostDuringDescent = false;
-      this.pauseOverlay.classList.add("visible");
-    } else {
-      this._resumeAudio();
-    }
-    await this._warmOpeningFrames({
-      onProgress: (data) => {
-        if (startupToken === this._startupToken) {
-          this._updateDescentProgress(data);
-        }
-      },
-    });
-    if (startupToken !== this._startupToken) return;
-
-    // Dismiss descent overlay only after the first live gameplay frames have
-    // rendered, so the player does not inherit opening-frame shader stalls.
-    this._descentActive = false;
-    this.descentOverlay.classList.add("fade-out");
-    this._descentFadeTimer = setTimeout(() => {
-      if (startupToken !== this._startupToken) return;
-      this.descentOverlay.classList.remove("visible");
+      this.descentOverlay.classList.add("visible");
       this.descentOverlay.classList.remove("fade-out");
-      this._descentFadeTimer = null;
-    }, 800);
+      this.descentProgressBar.style.width = "0%";
+      this._descentActive = true;
+      this._descentPhase = "physics";
+      this._descentLastCreatureCount = 0;
+      this._descentLastTeaseTime = 0;
+      this._descentItems.innerHTML = "";
+      this._descentTease.innerHTML = "";
+      this._updateDescentProgress();
+      this.underwaterEffect.beginStartupGuard();
 
-    console.log(`[deep-underworld] ${logMessage}`, primeSummary);
+      // Initialize Rapier WASM physics before terrain/player use it
+      const physicsWorld = new PhysicsWorld();
+      await physicsWorld.init();
+      if (startupToken !== this._startupToken) return;
+
+      this.physicsWorld = physicsWorld;
+      this.terrain.setPhysicsWorld(physicsWorld);
+      this.player.setPhysicsWorld(physicsWorld);
+
+      this._descentPhase = "shaders";
+      this._updateDescentProgress();
+
+      try {
+        primeSummary = await this.preload.primeStartBaseline({
+          onProgress: (data) => {
+            if (startupToken === this._startupToken) {
+              this._updateDescentProgress(data);
+            }
+          },
+        });
+      } catch (err) {
+        console.warn("[deep-underworld] Startup preload degraded:", err);
+      }
+
+      if (startupToken !== this._startupToken) return;
+      if (this.gameOver) {
+        this.startPreparing = false;
+        return;
+      }
+
+      this.preload.startDescentAssistFromSnapshot();
+
+      this.running = true;
+      this.startPreparing = false;
+
+      if (this._lockLostDuringDescent) {
+        this._lockLostDuringDescent = false;
+        this.pauseOverlay.classList.add("visible");
+      } else {
+        this._resumeAudio();
+      }
+
+      try {
+        await this._warmOpeningFrames({
+          onProgress: (data) => {
+            if (startupToken === this._startupToken) {
+              this._updateDescentProgress(data);
+            }
+          },
+        });
+      } catch (err) {
+        console.warn("[deep-underworld] Opening stabilization degraded:", err);
+      }
+      if (startupToken !== this._startupToken) return;
+
+      // Dismiss descent overlay only after the first live gameplay frames have
+      // rendered, so the player does not inherit opening-frame shader stalls.
+      this._descentActive = false;
+      this.descentOverlay.classList.add("fade-out");
+      this._descentFadeTimer = setTimeout(() => {
+        if (startupToken !== this._startupToken) return;
+        this.descentOverlay.classList.remove("visible");
+        this.descentOverlay.classList.remove("fade-out");
+        this._descentFadeTimer = null;
+      }, 800);
+
+      console.log(`[deep-underworld] ${logMessage}`, primeSummary);
+    } catch (err) {
+      if (startupToken !== this._startupToken) return;
+
+      console.error("[deep-underworld] Startup sequence failed:", err);
+      this.startPreparing = false;
+      this.pendingStart = false;
+      this.running = false;
+      this._descentActive = false;
+      this._descentPhase = "idle";
+      this._descentLastCreatureCount = 0;
+      this._descentLastTeaseTime = 0;
+      this._startTransition.startRequested = false;
+      this._startTransition.started = false;
+      this._pauseAudio();
+      this.player.locked = false;
+      this.player.unlock();
+
+      if (this._descentFadeTimer !== null) {
+        clearTimeout(this._descentFadeTimer);
+        this._descentFadeTimer = null;
+      }
+
+      this.descentOverlay.classList.remove("visible", "fade-out");
+      this.descentProgressBar.style.width = "0%";
+      this._descentItems.innerHTML = "";
+      this._descentTease.innerHTML = "";
+      this.menuOverlay.classList.remove("hidden");
+      this.pauseOverlay.classList.remove("visible");
+    }
   }
 
   async _warmOpeningFrames({ onProgress } = {}) {

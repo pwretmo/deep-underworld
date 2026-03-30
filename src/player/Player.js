@@ -1,6 +1,9 @@
 import * as THREE from "three";
 import { ExternalLightingSystem } from "./ExternalLightingSystem.js";
 
+export const PLAYER_START_Y = -5;
+export const PLAYER_START_PITCH = 0;
+
 /**
  * Detect if the GPU can handle volumetric shaders.
  * Stay conservative before backend init, but preserve the advanced beam path
@@ -32,7 +35,7 @@ export class Player {
   /**
    * @param {THREE.PerspectiveCamera} camera
    * @param {HTMLElement} domElement
-  * @param {object} [renderer] - optional, used for backend capability detection
+   * @param {object} [renderer] - optional, used for backend capability detection
    */
   constructor(camera, domElement, renderer) {
     this.camera = camera;
@@ -48,7 +51,7 @@ export class Player {
     this.autoplayCollisionBypassTimer = 0;
 
     // Mouse look
-    this.euler = new THREE.Euler(0, 0, 0, "YXZ");
+    this.euler = new THREE.Euler(PLAYER_START_PITCH, 0, 0, "YXZ");
     this.locked = false;
     this.mouseSensitivity = 0.002;
 
@@ -68,6 +71,8 @@ export class Player {
     // Submarine ambient glow — visible cockpit illumination
     this.subLight = new THREE.PointLight(0x445577, 8, 65);
     camera.add(this.subLight);
+
+    this.camera.quaternion.setFromEuler(this.euler);
 
     /** Current depth (positive = deeper). Updated by Game._animate(). */
     this.depth = 0;
@@ -155,15 +160,19 @@ export class Player {
   }
 
   reset() {
-    this.position.set(0, -5, 0);
+    this.position.set(0, PLAYER_START_Y, 0);
     this.velocity.set(0, 0, 0);
     this.clearAutoplayInput();
     this.autoplayCollisionBypassTimer = 0;
-    this.euler.set(0, 0, 0);
+    this.euler.set(PLAYER_START_PITCH, 0, 0);
     this.camera.quaternion.setFromEuler(this.euler);
     // Sync physics body to reset position
     if (this._physicsBody) {
-      this._physicsBody.setNextKinematicTranslation({ x: 0, y: -5, z: 0 });
+      this._physicsBody.setNextKinematicTranslation({
+        x: 0,
+        y: PLAYER_START_Y,
+        z: 0,
+      });
     }
   }
 
