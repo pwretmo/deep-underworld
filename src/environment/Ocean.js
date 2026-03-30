@@ -246,6 +246,8 @@ export class Ocean {
     this._particleSpawnAnchor = new THREE.Vector3();
     this._hasParticleSpawnAnchor = false;
     this._particleTexture = null;
+    this._particleComputeStorageAttributes = [];
+    this._particleRenderer = null;
 
     // Ambient light — richer blue fill for underwater atmosphere
     this.ambientLight = new THREE.AmbientLight(0x2a4466, 0.22);
@@ -323,16 +325,33 @@ export class Ocean {
     return Math.max(1, Math.round(settings.particleCount ?? 1));
   }
 
-  _disposeParticles() {
-    if (!this.particleSystem) return;
+  _disposeParticleComputeResources() {
+    this.particleCompute?.dispose();
 
-    this.scene.remove(this.particleSystem);
-    this.particleSystem.geometry?.dispose();
-    this.particleSystem.material?.dispose();
+    // Compute-only storage attributes are not owned by the render geometry.
+    const attributeManager = this._particleRenderer?._attributes;
+    if (attributeManager) {
+      for (const attribute of this._particleComputeStorageAttributes) {
+        attributeManager.delete(attribute);
+      }
+    }
+
+    this._particleComputeStorageAttributes = [];
+    this.particleCompute = null;
+  }
+
+  _disposeParticles() {
+    this._disposeParticleComputeResources();
+
+    if (this.particleSystem) {
+      this.scene.remove(this.particleSystem);
+      this.particleSystem.geometry?.dispose();
+      this.particleSystem.material?.dispose();
+      this.particleSystem = null;
+    }
+
     this._particleTexture?.dispose();
 
-    this.particleSystem = null;
-    this.particleCompute = null;
     this._computeUniforms = null;
     this._particleTexture = null;
     this.particleCount = 0;
@@ -545,6 +564,10 @@ export class Ocean {
     });
 
     this.particleCompute = computeFn().compute(count);
+    this._particleComputeStorageAttributes = [
+      seedStorageAttr,
+      phaseStorageAttr,
+    ];
 
     // Build an irregular, low-energy flake texture instead of a bright soft disc.
     const pSize = MARINE_SNOW_TEXTURE_RESOLUTION;
@@ -654,6 +677,7 @@ export class Ocean {
     const abyssBlend = THREE.MathUtils.smoothstep(depth, 380, 760);
     this._particleSpawnAnchor.copy(playerPos);
     this._hasParticleSpawnAnchor = true;
+    this._particleRenderer = renderer;
 
     this.waterSurface.material.uniforms.time.value = this.time;
 
