@@ -72,6 +72,28 @@ export class PhysicsWorld {
   }
 
   /**
+   * Create many sphere colliders from a flat [x, y, z, radius] array.
+   * @param {Float32Array} spheres
+   * @returns {number[]} collider handles
+   */
+  createSphereColliders(spheres) {
+    const handles = [];
+
+    for (let i = 0; i + 3 < spheres.length; i += 4) {
+      handles.push(
+        this.createSphereCollider(
+          spheres[i],
+          spheres[i + 1],
+          spheres[i + 2],
+          spheres[i + 3],
+        ),
+      );
+    }
+
+    return handles;
+  }
+
+  /**
    * Create a capsule collider for the player (kinematic position-based).
    * @param {number} x
    * @param {number} y

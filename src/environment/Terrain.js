@@ -63,6 +63,64 @@ function fbm3D(inputPosition) {
     .div(1.875);
 }
 
+const CHUNK_FINALIZATION_STAGES = [
+  'geometry',
+  'rocks',
+  'terrainCollider',
+  'rockColliders',
+  'attach',
+];
+const STREAM_FINALIZATION_BUDGET_MS = 4;
+const PRELOAD_FINALIZATION_BUDGET_MS = 8;
+const MAX_FINALIZATION_STAGES_PER_SLICE = 8;
+const PROFILE_EMA_ALPHA = 0.2;
+const SLOW_FINALIZATION_STAGE_MS = 2.5;
+const SLOW_FINALIZATION_TOTAL_MS = 6;
+const PROFILE_HISTORY_LIMIT = 24;
+const TERRAIN_CHUNK_PROFILE_QUERY_KEY = 'terrainChunkProfile';
+const SLOW_FINALIZATION_LOG_INTERVAL_MS = 5000;
+
+function updateEma(current, next) {
+  return current === 0 ? next : current + (next - current) * PROFILE_EMA_ALPHA;
+}
+
+function trimHistory(history, maxEntries) {
+  if (history.length > maxEntries) {
+    history.splice(0, history.length - maxEntries);
+  }
+}
+
+function isChunkApplyDiagnosticsEnabled() {
+  if (typeof window === 'undefined') return false;
+
+  try {
+    return new URLSearchParams(window.location.search).has(TERRAIN_CHUNK_PROFILE_QUERY_KEY);
+  } catch {
+    return false;
+  }
+}
+
+function createChunkApplyProfile() {
+  const stages = {};
+  for (const stageName of CHUNK_FINALIZATION_STAGES) {
+    stages[stageName] = {
+      lastMs: 0,
+      avgMs: 0,
+      maxMs: 0,
+    };
+  }
+
+  return {
+    sampleCount: 0,
+    lastTotalMs: 0,
+    avgTotalMs: 0,
+    maxTotalMs: 0,
+    lastSample: null,
+    slowSamples: [],
+    stages,
+  };
+}
+
 export class Terrain {
   constructor(scene) {
     this.scene = scene;
@@ -72,14 +130,19 @@ export class Terrain {
     this.lastChunkX = null;
     this.lastChunkZ = null;
     this.viewDistance = qualityManager.getSettings().terrainViewDistance;
-    this._pendingChunks = []; // queue for staggered generation
+    this._pendingChunks = []; // queue for staggered worker requests
     this._physicsWorld = null;
     this._neededChunkKeys = new Set();
-    this._readyPayloads = [];
+    this._pendingFinalizations = [];
+    this._pendingFinalizationKeys = new Set();
+    this._activeFinalization = null;
     this._requestSeq = 0;
     this._inFlightById = new Map();
     this._inFlightByKey = new Map();
     this._maxInFlight = 2;
+    this._chunkApplyProfile = createChunkApplyProfile();
+    this._chunkApplyLoggingEnabled = isChunkApplyDiagnosticsEnabled();
+    this._lastChunkApplyLogMs = Number.NEGATIVE_INFINITY;
     this._chunkWorker = new Worker(new URL('./chunkPayloadWorker.js', import.meta.url), { type: 'module' });
     this._chunkWorker.onmessage = (event) => {
       const data = event.data;
@@ -93,11 +156,16 @@ export class Terrain {
         this._inFlightByKey.delete(request.key);
       }
 
-      if (request.cancelled || !this._neededChunkKeys.has(request.key) || this.chunks.has(request.key)) {
+      if (
+        request.cancelled ||
+        !this._neededChunkKeys.has(request.key) ||
+        this.chunks.has(request.key) ||
+        this._pendingFinalizationKeys.has(request.key)
+      ) {
         return;
       }
 
-      this._readyPayloads.push({ key: request.key, cx: data.cx, cz: data.cz, payload: data.payload });
+      this._enqueueFinalization(request.key, data.cx, data.cz, data.payload);
     };
 
     window.addEventListener('qualitychange', (e) => {
@@ -262,124 +330,273 @@ export class Terrain {
    */
   _createChunkCollider(mesh, colliderVertices, indices) {
     const handle = this._physicsWorld.createTrimeshCollider(colliderVertices, indices);
-    mesh.userData.physicsColliderHandles = [handle];
+    const handles = mesh.userData.physicsColliderHandles || [];
+    handles.push(handle);
+    mesh.userData.physicsColliderHandles = handles;
+    return handle;
   }
 
-  _addRocksFromPayload(parent, payload) {
-    const count = payload.rockTransforms.length / 9;
-    if (count <= 0) return;
+  _addRockVisualsFromPayload(parent, payload) {
+    const batches = payload.rockBatches || [];
+    for (const batch of batches) {
+      const geometry = this._rockGeos[batch.type % this._rockGeos.length];
+      const count = batch.matrices.length / 16;
+      if (!geometry || count <= 0) continue;
 
-    const numTypes = this._rockGeos.length;
-    const groups = Array.from({ length: numTypes }, () => []);
-    for (let i = 0; i < count; i++) {
-      const t = payload.rockTypes ? payload.rockTypes[i] % numTypes : i % numTypes;
-      groups[t].push(i);
-    }
-
-    const dummy = new THREE.Object3D();
-    const tmpColor = new THREE.Color();
-
-    for (let t = 0; t < numTypes; t++) {
-      const ids = groups[t];
-      if (ids.length === 0) continue;
-
-      const inst = new THREE.InstancedMesh(this._rockGeos[t], this._rockMat, ids.length);
+      const inst = new THREE.InstancedMesh(geometry, this._rockMat, count);
       inst.castShadow = true;
       inst.receiveShadow = true;
 
-      if (payload.rockColors) {
-        inst.instanceColor = new THREE.InstancedBufferAttribute(
-          new Float32Array(ids.length * 3), 3
-        );
-      }
-
-      for (let j = 0; j < ids.length; j++) {
-        const i = ids[j];
-        const idx = i * 9;
-        dummy.position.set(
-          payload.rockTransforms[idx],
-          payload.rockTransforms[idx + 1],
-          payload.rockTransforms[idx + 2]
-        );
-        dummy.scale.set(
-          payload.rockTransforms[idx + 3],
-          payload.rockTransforms[idx + 4],
-          payload.rockTransforms[idx + 5]
-        );
-        dummy.rotation.set(
-          payload.rockTransforms[idx + 6],
-          payload.rockTransforms[idx + 7],
-          payload.rockTransforms[idx + 8]
-        );
-        dummy.updateMatrix();
-        inst.setMatrixAt(j, dummy.matrix);
-
-        if (payload.rockColors) {
-          const ci = i * 3;
-          tmpColor.setRGB(
-            payload.rockColors[ci],
-            payload.rockColors[ci + 1],
-            payload.rockColors[ci + 2]
-          );
-          inst.setColorAt(j, tmpColor);
-        }
-      }
-
+      inst.instanceMatrix = new THREE.InstancedBufferAttribute(batch.matrices, 16);
       inst.instanceMatrix.needsUpdate = true;
-      if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
-      parent.add(inst);
-    }
 
-    // Create physics sphere colliders for each rock from worker payload
-    if (this._physicsWorld) {
-      const handles = parent.userData.physicsColliderHandles || [];
-      for (let i = 0; i < count; i++) {
-        const idx = i * 4;
-        const wx = payload.rockColliders[idx];
-        const wy = payload.rockColliders[idx + 1];
-        const wz = payload.rockColliders[idx + 2];
-        const radius = payload.rockColliders[idx + 3];
-        const handle = this._physicsWorld.createSphereCollider(wx, wy, wz, radius);
-        handles.push(handle);
+      if (batch.colors && batch.colors.length > 0) {
+        inst.instanceColor = new THREE.InstancedBufferAttribute(batch.colors, 3);
+        inst.instanceColor.needsUpdate = true;
       }
-      parent.userData.physicsColliderHandles = handles;
+
+      parent.add(inst);
     }
   }
 
-  _applyReadyPayloads(maxCount, cancelToken) {
-    let applied = 0;
-    while (this._readyPayloads.length > 0 && applied < maxCount) {
-      if (cancelToken?.cancelled) break;
-      const next = this._readyPayloads.shift();
-      if (!next) break;
+  _createRockCollidersFromPayload(parent, payload) {
+    if (!this._physicsWorld || !payload.rockColliders || payload.rockColliders.length === 0) {
+      return;
+    }
 
-      const { key, cx, cz, payload } = next;
-      if (!this._neededChunkKeys.has(key) || this.chunks.has(key)) {
+    const handles = this._physicsWorld.createSphereColliders(payload.rockColliders);
+    if (handles.length === 0) return;
+
+    const colliderHandles = parent.userData.physicsColliderHandles || [];
+    colliderHandles.push(...handles);
+    parent.userData.physicsColliderHandles = colliderHandles;
+  }
+
+  _enqueueFinalization(key, cx, cz, payload) {
+    this._pendingFinalizationKeys.add(key);
+    this._pendingFinalizations.push({
+      key,
+      cx,
+      cz,
+      payload,
+      mesh: null,
+      geometry: null,
+      stageIndex: 0,
+      stageTimings: {},
+    });
+  }
+
+  _disposePendingFinalization(job) {
+    if (!job) return;
+
+    if (this._physicsWorld && job.mesh?.userData?.physicsColliderHandles) {
+      for (const handle of job.mesh.userData.physicsColliderHandles) {
+        this._physicsWorld.removeCollider(handle);
+      }
+      job.mesh.userData.physicsColliderHandles = [];
+    }
+
+    if (job.geometry) {
+      job.geometry.dispose();
+    }
+
+    if (job.mesh) {
+      job.mesh.clear();
+    }
+
+    this._pendingFinalizationKeys.delete(job.key);
+    job.payload = null;
+  }
+
+  _createChunkMeshFromPayload(cx, cz, payload) {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(payload.positions, 3));
+    geometry.setAttribute('normal', new THREE.BufferAttribute(payload.normals, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(payload.colors, 3));
+    geometry.setIndex(new THREE.BufferAttribute(payload.indices, 1));
+
+    const mesh = new THREE.Mesh(geometry, this._terrainMat);
+    mesh.position.set(cx * this.chunkSize, 0, cz * this.chunkSize);
+    mesh.receiveShadow = true;
+
+    return { geometry, mesh };
+  }
+
+  _recordChunkApplyStage(stageName, elapsedMs) {
+    const stats = this._chunkApplyProfile.stages[stageName];
+    if (!stats) return;
+
+    stats.lastMs = elapsedMs;
+    stats.avgMs = updateEma(stats.avgMs, elapsedMs);
+    stats.maxMs = Math.max(stats.maxMs, elapsedMs);
+  }
+
+  _recordChunkApplySample(job) {
+    const stages = {};
+    let totalMs = 0;
+
+    for (const stageName of CHUNK_FINALIZATION_STAGES) {
+      const elapsedMs = job.stageTimings[stageName] || 0;
+      stages[stageName] = elapsedMs;
+      totalMs += elapsedMs;
+    }
+
+    const sample = {
+      key: job.key,
+      totalMs,
+      stages,
+    };
+    const profile = this._chunkApplyProfile;
+    profile.sampleCount += 1;
+    profile.lastTotalMs = totalMs;
+    profile.avgTotalMs = updateEma(profile.avgTotalMs, totalMs);
+    profile.maxTotalMs = Math.max(profile.maxTotalMs, totalMs);
+    profile.lastSample = sample;
+
+    const hasSlowStage = CHUNK_FINALIZATION_STAGES.some(
+      (stageName) => stages[stageName] >= SLOW_FINALIZATION_STAGE_MS,
+    );
+
+    if (totalMs >= SLOW_FINALIZATION_TOTAL_MS || hasSlowStage) {
+      profile.slowSamples.push(sample);
+      trimHistory(profile.slowSamples, PROFILE_HISTORY_LIMIT);
+
+      const now = performance.now();
+      if (
+        this._chunkApplyLoggingEnabled &&
+        now - this._lastChunkApplyLogMs >= SLOW_FINALIZATION_LOG_INTERVAL_MS
+      ) {
+        this._lastChunkApplyLogMs = now;
+
+        const breakdown = CHUNK_FINALIZATION_STAGES
+          .map((stageName) => `${stageName}=${stages[stageName].toFixed(2)}ms`)
+          .join(', ');
+        console.warn(
+          `[Terrain] Slow chunk finalization ${job.key}: total=${totalMs.toFixed(2)}ms (${breakdown})`,
+        );
+      }
+    }
+  }
+
+  getChunkApplyProfile() {
+    const stages = {};
+    for (const stageName of CHUNK_FINALIZATION_STAGES) {
+      stages[stageName] = { ...this._chunkApplyProfile.stages[stageName] };
+    }
+
+    return {
+      sampleCount: this._chunkApplyProfile.sampleCount,
+      lastTotalMs: this._chunkApplyProfile.lastTotalMs,
+      avgTotalMs: this._chunkApplyProfile.avgTotalMs,
+      maxTotalMs: this._chunkApplyProfile.maxTotalMs,
+      lastSample: this._chunkApplyProfile.lastSample
+        ? {
+            ...this._chunkApplyProfile.lastSample,
+            stages: { ...this._chunkApplyProfile.lastSample.stages },
+          }
+        : null,
+      slowSamples: this._chunkApplyProfile.slowSamples.map((sample) => ({
+        ...sample,
+        stages: { ...sample.stages },
+      })),
+      stages,
+    };
+  }
+
+  _takeNextFinalization() {
+    while (this._pendingFinalizations.length > 0) {
+      const job = this._pendingFinalizations.shift();
+      if (!job) break;
+
+      if (!this._neededChunkKeys.has(job.key) || this.chunks.has(job.key)) {
+        this._disposePendingFinalization(job);
         continue;
       }
 
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(payload.positions, 3));
-      geo.setAttribute('color', new THREE.BufferAttribute(payload.colors, 3));
-      geo.setIndex(new THREE.BufferAttribute(payload.indices, 1));
-      geo.computeVertexNormals();
+      return job;
+    }
 
-      const mat = this._terrainMat;
+    return null;
+  }
 
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(cx * this.chunkSize, 0, cz * this.chunkSize);
-      mesh.receiveShadow = true;
+  _runFinalizationStage(job) {
+    const stageName = CHUNK_FINALIZATION_STAGES[job.stageIndex];
+    if (!stageName) return false;
 
-      this._addRocksFromPayload(mesh, payload);
+    const stageStart = performance.now();
+
+    if (stageName === 'geometry') {
+      const { geometry, mesh } = this._createChunkMeshFromPayload(job.cx, job.cz, job.payload);
+      job.geometry = geometry;
+      job.mesh = mesh;
+    } else if (stageName === 'rocks') {
+      this._addRockVisualsFromPayload(job.mesh, job.payload);
+    } else if (stageName === 'terrainCollider') {
       if (this._physicsWorld) {
-        this._createChunkCollider(mesh, payload.colliderVertices, payload.indices);
+        this._createChunkCollider(job.mesh, job.payload.colliderVertices, job.payload.indices);
+      }
+    } else if (stageName === 'rockColliders') {
+      if (this._physicsWorld) {
+        this._createRockCollidersFromPayload(job.mesh, job.payload);
+      }
+    } else if (stageName === 'attach') {
+      this.scene.add(job.mesh);
+      this.chunks.set(job.key, job.mesh);
+    }
+
+    const elapsedMs = performance.now() - stageStart;
+    job.stageTimings[stageName] = elapsedMs;
+    this._recordChunkApplyStage(stageName, elapsedMs);
+    job.stageIndex += 1;
+    return true;
+  }
+
+  _drainFinalizationStages(maxStages, maxCostMs, cancelToken, options = undefined) {
+    if (maxStages <= 0 || maxCostMs <= 0) return 0;
+
+    const progressedKeys = options?.progressedKeys;
+    const maxChunks = options?.maxChunks ?? Infinity;
+    let completedStages = 0;
+    const sliceStart = performance.now();
+
+    while (completedStages < maxStages) {
+      if (cancelToken?.cancelled) break;
+      if (performance.now() - sliceStart >= maxCostMs) break;
+
+      if (!this._activeFinalization) {
+        if (progressedKeys && progressedKeys.size >= maxChunks) break;
+        this._activeFinalization = this._takeNextFinalization();
+        if (!this._activeFinalization) break;
       }
 
-      this.scene.add(mesh);
-      this.chunks.set(key, mesh);
-      applied++;
+      const job = this._activeFinalization;
+      if (progressedKeys && progressedKeys.size >= maxChunks && !progressedKeys.has(job.key)) {
+        break;
+      }
+
+      if (!this._neededChunkKeys.has(job.key) || this.chunks.has(job.key)) {
+        this._disposePendingFinalization(job);
+        this._activeFinalization = null;
+        continue;
+      }
+
+      if (!this._runFinalizationStage(job)) {
+        this._disposePendingFinalization(job);
+        this._activeFinalization = null;
+        continue;
+      }
+
+      completedStages += 1;
+      progressedKeys?.add(job.key);
+      if (job.stageIndex >= CHUNK_FINALIZATION_STAGES.length) {
+        this._recordChunkApplySample(job);
+        this._pendingFinalizationKeys.delete(job.key);
+        job.payload = null;
+        this._activeFinalization = null;
+      }
     }
-    return applied;
+
+    return completedStages;
   }
 
   _requestPendingChunks(maxCount, cancelToken) {
@@ -389,7 +606,12 @@ export class Terrain {
       if (this._inFlightByKey.size >= this._maxInFlight) break;
 
       const { key, x, z } = this._pendingChunks.shift();
-      if (this.chunks.has(key) || this._inFlightByKey.has(key) || !this._neededChunkKeys.has(key)) {
+      if (
+        this.chunks.has(key) ||
+        this._inFlightByKey.has(key) ||
+        this._pendingFinalizationKeys.has(key) ||
+        !this._neededChunkKeys.has(key)
+      ) {
         continue;
       }
 
@@ -415,7 +637,25 @@ export class Terrain {
         this._cancelInFlightRequest(requestId);
       }
     }
-    this._readyPayloads = this._readyPayloads.filter(entry => needed.has(entry.key));
+
+    if (
+      this._activeFinalization &&
+      (!needed.has(this._activeFinalization.key) || this.chunks.has(this._activeFinalization.key))
+    ) {
+      this._disposePendingFinalization(this._activeFinalization);
+      this._activeFinalization = null;
+    }
+
+    const pendingFinalizations = [];
+    for (const job of this._pendingFinalizations) {
+      if (!needed.has(job.key) || this.chunks.has(job.key)) {
+        this._disposePendingFinalization(job);
+        continue;
+      }
+
+      pendingFinalizations.push(job);
+    }
+    this._pendingFinalizations = pendingFinalizations;
 
     // Remove distant chunks
     for (const [key, mesh] of this.chunks) {
@@ -435,7 +675,11 @@ export class Terrain {
     // Queue new chunks for staggered creation (1 per frame)
     this._pendingChunks = [];
     for (const key of needed) {
-      if (!this.chunks.has(key)) {
+      if (
+        !this.chunks.has(key) &&
+        !this._inFlightByKey.has(key) &&
+        !this._pendingFinalizationKeys.has(key)
+      ) {
         const [x, z] = key.split(',').map(Number);
         this._pendingChunks.push({ key, x, z });
       }
@@ -452,29 +696,31 @@ export class Terrain {
 
   preloadDrain(maxCount, cancelToken) {
     if (maxCount <= 0) return 0;
-    let progress = 0;
+    const progressedKeys = new Set();
+    this._drainFinalizationStages(
+      maxCount * CHUNK_FINALIZATION_STAGES.length,
+      PRELOAD_FINALIZATION_BUDGET_MS,
+      cancelToken,
+      {
+        progressedKeys,
+        maxChunks: maxCount,
+      },
+    );
+
+    let progress = progressedKeys.size;
     while (progress < maxCount) {
       if (cancelToken?.cancelled) break;
 
-      const applied = this._applyReadyPayloads(1, cancelToken);
-      if (applied > 0) {
-        progress += applied;
-        continue;
-      }
-
       const requested = this._requestPendingChunks(1, cancelToken);
-      if (requested > 0) {
-        progress += requested;
-        continue;
-      }
-
-      break;
+      if (requested <= 0) break;
+      progress += requested;
     }
+
     return progress;
   }
 
   getPendingCount() {
-    return this._pendingChunks.length + this._inFlightById.size + this._readyPayloads.length;
+    return this._pendingChunks.length + this._inFlightById.size + this._pendingFinalizationKeys.size;
   }
 
   getChunkCount() {
@@ -486,8 +732,12 @@ export class Terrain {
     const cz = Math.round(playerPos.z / this.chunkSize);
 
     if (allowChunkWork) {
-      // Build/apply at most 1 chunk payload per streaming frame and request at most 1 new chunk
-      this._applyReadyPayloads(1);
+      // Finalize chunk stages within a small streaming budget so terrain apply
+      // no longer lands as one opaque main-thread block.
+      this._drainFinalizationStages(
+        MAX_FINALIZATION_STAGES_PER_SLICE,
+        STREAM_FINALIZATION_BUDGET_MS,
+      );
       this._requestPendingChunks(1);
     }
 

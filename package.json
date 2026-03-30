@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "profile:environment-animation": "node scripts/profile-environment-animation.mjs",
+    "profile:terrain-chunk-apply": "node scripts/profile-terrain-chunk-apply.mjs",
     "generate:preload-lookup": "node scripts/generate-preload-lookup-artifact.mjs",
     "prebuild": "npm run generate:preload-lookup",
     "build": "vite build",

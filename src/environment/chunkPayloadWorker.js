@@ -10,6 +10,7 @@ const TERRAIN_COLORS = {
 const ORB_COLORS = [0x00ffaa, 0x00aaff, 0x8844ff, 0xff00aa, 0x44ffaa];
 const CORAL_SHALLOW_COLORS = [0xff6644, 0xff44aa, 0xffaa33, 0xff8866];
 const CORAL_DEEP_COLORS = [0x664455, 0x554466, 0x445566, 0x556644];
+const TERRAIN_ROCK_TYPE_COUNT = 4;
 
 const cancelledRequests = new Set();
 
@@ -29,7 +30,125 @@ function getTerrainBaseDepth(x, z) {
   return -80 - Math.abs(fbm2D(x * 0.001, z * 0.001)) * 600;
 }
 
-function createTerrainPayload({ cx, cz, chunkSize, resolution }) {
+function computeTerrainNormals(positions, indices) {
+  const normals = new Float32Array(positions.length);
+
+  for (let i = 0; i < indices.length; i += 3) {
+    const ai = indices[i] * 3;
+    const bi = indices[i + 1] * 3;
+    const ci = indices[i + 2] * 3;
+
+    const abx = positions[bi] - positions[ai];
+    const aby = positions[bi + 1] - positions[ai + 1];
+    const abz = positions[bi + 2] - positions[ai + 2];
+    const acx = positions[ci] - positions[ai];
+    const acy = positions[ci + 1] - positions[ai + 1];
+    const acz = positions[ci + 2] - positions[ai + 2];
+
+    const nx = aby * acz - abz * acy;
+    const ny = abz * acx - abx * acz;
+    const nz = abx * acy - aby * acx;
+
+    normals[ai] += nx;
+    normals[ai + 1] += ny;
+    normals[ai + 2] += nz;
+    normals[bi] += nx;
+    normals[bi + 1] += ny;
+    normals[bi + 2] += nz;
+    normals[ci] += nx;
+    normals[ci + 1] += ny;
+    normals[ci + 2] += nz;
+  }
+
+  for (let i = 0; i < normals.length; i += 3) {
+    const nx = normals[i];
+    const ny = normals[i + 1];
+    const nz = normals[i + 2];
+    const length = Math.hypot(nx, ny, nz) || 1;
+    normals[i] = nx / length;
+    normals[i + 1] = ny / length;
+    normals[i + 2] = nz / length;
+  }
+
+  return normals;
+}
+
+function pushComposedMatrix(
+  target,
+  positionX,
+  positionY,
+  positionZ,
+  scaleX,
+  scaleY,
+  scaleZ,
+  rotationX,
+  rotationY,
+  rotationZ,
+) {
+  const c1 = Math.cos(rotationX * 0.5);
+  const c2 = Math.cos(rotationY * 0.5);
+  const c3 = Math.cos(rotationZ * 0.5);
+  const s1 = Math.sin(rotationX * 0.5);
+  const s2 = Math.sin(rotationY * 0.5);
+  const s3 = Math.sin(rotationZ * 0.5);
+
+  const qx = s1 * c2 * c3 + c1 * s2 * s3;
+  const qy = c1 * s2 * c3 - s1 * c2 * s3;
+  const qz = c1 * c2 * s3 + s1 * s2 * c3;
+  const qw = c1 * c2 * c3 - s1 * s2 * s3;
+
+  const x2 = qx + qx;
+  const y2 = qy + qy;
+  const z2 = qz + qz;
+  const xx = qx * x2;
+  const xy = qx * y2;
+  const xz = qx * z2;
+  const yy = qy * y2;
+  const yz = qy * z2;
+  const zz = qz * z2;
+  const wx = qw * x2;
+  const wy = qw * y2;
+  const wz = qw * z2;
+
+  target.push(
+    (1 - (yy + zz)) * scaleX,
+    (xy + wz) * scaleX,
+    (xz - wy) * scaleX,
+    0,
+    (xy - wz) * scaleY,
+    (1 - (xx + zz)) * scaleY,
+    (yz + wx) * scaleY,
+    0,
+    (xz + wy) * scaleZ,
+    (yz - wx) * scaleZ,
+    (1 - (xx + yy)) * scaleZ,
+    0,
+    positionX,
+    positionY,
+    positionZ,
+    1,
+  );
+}
+
+function collectTerrainTransferList(payload) {
+  const transfers = [
+    payload.positions.buffer,
+    payload.colors.buffer,
+    payload.normals.buffer,
+    payload.indices.buffer,
+    payload.colliderVertices.buffer,
+    payload.rockColliders.buffer,
+  ];
+
+  for (const batch of payload.rockBatches) {
+    transfers.push(batch.matrices.buffer);
+    transfers.push(batch.colors.buffer);
+  }
+
+  return transfers;
+}
+
+export function createTerrainPayload({ cx, cz, chunkSize, resolution }) {
   const offsetX = cx * chunkSize;
   const offsetZ = cz * chunkSize;
   const vertsPerSide = resolution + 1;
@@ -103,11 +222,14 @@ function createTerrainPayload({ cx, cz, chunkSize, resolution }) {
     }
   }
 
+  const normals = computeTerrainNormals(positions, indices);
+
   const rockCount = 8 + Math.floor(Math.random() * 8);
-  const rockTransforms = new Float32Array(rockCount * 9);
   const rockColliders = new Float32Array(rockCount * 4);
-  const rockTypes = new Uint8Array(rockCount);
-  const rockColors = new Float32Array(rockCount * 3);
+  const rockBatchBuilders = Array.from(
+    { length: TERRAIN_ROCK_TYPE_COUNT },
+    () => ({ matrices: [], colors: [] }),
+  );
 
   for (let i = 0; i < rockCount; i++) {
     const localX = (Math.random() - 0.5) * chunkSize * 0.8;
@@ -121,17 +243,24 @@ function createTerrainPayload({ cx, cz, chunkSize, resolution }) {
     const scaleY = scaleX * (0.5 + Math.random() * 0.8);
     const scaleZ = scaleX;
     const localY = baseDepth + h + scaleX * 0.3;
+    const rotationX = Math.random();
+    const rotationY = Math.random();
+    const rotationZ = Math.random();
+    const rockType = Math.floor(Math.random() * TERRAIN_ROCK_TYPE_COUNT);
+    const rockBatch = rockBatchBuilders[rockType];
 
-    const transformIdx = i * 9;
-    rockTransforms[transformIdx] = localX;
-    rockTransforms[transformIdx + 1] = localY;
-    rockTransforms[transformIdx + 2] = localZ;
-    rockTransforms[transformIdx + 3] = scaleX;
-    rockTransforms[transformIdx + 4] = scaleY;
-    rockTransforms[transformIdx + 5] = scaleZ;
-    rockTransforms[transformIdx + 6] = Math.random();
-    rockTransforms[transformIdx + 7] = Math.random();
-    rockTransforms[transformIdx + 8] = Math.random();
+    pushComposedMatrix(
+      rockBatch.matrices,
+      localX,
+      localY,
+      localZ,
+      scaleX,
+      scaleY,
+      scaleZ,
+      rotationX,
+      rotationY,
+      rotationZ,
+    );
 
     const radius = (scaleX + scaleY + scaleZ) / 3;
     const colliderIdx = i * 4;
@@ -140,35 +269,37 @@ function createTerrainPayload({ cx, cz, chunkSize, resolution }) {
     rockColliders[colliderIdx + 2] = worldZ;
     rockColliders[colliderIdx + 3] = radius;
 
-    rockTypes[i] = Math.floor(Math.random() * 4);
-
     const rockDepth = -localY;
-    const ci = i * 3;
     const rv = Math.random() * 0.08;
     if (rockDepth < 100) {
-      rockColors[ci] = 0.35 + rv;
-      rockColors[ci + 1] = 0.32 + rv * 0.8;
-      rockColors[ci + 2] = 0.28 + rv * 0.5;
+      rockBatch.colors.push(0.35 + rv, 0.32 + rv * 0.8, 0.28 + rv * 0.5);
     } else if (rockDepth < 300) {
-      rockColors[ci] = 0.25 + rv;
-      rockColors[ci + 1] = 0.22 + rv * 0.7;
-      rockColors[ci + 2] = 0.22 + rv;
+      rockBatch.colors.push(0.25 + rv, 0.22 + rv * 0.7, 0.22 + rv);
     } else {
-      rockColors[ci] = 0.15 + rv;
-      rockColors[ci + 1] = 0.12 + rv * 0.5;
-      rockColors[ci + 2] = 0.16 + rv;
+      rockBatch.colors.push(0.15 + rv, 0.12 + rv * 0.5, 0.16 + rv);
     }
+  }
+
+  const rockBatches = [];
+  for (let type = 0; type < rockBatchBuilders.length; type++) {
+    const batch = rockBatchBuilders[type];
+    if (batch.matrices.length === 0) continue;
+
+    rockBatches.push({
+      type,
+      matrices: new Float32Array(batch.matrices),
+      colors: new Float32Array(batch.colors),
+    });
   }
 
   return {
     positions,
     colors,
+    normals,
     indices,
     colliderVertices,
-    rockTransforms,
+    rockBatches,
     rockColliders,
-    rockTypes,
-    rockColors,
   };
 }
 
@@ -342,7 +473,7 @@ if (typeof self !== "undefined") {
         cx: data.cx,
         cz: data.cz,
         payload,
-      });
+      }, collectTerrainTransferList(payload));
       return;
     }
 
