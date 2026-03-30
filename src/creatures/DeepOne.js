@@ -12,6 +12,19 @@ const PROXIMITY_RANGE = 2.5;
 // Fin undulation parameters
 const FIN_WAVE_SPEED = 0.8;
 const FIN_WAVE_AMP = 0.06;
+const HERO_NORMAL_DISTANCE = 12;
+const HERO_NORMAL_INTERVAL = 3;
+const APPENDAGE_BOUNDS_PADDING = 0.35;
+
+function _inflateGeometryBounds(geometry, padding) {
+  if (!padding) return;
+  if (!geometry.boundingSphere) {
+    geometry.computeBoundingSphere();
+  }
+  if (geometry.boundingSphere) {
+    geometry.boundingSphere.radius += padding;
+  }
+}
 
 // ─── Module-level singleton textures (never disposed per-instance) ─────────────
 
@@ -499,6 +512,8 @@ export class DeepOne {
       rootX += rest[i]; rootZ += rest[i + 2]; rootCount++;
     }
 
+    _inflateGeometryBounds(geom, opts.boundsPadding ?? APPENDAGE_BOUNDS_PADDING);
+
     return {
       mesh, geometry: geom, restPositions: rest,
       rootCenter: {
@@ -514,7 +529,7 @@ export class DeepOne {
   // ─── Per-vertex tentacle deformation (buffer mutation — zero GC) ─────────────
   // Mutates the position buffer directly; no geometry dispose/recreate.
 
-  _deformAppendage(app, t, motionScale) {
+  _deformAppendage(app, t, motionScale, refreshNormals = false) {
     const positions = app.geometry.attributes.position;
     const arr = positions.array;
     const rest = app.restPositions;
@@ -576,9 +591,10 @@ export class DeepOne {
     }
 
     positions.needsUpdate = true;
-    app.geometry.computeVertexNormals();
-    app.geometry.attributes.normal.needsUpdate = true;
-    app.geometry.computeBoundingSphere();
+    if (refreshNormals) {
+      app.geometry.computeVertexNormals();
+      app.geometry.attributes.normal.needsUpdate = true;
+    }
   }
 
   // ─── Near tier: full detail ───────────────────────────────────────────────────
@@ -718,10 +734,10 @@ export class DeepOne {
 
   // ─── Sync newly visible tier to current animation state ──────────────────────
 
-  _syncTier(tier, t) {
+  _syncTier(tier, t, refreshNormals = false) {
     const ms = tier.profile.motionScale || 1;
     for (const app of tier.tentacles) {
-      this._deformAppendage(app, t, ms);
+      this._deformAppendage(app, t, ms, refreshNormals);
     }
   }
 
@@ -819,10 +835,12 @@ export class DeepOne {
     // ── LOD tier selection ──
     const tierName = this._getLodTierName(distToPlayer);
     const tier = this._tiers[tierName];
+    const heroNormalBudget =
+      tierName === 'near' && distToPlayer < HERO_NORMAL_DISTANCE;
 
     // Sync newly visible tier so transitions don't reveal stale geometry
     if (this._lastTierName !== tierName) {
-      this._syncTier(tier, t);
+      this._syncTier(tier, t, heroNormalBudget);
       this._lastTierName = tierName;
     }
 
@@ -830,8 +848,10 @@ export class DeepOne {
     const interval = tier.profile.animInterval || 1;
     if (this._frameCount % interval === 0) {
       const ms = tier.profile.motionScale || 1;
+      const refreshNormals =
+        heroNormalBudget && (this._frameCount % HERO_NORMAL_INTERVAL === 0);
       for (const app of tier.tentacles) {
-        this._deformAppendage(app, t, ms);
+        this._deformAppendage(app, t, ms, refreshNormals);
       }
     }
 

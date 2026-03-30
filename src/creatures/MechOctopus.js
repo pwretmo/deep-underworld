@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { abs, cos, dot, materialEmissive, normalView, positionLocal, positionView, pow, sin, sub, uniform, uv, vec3 } from 'three/tsl';
+import { abs, cos, dot, materialEmissive, max, normalView, positionLocal, positionView, pow, sin, sub, uniform, uv, vec3 } from 'three/tsl';
 import { LOD_NEAR_DISTANCE, LOD_MEDIUM_DISTANCE, toStandardMaterial } from './lodUtils.js';
 import { qualityManager } from '../QualityManager.js';
 
@@ -54,6 +54,21 @@ function _applyFresnelShader(mat) {
   const viewDir = positionView.negate().normalize();
   const rim = pow(sub(1.0, abs(dot(normalView, viewDir))), 3.0);
   mat.emissiveNode = materialEmissive.add(vec3(0.12, 0.20, 0.35).mul(rim).mul(0.6));
+}
+
+function _applyMantleBreathingShader(mat) {
+  mat.userData.shaderUniforms = {
+    ...(mat.userData.shaderUniforms || {}),
+    uMantleInflation: uniform(0),
+  };
+
+  const radialLen = max(positionLocal.length(), 0.001);
+  const inflateFactor = mat.userData.shaderUniforms.uMantleInflation
+    .div(radialLen)
+    .add(1.0);
+
+  mat.positionNode = positionLocal.mul(inflateFactor);
+  mat.needsUpdate = true;
 }
 
 // Biomechanical octopus with industrial tentacles, riveted dome, suction cups as mechanical clamps
@@ -148,6 +163,10 @@ export class MechOctopus {
       normalMap: tentNormal,
     });
 
+    if (isNearTier) {
+      _applyMantleBreathingShader(bodyMat);
+    }
+
     // Issue 9: Fresnel rim-light — non-far tiers only
     if (!useFar) {
       _applyFresnelShader(bodyMat);
@@ -176,19 +195,6 @@ export class MechOctopus {
     mantleGeo.computeVertexNormals();
     const mantleMesh = new THREE.Mesh(mantleGeo, bodyMat);
     g.add(mantleMesh);
-
-    // Store original vertex positions + pre-computed inverse lengths for breathing animation (near only).
-    if (isNearTier) {
-      this._mantleOrigPos = new Float32Array(mp.array);
-      this._mantlePosAttr = mp;
-      this._mantleGeoNear = mantleGeo; // Issue 10: store for computeVertexNormals
-      this._mantleInvLen  = new Float32Array(mp.count);
-      for (let i = 0; i < mp.count; i++) {
-        const ox = mp.getX(i), oy = mp.getY(i), oz = mp.getZ(i);
-        const len = Math.sqrt(ox * ox + oy * oy + oz * oz);
-        this._mantleInvLen[i] = len > 0.001 ? 1 / len : 0;
-      }
-    }
 
     // --- Chromatophore spots on mantle surface (near) ---
     if (p.details) {
@@ -629,22 +635,10 @@ export class MechOctopus {
   // ─── Mantle jet-pulse breathing ───────────────────────────────────────────────
 
   _animateMantleBreathing(pulse) {
-    const orig   = this._mantleOrigPos;
-    const attr   = this._mantlePosAttr;
-    const invLen = this._mantleInvLen;
-    if (!orig || !attr || !invLen) return;
+    const uniforms = this._bodyMatNear?.userData?.shaderUniforms;
+    if (!uniforms?.uMantleInflation) return;
 
-    // Inflate each vertex outward proportional to jet pulse + alarm.
-    // Uses pre-computed inverse lengths to avoid per-frame sqrt.
-    const inflation = 0.04 * pulse + this._alarmFlash * 0.05;
-    for (let i = 0; i < attr.count; i++) {
-      const ox = orig[i * 3], oy = orig[i * 3 + 1], oz = orig[i * 3 + 2];
-      const s = 1 + inflation * invLen[i];
-      attr.setXYZ(i, ox * s, oy * s, oz * s);
-    }
-    attr.needsUpdate = true;
-    // Issue 10: recompute normals after vertex deformation
-    if (this._mantleGeoNear) this._mantleGeoNear.computeVertexNormals();
+    uniforms.uMantleInflation.value = 0.04 * pulse + this._alarmFlash * 0.05;
   }
 
   // ─── Chromatophore emissive wave ──────────────────────────────────────────────
