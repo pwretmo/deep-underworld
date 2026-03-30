@@ -1,6 +1,20 @@
-import * as THREE from 'three/webgpu';
-import { abs, clamp, cos, dot, materialColor, materialEmissive, normalView, positionLocal, positionView, pow, sub, uniform, vec3 } from 'three/tsl';
-import { qualityManager } from '../QualityManager.js';
+import * as THREE from "three/webgpu";
+import {
+  abs,
+  clamp,
+  cos,
+  dot,
+  materialColor,
+  materialEmissive,
+  normalView,
+  positionLocal,
+  positionView,
+  pow,
+  sub,
+  uniform,
+  vec3,
+} from "three/tsl";
+import { qualityManager } from "../QualityManager.js";
 
 const KELP_SWAY_FREQUENCY = 0.5;
 const KELP_SWAY_DELTA = 0.3;
@@ -13,7 +27,9 @@ function expandGeometryBounds(geometry, axis, padding) {
 
   geometry.boundingBox.min[axis] -= padding;
   geometry.boundingBox.max[axis] += padding;
-  geometry.boundingSphere = geometry.boundingBox.getBoundingSphere(new THREE.Sphere());
+  geometry.boundingSphere = geometry.boundingBox.getBoundingSphere(
+    new THREE.Sphere(),
+  );
 }
 
 export class Flora {
@@ -33,10 +49,13 @@ export class Flora {
     this._inFlightById = new Map();
     this._inFlightByKey = new Map();
     this._maxInFlight = 2;
-    this._chunkWorker = new Worker(new URL('./chunkPayloadWorker.js', import.meta.url), { type: 'module' });
+    this._chunkWorker = new Worker(
+      new URL("./chunkPayloadWorker.js", import.meta.url),
+      { type: "module" },
+    );
     this._chunkWorker.onmessage = (event) => {
       const data = event.data;
-      if (!data || data.type !== 'floraPayload') return;
+      if (!data || data.type !== "floraPayload") return;
 
       const request = this._inFlightById.get(data.requestId);
       if (!request) return;
@@ -46,11 +65,20 @@ export class Flora {
         this._inFlightByKey.delete(request.key);
       }
 
-      if (request.cancelled || !this._neededChunkKeys.has(request.key) || this.groups.has(request.key)) {
+      if (
+        request.cancelled ||
+        !this._neededChunkKeys.has(request.key) ||
+        this.groups.has(request.key)
+      ) {
         return;
       }
 
-      this._readyPayloads.push({ key: request.key, cx: data.cx, cz: data.cz, payload: data.payload });
+      this._readyPayloads.push({
+        key: request.key,
+        cx: data.cx,
+        cz: data.cz,
+        payload: data.payload,
+      });
     };
 
     // Shared geometry/materials for instanced bio-orbs
@@ -79,7 +107,7 @@ export class Flora {
       metalness: 0.1,
     });
 
-    window.addEventListener('qualitychange', (e) => {
+    window.addEventListener("qualitychange", (e) => {
       this._floraDensityScale = e.detail.settings.floraDensityScale;
       // Mark all chunks for rebuild on next move
       if (this.lastChunkX !== null) {
@@ -88,7 +116,9 @@ export class Flora {
     });
   }
 
-  _getChunkKey(cx, cz) { return `${cx},${cz}`; }
+  _getChunkKey(cx, cz) {
+    return `${cx},${cz}`;
+  }
 
   _cancelInFlightRequest(requestId) {
     const req = this._inFlightById.get(requestId);
@@ -99,7 +129,7 @@ export class Flora {
     if (this._inFlightByKey.get(req.key) === requestId) {
       this._inFlightByKey.delete(req.key);
     }
-    this._chunkWorker.postMessage({ type: 'cancel', requestId });
+    this._chunkWorker.postMessage({ type: "cancel", requestId });
   }
 
   _requestChunkPayload(key, cx, cz) {
@@ -108,7 +138,7 @@ export class Flora {
     this._inFlightById.set(requestId, { key, cancelled: false });
     this._inFlightByKey.set(key, requestId);
     this._chunkWorker.postMessage({
-      type: 'generateFlora',
+      type: "generateFlora",
       requestId,
       key,
       cx,
@@ -134,9 +164,14 @@ export class Flora {
 
     // Batch bio-orbs into InstancedMesh
     if (payload.orbs.length > 0) {
-      const instancedOrbs = new THREE.InstancedMesh(this._orbGeo, this._orbMat, payload.orbs.length);
+      const instancedOrbs = new THREE.InstancedMesh(
+        this._orbGeo,
+        this._orbMat,
+        payload.orbs.length,
+      );
       instancedOrbs.instanceColor = new THREE.InstancedBufferAttribute(
-        new Float32Array(payload.orbs.length * 3), 3
+        new Float32Array(payload.orbs.length * 3),
+        3,
       );
       const dummy = new THREE.Object3D();
       const tmpColor = new THREE.Color();
@@ -155,15 +190,23 @@ export class Flora {
     }
 
     for (const lightData of payload.orbLights) {
-      const light = new THREE.PointLight(lightData.color, lightData.intensity, lightData.distance);
-      light.userData.duwCategory = 'flora_decor';
+      const light = new THREE.PointLight(
+        lightData.color,
+        lightData.intensity,
+        lightData.distance,
+      );
+      light.userData.duwCategory = "flora_decor";
       light.position.set(lightData.x, lightData.y, lightData.z);
       group.add(light);
     }
 
     // Batch tube worm cylinders into InstancedMesh
     if (payload.tubes.length > 0) {
-      const instancedTubes = new THREE.InstancedMesh(this._tubeGeo, this._tubeMat, payload.tubes.length);
+      const instancedTubes = new THREE.InstancedMesh(
+        this._tubeGeo,
+        this._tubeMat,
+        payload.tubes.length,
+      );
       const dummy = new THREE.Object3D();
       for (let i = 0; i < payload.tubes.length; i++) {
         const d = payload.tubes[i];
@@ -179,7 +222,11 @@ export class Flora {
 
     // Batch tube worm tips into InstancedMesh
     if (payload.tubeTips.length > 0) {
-      const instancedTips = new THREE.InstancedMesh(this._tipGeo, this._tipMat, payload.tubeTips.length);
+      const instancedTips = new THREE.InstancedMesh(
+        this._tipGeo,
+        this._tipMat,
+        payload.tubeTips.length,
+      );
       const dummy = new THREE.Object3D();
       for (let i = 0; i < payload.tubeTips.length; i++) {
         const d = payload.tubeTips[i];
@@ -210,7 +257,9 @@ export class Flora {
     const viewDir = positionView.negate().normalize();
     const NdV = abs(dot(normalView, viewDir));
     const rim = pow(sub(1.0, NdV), 2.0);
-    material.emissiveNode = materialEmissive.add(materialColor.mul(rim).mul(0.15));
+    material.emissiveNode = materialEmissive.add(
+      materialColor.mul(rim).mul(0.15),
+    );
     return material;
   }
 
@@ -223,8 +272,14 @@ export class Flora {
     }
 
     const curve = new THREE.CatmullRomCurve3(points);
-    const geo = new THREE.TubeGeometry(curve, kelpData.segments, kelpData.radius, 4, false);
-    expandGeometryBounds(geo, 'x', KELP_SWAY_BOUNDS_PADDING);
+    const geo = new THREE.TubeGeometry(
+      curve,
+      kelpData.segments,
+      kelpData.radius,
+      4,
+      false,
+    );
+    expandGeometryBounds(geo, "x", KELP_SWAY_BOUNDS_PADDING);
 
     const color = new THREE.Color(0.1, kelpData.green, 0.05);
     const emissive = new THREE.Color(0.02, kelpData.green * 0.15, 0.01);
@@ -238,7 +293,11 @@ export class Flora {
 
     const mat = this._createKelpMaterial(color, emissive);
     // Match the previous integrated CPU sway from a fixed rest pose without mutating vertex buffers.
-    mat.positionNode = vec3(positionLocal.x.add(swayOffset), positionLocal.y, positionLocal.z);
+    mat.positionNode = vec3(
+      positionLocal.x.add(swayOffset),
+      positionLocal.y,
+      positionLocal.z,
+    );
     mat.needsUpdate = true;
 
     const leafMat = this._createKelpMaterial(color, emissive);
@@ -258,9 +317,12 @@ export class Flora {
   }
 
   _addCoralFromData(parent, coralData) {
-    const emissive = coralData.emissiveFactor > 0
-      ? new THREE.Color(coralData.color).multiplyScalar(coralData.emissiveFactor)
-      : new THREE.Color(0);
+    const emissive =
+      coralData.emissiveFactor > 0
+        ? new THREE.Color(coralData.color).multiplyScalar(
+            coralData.emissiveFactor,
+          )
+        : new THREE.Color(0);
     const mat = new THREE.MeshStandardMaterial({
       color: coralData.color,
       roughness: 0.45,
@@ -269,7 +331,12 @@ export class Flora {
     });
 
     for (const branchData of coralData.branches) {
-      const geo = new THREE.CylinderGeometry(branchData.size * 0.6, branchData.size, branchData.size * 3, 5);
+      const geo = new THREE.CylinderGeometry(
+        branchData.size * 0.6,
+        branchData.size,
+        branchData.size * 3,
+        5,
+      );
       const branch = new THREE.Mesh(geo, mat);
       branch.position.set(branchData.x, branchData.y, branchData.z);
       branch.rotation.x = branchData.rx;
@@ -305,7 +372,11 @@ export class Flora {
       if (this._inFlightByKey.size >= this._maxInFlight) break;
 
       const { key, x, z } = this._pendingChunks.shift();
-      if (this.groups.has(key) || this._inFlightByKey.has(key) || !this._neededChunkKeys.has(key)) {
+      if (
+        this.groups.has(key) ||
+        this._inFlightByKey.has(key) ||
+        !this._neededChunkKeys.has(key)
+      ) {
         continue;
       }
 
@@ -317,11 +388,11 @@ export class Flora {
   }
 
   _disposeGroup(group) {
-    group.traverse(child => {
+    group.traverse((child) => {
       if (child.geometry) child.geometry.dispose();
       if (child.material) {
         if (Array.isArray(child.material)) {
-          child.material.forEach(m => m.dispose());
+          child.material.forEach((m) => m.dispose());
         } else {
           child.material.dispose();
         }
@@ -344,7 +415,9 @@ export class Flora {
         this._cancelInFlightRequest(requestId);
       }
     }
-    this._readyPayloads = this._readyPayloads.filter(entry => needed.has(entry.key));
+    this._readyPayloads = this._readyPayloads.filter((entry) =>
+      needed.has(entry.key),
+    );
 
     for (const [key, group] of this.groups) {
       if (!needed.has(key)) {
@@ -357,7 +430,7 @@ export class Flora {
     this._pendingChunks = [];
     for (const key of needed) {
       if (!this.groups.has(key)) {
-        const [x, z] = key.split(',').map(Number);
+        const [x, z] = key.split(",").map(Number);
         this._pendingChunks.push({ key, x, z });
       }
     }
@@ -395,7 +468,11 @@ export class Flora {
   }
 
   getPendingCount() {
-    return this._pendingChunks.length + this._inFlightById.size + this._readyPayloads.length;
+    return (
+      this._pendingChunks.length +
+      this._inFlightById.size +
+      this._readyPayloads.length
+    );
   }
 
   getChunkCount() {
