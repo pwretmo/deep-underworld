@@ -483,9 +483,9 @@ export class UnderwaterEffect {
 
     window.addEventListener('qualitychange', (e) => {
       this._qualityMaxScale = e.detail.settings.postProcessScale;
-      this._refreshScaleCap({ force: true, skipCooldown: true });
       this._setupBloom(e.detail.tier);
       this._setupGodrays(e.detail.tier);
+      this._refreshScaleCap({ force: true, skipCooldown: true });
     });
   }
 
@@ -610,6 +610,7 @@ export class UnderwaterEffect {
           Math.max(1, Math.round(height * scale))
         );
       };
+      this._updateGodraysNodeSize();
     } else if (tier !== 'ultra' && this._godraysPass) {
       this._godraysPass.dispose();
       this._godraysPass = null;
