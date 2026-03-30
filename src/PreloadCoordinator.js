@@ -22,13 +22,15 @@ const ENTRY_TTL_MS = 1000 * 60 * 60 * 24;
 const INDEXED_DB_SIZE_CEILING = 3 * 1024 * 1024;
 
 export class PreloadCoordinator {
-  constructor({ renderer, underwaterEffect, player, terrain, flora, creatures, prepareDepthState }) {
+  constructor({ renderer, underwaterEffect, player, terrain, flora, creatures, scene, ocean, prepareDepthState }) {
     this.renderer = renderer;
     this.underwaterEffect = underwaterEffect;
     this.player = player;
     this.terrain = terrain;
     this.flora = flora;
     this.creatures = creatures;
+    this.scene = scene;
+    this.ocean = ocean;
     this.prepareDepthState = prepareDepthState;
 
     this.state = 'idle';
@@ -394,6 +396,13 @@ export class PreloadCoordinator {
 
     await this._warmFlashlightOnceAsync();
     if (token.cancelled) return;
+
+    // Pre-compile sunLight shadow map if shadows are enabled on this tier
+    if (this.ocean && this.ocean.sunLight.castShadow) {
+      this.renderer.render(this.scene, this.player.camera);
+      await new Promise(r => requestAnimationFrame(r));
+      if (token.cancelled) return;
+    }
 
     this._gpuWarmed = true;
   }

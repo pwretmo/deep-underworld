@@ -201,11 +201,12 @@ export class Ocean {
     scene.add(this.ambientLight);
 
     // Sun light from above (only visible near surface).
-    // Dynamic shadow-map compilation was causing multi-second startup stalls
-    // on the first interactive render, so keep the light shadowless.
+    // Shadow-map is pre-compiled during PreloadCoordinator warm-up so
+    // enabling castShadow here no longer causes a first-frame stall.
+    const tier = qualityManager.tier;
     this.sunLight = new THREE.DirectionalLight(0x7099bb, 0.45);
     this.sunLight.position.set(50, 100, 30);
-    this.sunLight.castShadow = false;
+    this.sunLight.castShadow = tier === 'high' || tier === 'ultra';
     const shadowSize = qualityManager.getSettings().shadowMapSize || 1024;
     this.sunLight.shadow.mapSize.set(shadowSize, shadowSize);
     this.sunLight.shadow.camera.near = 10;
@@ -244,9 +245,11 @@ export class Ocean {
     );
     scene.background = new THREE.Color(0x006994);
 
-    // React to quality tier changes for shadow map size
+    // React to quality tier changes for shadow map size and castShadow
     window.addEventListener("qualitychange", (e) => {
+      const newTier = e.detail.tier;
       const size = e.detail.settings.shadowMapSize || 1024;
+      this.sunLight.castShadow = newTier === 'high' || newTier === 'ultra';
       this.sunLight.shadow.mapSize.set(size, size);
       if (this.sunLight.shadow.map) {
         this.sunLight.shadow.map.dispose();
