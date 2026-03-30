@@ -148,7 +148,7 @@ function collectTerrainTransferList(payload) {
   return transfers;
 }
 
-function createTerrainPayload({ cx, cz, chunkSize, resolution }) {
+export function createTerrainPayload({ cx, cz, chunkSize, resolution }) {
   const offsetX = cx * chunkSize;
   const offsetZ = cz * chunkSize;
   const vertsPerSide = resolution + 1;
