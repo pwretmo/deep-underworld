@@ -15,6 +15,7 @@ import {
   If,
   instancedBufferAttribute,
   instanceIndex,
+  length,
   max,
   mix,
   positionLocal,
@@ -41,6 +42,9 @@ const WATER_SURFACE_X_WAVE_AMPLITUDE = 0.5;
 const WATER_SURFACE_Z_WAVE_SCALE = 0.03;
 const WATER_SURFACE_Z_WAVE_SPEED = 0.3;
 const WATER_SURFACE_Z_WAVE_AMPLITUDE = 0.3;
+const WATER_SURFACE_WAVE_FALLOFF_START = 28;
+const WATER_SURFACE_WAVE_FALLOFF_END = 160;
+const WATER_SURFACE_HORIZON_WAVE_FACTOR = 0.04;
 const WATER_SURFACE_BOUNDS_PADDING =
   WATER_SURFACE_X_WAVE_AMPLITUDE + WATER_SURFACE_Z_WAVE_AMPLITUDE;
 const MARINE_SNOW_VIEW_SCALE = 165.0;
@@ -381,20 +385,33 @@ export class Ocean {
     });
     const uniforms = createUniformMap({
       time: 0,
+      surfacePhaseOffset: new THREE.Vector2(0, 0),
     });
+    const waveSamplePoint = positionLocal.xy.add(uniforms.surfacePhaseOffset);
+    const waveFade = smoothstep(
+      WATER_SURFACE_WAVE_FALLOFF_START,
+      WATER_SURFACE_WAVE_FALLOFF_END,
+      length(positionLocal.xy),
+    );
+    const waveStrength = mix(
+      float(1.0),
+      float(WATER_SURFACE_HORIZON_WAVE_FACTOR),
+      waveFade,
+    );
     const wave = sin(
-      positionLocal.x
+      waveSamplePoint.x
         .mul(WATER_SURFACE_X_WAVE_SCALE)
         .add(uniforms.time.mul(WATER_SURFACE_X_WAVE_SPEED)),
     )
       .mul(WATER_SURFACE_X_WAVE_AMPLITUDE)
       .add(
         cos(
-          positionLocal.y
+          waveSamplePoint.y
             .mul(WATER_SURFACE_Z_WAVE_SCALE)
             .add(uniforms.time.mul(WATER_SURFACE_Z_WAVE_SPEED)),
         ).mul(WATER_SURFACE_Z_WAVE_AMPLITUDE),
-      );
+      )
+      .mul(waveStrength);
     mat.positionNode = vec3(
       positionLocal.x,
       positionLocal.y,
@@ -680,6 +697,12 @@ export class Ocean {
     this._particleRenderer = renderer;
 
     this.waterSurface.material.uniforms.time.value = this.time;
+    this.waterSurface.material.uniforms.surfacePhaseOffset.value.set(
+      playerPos.x,
+      -playerPos.z,
+    );
+    this.waterSurface.position.x = playerPos.x;
+    this.waterSurface.position.z = playerPos.z;
 
     // Dynamic surface emissive: shimmer strongest in shallow water
     const emissivePulse =
