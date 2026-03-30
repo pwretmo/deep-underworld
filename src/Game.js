@@ -257,6 +257,8 @@ export class Game {
       terrain: this.terrain,
       flora: this.flora,
       creatures: this.creatures,
+      scene: this.scene,
+      ocean: this.ocean,
       prepareDepthState: (depth) => {
         this.lightingPolicy.update(
           depth,
