@@ -33,6 +33,7 @@ import {
   vec3,
 } from "three/tsl";
 import { qualityManager } from "../QualityManager.js";
+import { expandGeometryBounds } from "../utils/geometryBounds.js";
 
 const WATER_SURFACE_X_WAVE_SCALE = 0.05;
 const WATER_SURFACE_X_WAVE_SPEED = 0.5;
@@ -42,17 +43,6 @@ const WATER_SURFACE_Z_WAVE_SPEED = 0.3;
 const WATER_SURFACE_Z_WAVE_AMPLITUDE = 0.3;
 const WATER_SURFACE_BOUNDS_PADDING =
   WATER_SURFACE_X_WAVE_AMPLITUDE + WATER_SURFACE_Z_WAVE_AMPLITUDE;
-
-function expandGeometryBounds(geometry, axis, padding) {
-  geometry.computeBoundingBox();
-  if (!geometry.boundingBox) return;
-
-  geometry.boundingBox.min[axis] -= padding;
-  geometry.boundingBox.max[axis] += padding;
-  geometry.boundingSphere = geometry.boundingBox.getBoundingSphere(
-    new THREE.Sphere(),
-  );
-}
 
 function cloneUniformValue(value) {
   return value?.clone ? value.clone() : value;

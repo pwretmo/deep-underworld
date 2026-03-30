@@ -15,22 +15,12 @@ import {
   vec3,
 } from "three/tsl";
 import { qualityManager } from "../QualityManager.js";
+import { expandGeometryBounds } from "../utils/geometryBounds.js";
 
 const KELP_SWAY_FREQUENCY = 0.5;
 const KELP_SWAY_DELTA = 0.3;
 const KELP_SWAY_DISPLACEMENT_SCALE = KELP_SWAY_DELTA / KELP_SWAY_FREQUENCY;
 const KELP_SWAY_BOUNDS_PADDING = KELP_SWAY_DISPLACEMENT_SCALE * 2;
-
-function expandGeometryBounds(geometry, axis, padding) {
-  geometry.computeBoundingBox();
-  if (!geometry.boundingBox) return;
-
-  geometry.boundingBox.min[axis] -= padding;
-  geometry.boundingBox.max[axis] += padding;
-  geometry.boundingSphere = geometry.boundingBox.getBoundingSphere(
-    new THREE.Sphere(),
-  );
-}
 
 export class Flora {
   constructor(scene) {
