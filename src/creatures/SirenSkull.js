@@ -1,5 +1,5 @@
 import * as THREE from "three/webgpu";
-import { abs, length, materialEmissive, positionLocal, sin, sub, uniform, uv, varying, vec3 } from "three/tsl";
+import { abs, attribute, cos, length, materialEmissive, positionLocal, sin, sub, uniform, uv, varying, vec3 } from "three/tsl";
 import { toStandardMaterial } from "./lodUtils.js";
 
 const SIREN_LOD_NEAR_DISTANCE = 30;
@@ -233,21 +233,44 @@ export class SirenSkull {
       uFlutterTime: uniform(0),
       uVelocity: uniform(new THREE.Vector3()),
       uPulse: uniform(0),
+      uProximity: uniform(0),
     };
     const u = material.userData.shaderUniforms;
 
     // TSL: vertex trail flutter displacement
+    const membranePhase = attribute("membranePhase", "float");
     const trail = sub(1.0, uv().y);
     const edge = abs(uv().x.mul(2.0).sub(1.0));
     const velocityMag = length(u.uVelocity);
-    const waveArg = positionLocal.y.add(u.uFlutterTime.mul(2.4)).mul(5.2).add(uv().x.mul(10.5));
-    const wave = sin(waveArg).mul(trail).mul(velocityMag.mul(0.018).add(0.06));
-    const flutterArg = u.uFlutterTime.mul(11.0).add(uv().y.mul(20.0)).add(uv().x.mul(13.0));
-    const flutter = sin(flutterArg).mul(edge).mul(trail).mul(0.02);
+    const propagation = sin(
+      u.uFlutterTime.mul(2.4).add(trail.mul(8.5)).add(membranePhase),
+    )
+      .mul(trail)
+      .mul(u.uProximity.mul(0.05).add(0.09));
+    const drag = sin(
+      u.uFlutterTime.mul(6.8).add(uv().x.mul(14.0)).add(membranePhase.mul(0.58)),
+    )
+      .mul(edge)
+      .mul(trail)
+      .mul(0.04);
+    const flutter = sin(
+      u.uFlutterTime
+        .mul(11.0)
+        .add(uv().y.mul(20.0))
+        .add(uv().x.mul(13.0))
+        .add(membranePhase),
+    )
+      .mul(edge)
+      .mul(trail)
+      .mul(velocityMag.mul(0.012).add(u.uPulse.mul(0.018)).add(0.02));
     material.positionNode = vec3(
-      positionLocal.x.add(u.uVelocity.x.mul(trail).mul(0.08)),
-      positionLocal.y.sub(abs(u.uVelocity.y).mul(trail).mul(0.04)),
-      positionLocal.z.add(wave).add(flutter)
+      positionLocal.x.add(
+        u.uVelocity.x.mul(trail).mul(u.uProximity.mul(0.04).add(0.08)).mul(0.9),
+      ),
+      positionLocal.y.sub(
+        abs(u.uVelocity.y).mul(trail).mul(u.uProximity.mul(0.04).add(0.06)).mul(0.3),
+      ),
+      positionLocal.z.add(propagation).add(drag).add(flutter)
     );
 
     // TSL: edge flicker emissive (varying bridge vertex→fragment)
@@ -462,6 +485,7 @@ export class SirenSkull {
     for (let i = 0; i < profile.membraneCount; i++) {
       const width = 1.5 - i * 0.2;
       const height = 0.8 + i * 0.4;
+      const phase = this.membranePhase + i * 1.7;
       const membraneGeo = new THREE.PlaneGeometry(
         width,
         height,
@@ -470,14 +494,20 @@ export class SirenSkull {
       );
       const positionAttr = membraneGeo.attributes.position;
       const uvAttr = membraneGeo.attributes.uv;
-      const base = new Float32Array(positionAttr.array.length);
-      base.set(positionAttr.array);
       for (let v = 0; v < positionAttr.count; v++) {
         const y = positionAttr.getY(v);
         const uvx = uvAttr.getX(v);
         const edge = Math.abs(uvx * 2 - 1);
         positionAttr.setZ(v, Math.sin(y * 3.2 + i * 0.9) * 0.055 + edge * 0.01);
       }
+      const phaseAttr = new THREE.Float32BufferAttribute(
+        new Float32Array(positionAttr.count),
+        1,
+      );
+      for (let v = 0; v < positionAttr.count; v++) {
+        phaseAttr.setX(v, phase);
+      }
+      membraneGeo.setAttribute("membranePhase", phaseAttr);
       membraneGeo.computeVertexNormals();
 
       const membraneMesh = new THREE.Mesh(membraneGeo, membraneMaterial);
@@ -491,11 +521,7 @@ export class SirenSkull {
         -0.1 - i * 0.06,
         (i - 1) * 0.14,
       );
-      membraneMesh.userData.memData = {
-        base,
-        originalX: membraneMesh.position.x,
-        phase: this.membranePhase + i * 1.7,
-      };
+      membraneMesh.userData.originalX = membraneMesh.position.x;
 
       tierGroup.add(membraneMesh);
       membranes.push(membraneMesh);
@@ -881,59 +907,17 @@ export class SirenSkull {
         this.velocity,
       );
       tier.membraneMaterial.userData.shaderUniforms.uPulse.value = songPulse;
-    }
-
-    if (tierName !== "far") {
-      this._updateMembranesCpu(
-        tier,
-        dt,
-        tier.profile.membraneCpuStep,
-        proximity,
-      );
+      tier.membraneMaterial.userData.shaderUniforms.uProximity.value =
+        proximity;
+      this._updateMembraneOffsets(tier);
     }
   }
 
-  _updateMembranesCpu(tier, dt, cpuStep, proximity) {
+  _updateMembraneOffsets(tier) {
     for (let i = 0; i < tier.membranes.length; i++) {
       const membrane = tier.membranes[i];
-      const geometry = membrane.geometry;
-      const position = geometry.attributes.position;
-      const uv = geometry.attributes.uv;
-      const base = membrane.userData.memData.base;
-      const posArray = position.array;
-      const uvArray = uv.array;
-      const phase = membrane.userData.memData.phase;
-
-      const velocityStretchX = this.velocity.x * (0.08 + proximity * 0.04);
-      const velocityStretchY =
-        Math.abs(this.velocity.y) * (0.06 + proximity * 0.04);
-
-      for (let v = 0; v < position.count; v += cpuStep) {
-        const pIndex = v * 3;
-        const uvIndex = v * 2;
-        const u = uvArray[uvIndex];
-        const vv = uvArray[uvIndex + 1];
-        const trail = 1 - vv;
-        const edge = Math.abs(u * 2 - 1);
-
-        const propagation =
-          Math.sin(this.time * (2.4 + i * 0.35) + trail * 8.5 + phase) * trail;
-        const drag = Math.sin(this.time * 6.8 + u * 14.0 + i) * edge * trail;
-
-        posArray[pIndex] = base[pIndex] + velocityStretchX * trail * 0.9;
-        posArray[pIndex + 1] =
-          base[pIndex + 1] - velocityStretchY * trail * 0.3;
-        posArray[pIndex + 2] =
-          base[pIndex + 2] +
-          propagation * (0.09 + proximity * 0.05) +
-          drag * 0.04;
-      }
-
-      position.needsUpdate = true;
-      geometry.computeVertexNormals();
-
       membrane.position.x =
-        membrane.userData.memData.originalX -
+        membrane.userData.originalX -
         this.velocity.length() * (0.06 + i * 0.01);
     }
   }

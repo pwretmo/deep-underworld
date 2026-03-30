@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { abs, atan, attribute, cos, dot, float as tslFloat, materialColor, materialEmissive, max as tslMax, normalView, positionLocal, positionView, pow, sin, smoothstep as tslSmoothstep, sub, texture as tslTexture, uniform, uv, varying, vec2, vec3 } from 'three/tsl';
+import { abs, atan, attribute, clamp, cos, dot, float as tslFloat, materialColor, materialEmissive, max as tslMax, normalView, positionLocal, positionView, pow, sin, smoothstep as tslSmoothstep, sub, texture as tslTexture, uniform, uv, varying, vec2, vec3 } from 'three/tsl';
 
 const LOD_NEAR_DISTANCE = 30;
 const LOD_MEDIUM_DISTANCE = 80;
@@ -231,6 +231,135 @@ function _applyNematocystShader(mat, uniforms) {
   mat.needsUpdate = true;
 }
 
+function _inflateGeometryBounds(geometry, padding) {
+  if (!padding) return;
+  if (!geometry.boundingSphere) {
+    geometry.computeBoundingSphere();
+  }
+  if (geometry.boundingSphere) {
+    geometry.boundingSphere.radius += padding;
+  }
+}
+
+function _createAppendageShaderUniforms() {
+  return {
+    uAppendageTime: uniform(0),
+    uContractionPhase: uniform(0),
+    uDriftX: uniform(0),
+    uDriftZ: uniform(0),
+    uPlayerDirX: uniform(0),
+    uPlayerDirZ: uniform(0),
+    uProximityInfluence: uniform(0),
+  };
+}
+
+function _applyAppendageShader(mat, uniforms, appendage) {
+  mat.userData.shaderUniforms = uniforms;
+
+  const along = clamp(
+    positionLocal.y.negate().add(appendage.maxY).div(Math.max(appendage.length, 0.001)),
+    0.0,
+    1.0,
+  );
+  const tipWeight = along.mul(along).mul(sub(3.0, along.mul(2.0)));
+  const tipWeightSq = tipWeight.mul(tipWeight);
+  const contraction = tslMax(uniforms.uContractionPhase, 0.0);
+  const relaxed = tslMax(uniforms.uContractionPhase.negate(), 0.0);
+  const flowFactor = relaxed.mul(0.82).add(0.3);
+  const pulseSqueeze = sub(1.0, contraction.mul(appendage.radialPulse || 0));
+
+  const waveA = sin(
+    uniforms.uAppendageTime
+      .mul(appendage.swaySpeed || 0)
+      .add(appendage.phaseOffset || 0)
+      .add(along.mul(appendage.waveFrequency || 0)),
+  );
+  const waveB = sin(
+    uniforms.uAppendageTime
+      .mul(appendage.secondarySpeed || 0)
+      .add((appendage.phaseOffset || 0) * 0.67)
+      .add(along.mul(appendage.secondaryFrequency || 0)),
+  );
+  const lateral = waveA
+    .mul(appendage.swayAmount || 0)
+    .add(waveB.mul(appendage.secondarySwayAmount || 0))
+    .mul(flowFactor)
+    .mul(tipWeight);
+  const axial = cos(
+    uniforms.uAppendageTime
+      .mul(appendage.twistSpeed || 0)
+      .add(appendage.phaseOffset || 0)
+      .add(along.mul((appendage.waveFrequency || 0) * 0.55)),
+  )
+    .mul(appendage.twistAmount || 0)
+    .mul(tipWeight);
+  const curl = relaxed
+    .mul(appendage.relaxCurlAmount || 0)
+    .sub(contraction.mul(appendage.pulseCurlAmount || 0))
+    .mul(tipWeightSq);
+  const crossing = sin(
+    uniforms.uAppendageTime
+      .mul(appendage.crossSpeed || 0)
+      .add(appendage.crossPhase || 0)
+      .add(along.mul(appendage.crossFrequency || 0)),
+  )
+    .mul(appendage.crossAmount || 0)
+    .mul(contraction)
+    .mul(tipWeight)
+    .mul(appendage.crossSign || 1);
+  const oralSpread = contraction.mul(appendage.spreadAmount || 0).mul(tipWeight);
+  const proximityWeight = uniforms.uProximityInfluence.mul(
+    appendage.proximityResponse || 0,
+  );
+  const playerReact = proximityWeight.mul(tipWeight);
+  const vertical = contraction
+    .mul((appendage.modelScale || 1) * (appendage.liftAmount || 0))
+    .mul(tipWeight)
+    .sub(
+      relaxed
+        .mul((appendage.modelScale || 1) * (appendage.dropAmount || 0))
+        .mul(along)
+        .mul(0.4),
+    )
+    .add(waveB.mul(appendage.heaveAmount || 0).mul(tipWeightSq));
+
+  const radialX = positionLocal.x.sub(appendage.rootCenter.x);
+  const radialZ = positionLocal.z.sub(appendage.rootCenter.z);
+  const radialScale = pulseSqueeze.sub(1.0).mul(tipWeight).add(1.0);
+  const lateralX = lateral
+    .add(crossing)
+    .add(uniforms.uPlayerDirX.mul(playerReact).mul(0.06))
+    .mul(appendage.perpX || 0);
+  const lateralZ = lateral
+    .add(crossing)
+    .add(uniforms.uPlayerDirZ.mul(playerReact).mul(0.06))
+    .mul(appendage.perpZ || 0);
+  const axialX = axial
+    .add(uniforms.uDriftX.mul(tipWeight))
+    .mul(appendage.dirX || 0);
+  const axialZ = axial
+    .add(uniforms.uDriftZ.mul(tipWeight))
+    .mul(appendage.dirZ || 0);
+
+  mat.positionNode = vec3(
+    radialX
+      .mul(radialScale.add(oralSpread))
+      .add(lateralX)
+      .add(axialX)
+      .add(radialX.mul(curl))
+      .add(appendage.rootCenter.x),
+    positionLocal.y.add(vertical),
+    radialZ
+      .mul(radialScale.add(oralSpread))
+      .add(lateralZ)
+      .add(axialZ)
+      .add(radialZ.mul(curl))
+      .add(appendage.rootCenter.z),
+  );
+
+  mat.needsUpdate = true;
+}
+
 const LOD_PROFILE = {
   near: {
     bellWidthSegments: 64,
@@ -420,10 +549,7 @@ export class Jellyfish {
     mesh.frustumCulled = true;
 
     const geometry = mesh.geometry;
-    const positionAttr = geometry.attributes.position;
-    positionAttr.setUsage(THREE.DynamicDrawUsage);
-
-    const restPositions = Float32Array.from(positionAttr.array);
+    const restPositions = Float32Array.from(geometry.attributes.position.array);
     let minY = Infinity;
     let maxY = -Infinity;
     for (let i = 0; i < restPositions.length; i += 3) {
@@ -443,7 +569,7 @@ export class Jellyfish {
       rootCount++;
     }
 
-    return {
+    const descriptor = {
       mesh,
       geometry,
       restPositions,
@@ -457,12 +583,33 @@ export class Jellyfish {
       type: options.type,
       ...options,
     };
+
+    _inflateGeometryBounds(geometry, options.boundsPadding || 0);
+
+    if (!mesh.material.isMeshBasicMaterial) {
+      descriptor.shaderUniforms = _createAppendageShaderUniforms();
+      _applyAppendageShader(mesh.material, descriptor.shaderUniforms, descriptor);
+    }
+
+    return descriptor;
   }
 
-  _deformAppendage(appendage, jelly, pulse, t) {
-    const positions = appendage.geometry.attributes.position;
-    const array = positions.array;
+  _updateAppendageShaderUniforms(appendage, jelly, pulse, t) {
+    const uniforms = appendage.shaderUniforms;
+    if (!uniforms) return;
+
+    uniforms.uAppendageTime.value = t;
+    uniforms.uContractionPhase.value = pulse;
+    uniforms.uDriftX.value = jelly.velocityX * appendage.trailFactor * 0.32;
+    uniforms.uDriftZ.value = jelly.velocityZ * appendage.trailFactor * 0.32;
+    uniforms.uPlayerDirX.value = jelly.playerDirX;
+    uniforms.uPlayerDirZ.value = jelly.playerDirZ;
+    uniforms.uProximityInfluence.value = jelly.proximityInfluence;
+  }
+
+  _evaluateAppendagePoint(appendage, jelly, pulse, t, vertexIndex, target) {
     const rest = appendage.restPositions;
+    const baseIndex = vertexIndex * 3;
     const contraction = Math.max(0, pulse);
     const relaxed = Math.max(0, -pulse);
     const flowFactor = 0.3 + relaxed * 0.82;
@@ -472,89 +619,84 @@ export class Jellyfish {
     const proximityWeight =
       jelly.proximityInfluence * appendage.proximityResponse;
 
-    for (let i = 0; i < rest.length; i += 3) {
-      const baseX = rest[i];
-      const baseY = rest[i + 1];
-      const baseZ = rest[i + 2];
-      const along = THREE.MathUtils.clamp(
-        (appendage.maxY - baseY) / appendage.length,
-        0,
-        1,
-      );
-      const tipWeight = along * along * (3 - 2 * along);
-      const tipWeightSq = tipWeight * tipWeight;
+    const baseX = rest[baseIndex];
+    const baseY = rest[baseIndex + 1];
+    const baseZ = rest[baseIndex + 2];
+    const along = THREE.MathUtils.clamp(
+      (appendage.maxY - baseY) / appendage.length,
+      0,
+      1,
+    );
+    const tipWeight = along * along * (3 - 2 * along);
+    const tipWeightSq = tipWeight * tipWeight;
 
-      const waveA = Math.sin(
-        t * appendage.swaySpeed +
+    const waveA = Math.sin(
+      t * appendage.swaySpeed +
+        appendage.phaseOffset +
+        along * appendage.waveFrequency,
+    );
+    const waveB = Math.sin(
+      t * appendage.secondarySpeed +
+        appendage.phaseOffset * 0.67 +
+        along * appendage.secondaryFrequency,
+    );
+    const lateral =
+      (waveA * appendage.swayAmount + waveB * appendage.secondarySwayAmount) *
+      flowFactor *
+      tipWeight;
+    const axial =
+      Math.cos(
+        t * appendage.twistSpeed +
           appendage.phaseOffset +
-          along * appendage.waveFrequency,
-      );
-      const waveB = Math.sin(
-        t * appendage.secondarySpeed +
-          appendage.phaseOffset * 0.67 +
-          along * appendage.secondaryFrequency,
-      );
-      const lateral =
-        (waveA * appendage.swayAmount + waveB * appendage.secondarySwayAmount) *
-        flowFactor *
-        tipWeight;
-      const axial =
-        Math.cos(
-          t * appendage.twistSpeed +
-            appendage.phaseOffset +
-            along * appendage.waveFrequency * 0.55,
-        ) *
-        appendage.twistAmount *
-        tipWeight;
-      const curl =
-        (relaxed * appendage.relaxCurlAmount -
-          contraction * appendage.pulseCurlAmount) *
-        tipWeightSq;
-      const crossing =
-        Math.sin(
-          t * appendage.crossSpeed +
-            appendage.crossPhase +
-            along * appendage.crossFrequency,
-        ) *
-        appendage.crossAmount *
-        contraction *
-        tipWeight *
-        appendage.crossSign;
-      const oralSpread =
-        appendage.type === "oral"
-          ? contraction * appendage.spreadAmount * tipWeight
-          : 0;
-      const playerReact = proximityWeight * tipWeight;
-      const vertical =
-        contraction * jelly.size * appendage.liftAmount * tipWeight -
-        relaxed * jelly.size * appendage.dropAmount * along * 0.4 +
-        waveB * appendage.heaveAmount * tipWeightSq;
+          along * appendage.waveFrequency * 0.55,
+      ) *
+      appendage.twistAmount *
+      tipWeight;
+    const curl =
+      (relaxed * appendage.relaxCurlAmount -
+        contraction * appendage.pulseCurlAmount) *
+      tipWeightSq;
+    const crossing =
+      Math.sin(
+        t * appendage.crossSpeed +
+          appendage.crossPhase +
+          along * appendage.crossFrequency,
+      ) *
+      appendage.crossAmount *
+      contraction *
+      tipWeight *
+      appendage.crossSign;
+    const oralSpread =
+      appendage.type === "oral"
+        ? contraction * appendage.spreadAmount * tipWeight
+        : 0;
+    const playerReact = proximityWeight * tipWeight;
+    const vertical =
+      contraction * jelly.size * appendage.liftAmount * tipWeight -
+      relaxed * jelly.size * appendage.dropAmount * along * 0.4 +
+      waveB * appendage.heaveAmount * tipWeightSq;
 
-      const radialX = baseX - appendage.rootCenter.x;
-      const radialZ = baseZ - appendage.rootCenter.z;
-      const radialScale = THREE.MathUtils.lerp(1, pulseSqueeze, tipWeight);
+    const radialX = baseX - appendage.rootCenter.x;
+    const radialZ = baseZ - appendage.rootCenter.z;
+    const radialScale = THREE.MathUtils.lerp(1, pulseSqueeze, tipWeight);
 
-      array[i] =
-        appendage.rootCenter.x +
+    target.set(
+      appendage.rootCenter.x +
         radialX * (radialScale + oralSpread) +
         appendage.perpX *
           (lateral + crossing + jelly.playerDirX * playerReact * 0.06) +
         appendage.dirX * (axial + driftX * tipWeight) +
-        radialX * curl;
-      array[i + 1] = baseY + vertical;
-      array[i + 2] =
-        appendage.rootCenter.z +
+        radialX * curl,
+      baseY + vertical,
+      appendage.rootCenter.z +
         radialZ * (radialScale + oralSpread) +
         appendage.perpZ *
           (lateral + crossing + jelly.playerDirZ * playerReact * 0.06) +
         appendage.dirZ * (axial + driftZ * tipWeight) +
-        radialZ * curl;
-    }
+        radialZ * curl,
+    );
 
-    positions.needsUpdate = true;
-    appendage.geometry.computeVertexNormals();
-    appendage.geometry.attributes.normal.needsUpdate = true;
-    appendage.geometry.computeBoundingSphere();
+    return target;
   }
 
   _createOralArmFrill(curve, size, color, profile) {
@@ -679,14 +821,15 @@ export class Jellyfish {
     for (let i = 0; i < refs.length; i++) {
       const ref = refs[i];
       const appendage = tier.tentacles[ref.appendageIndex];
-      const positions = appendage.geometry.attributes.position.array;
-      const baseIndex = ref.vertexIndex * 3;
-
-      _tmpPos.set(
-        positions[baseIndex],
-        positions[baseIndex + 1] + ref.liftBias,
-        positions[baseIndex + 2],
+      this._evaluateAppendagePoint(
+        appendage,
+        jelly,
+        jelly._activePulse,
+        t,
+        ref.vertexIndex,
+        _tmpPos,
       );
+      _tmpPos.y += ref.liftBias;
       _tmpScale.setScalar(
         ref.baseScale *
           (0.86 +
@@ -903,6 +1046,7 @@ export class Jellyfish {
       oralArms.push(
         this._createAppendageDescriptor(arm, {
           type: "oral",
+          modelScale: size,
           angle,
           dirX: Math.cos(angle),
           dirZ: Math.sin(angle),
@@ -931,12 +1075,14 @@ export class Jellyfish {
           crossFrequency: 3.4 + Math.random() * 1.8,
           crossAmount: 0.02 + Math.random() * 0.018,
           crossSign: Math.random() > 0.5 ? 1 : -1,
+          boundsPadding: size * 0.35,
         }),
       );
 
       oralArms.push(
         this._createAppendageDescriptor(frill, {
           type: "oral",
+          modelScale: size,
           angle,
           dirX: Math.cos(angle),
           dirZ: Math.sin(angle),
@@ -965,6 +1111,7 @@ export class Jellyfish {
           crossFrequency: 2.8 + Math.random() * 1.2,
           crossAmount: 0.03 + Math.random() * 0.015,
           crossSign: Math.random() > 0.5 ? 1 : -1,
+          boundsPadding: size * 0.35,
         }),
       );
     }
@@ -1015,6 +1162,7 @@ export class Jellyfish {
       tentacles.push(
         this._createAppendageDescriptor(tentacle, {
           type: "tentacle",
+          modelScale: size,
           angle,
           dirX: Math.cos(angle),
           dirZ: Math.sin(angle),
@@ -1043,6 +1191,7 @@ export class Jellyfish {
           crossFrequency: 5.8 + Math.random() * 2.5,
           crossAmount: 0.05 + Math.random() * 0.04,
           crossSign: Math.random() > 0.5 ? 1 : -1,
+          boundsPadding: size * 0.45,
         }),
       );
     }
@@ -1337,6 +1486,7 @@ export class Jellyfish {
       damageAmount: 0,
       damageCooldown: Math.random() * 1.5,
       damageSide: Math.random() * TWO_PI,
+      _activePulse: 0,
       lastActiveTierName: null,
     };
   }
@@ -1388,11 +1538,11 @@ export class Jellyfish {
     }
 
     for (const tent of tier.tentacles) {
-      this._deformAppendage(tent, jelly, pulse, t);
+      this._updateAppendageShaderUniforms(tent, jelly, pulse, t);
     }
 
     for (const arm of tier.oralArms) {
-      this._deformAppendage(arm, jelly, pulse, t);
+      this._updateAppendageShaderUniforms(arm, jelly, pulse, t);
     }
 
     this._updateNematocysts(tier.nematocysts, tier, jelly, t);
@@ -1441,6 +1591,7 @@ export class Jellyfish {
 
       const idlePulse = Math.sin(t * 0.35 + jelly.phase * 0.6) * 0.22;
       const pulse = Math.sin(jelly.swimPhase) * 0.85 + idlePulse * 0.15;
+      jelly._activePulse = pulse;
       const contraction = Math.max(0, pulse);
       const relaxation = Math.max(0, -pulse);
       const propulsion = Math.pow(contraction, 1.7);
