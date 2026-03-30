@@ -110,30 +110,11 @@ export class Game {
 
     // Systems
     this.player = null;
-    this.ocean = new Ocean(this.scene);
-    this.terrain = new Terrain(this.scene);
-    this.flora = new Flora(this.scene);
-    this.creatures = new CreatureManager(this.scene);
-    this.hud = new HUD();
-    this.audio = new AudioManager();
-    this.underwaterEffect = null;
-    this.abyssEncounter = new AbyssEncounter();
-    this.physicsWorld = null; // initialized async in _primeAndEnterGameplay
-    this.preload = null;
-    this.graphicsDiagnostics = null;
-
-    // GPU detection and graphics diagnostics are deferred to async init()
-    // because WebGPURenderer requires await renderer.init() before backend access.
-
     this.lightingPolicy = new LightingPolicy();
     this._pointLightBudget = {
       shallowMax: qSettings.maxPointLights,
       deepMax: Math.max(3, Math.round(qSettings.maxPointLights * 0.6)),
       transitionBand: 3,
-      scanInterval: 1.1,
-      minScanInterval: 0.9,
-      maxScanInterval: 3.2,
-      scanElapsed: 1,
       retargetInterval: 0.35,
       retargetElapsed: 1,
       fadeInRate: 8,
@@ -142,9 +123,47 @@ export class Game {
       activeLights: [],
       tempWorldPos: new THREE.Vector3(),
       heavyFrameThreshold: 0.08,
-      scanCostAdjustThreshold: 1.5,
-      scanCostRecoverThreshold: 0.8,
+      profileAlpha: 0.2,
+      lastRegistrationMs: 0,
+      registrationEmaMs: 0,
+      lastUnregistrationMs: 0,
+      unregistrationEmaMs: 0,
+      lastRetargetMs: 0,
+      retargetEmaMs: 0,
+      lastCandidateCount: 0,
+      lastSelectedCount: 0,
+      lastSelectionLimit: 0,
     };
+    this._pointLightBudgetApi = {
+      registerLight: (light) => this._registerManagedPointLight(light),
+      unregisterLight: (light) => this._unregisterManagedPointLight(light),
+      registerObjectLights: (root) =>
+        this._registerManagedPointLightsFromRoot(root),
+      unregisterObjectLights: (root) =>
+        this._unregisterManagedPointLightsFromRoot(root),
+    };
+    this.ocean = new Ocean(this.scene, {
+      pointLightBudget: this._pointLightBudgetApi,
+    });
+    this.terrain = new Terrain(this.scene);
+    this.flora = new Flora(this.scene, {
+      pointLightBudget: this._pointLightBudgetApi,
+    });
+    this.creatures = new CreatureManager(this.scene, {
+      pointLightBudget: this._pointLightBudgetApi,
+    });
+    this.hud = new HUD();
+    this.audio = new AudioManager();
+    this.underwaterEffect = null;
+    this.abyssEncounter = new AbyssEncounter({
+      pointLightBudget: this._pointLightBudgetApi,
+    });
+    this.physicsWorld = null; // initialized async in _primeAndEnterGameplay
+    this.preload = null;
+    this.graphicsDiagnostics = null;
+
+    // GPU detection and graphics diagnostics are deferred to async init()
+    // because WebGPURenderer requires await renderer.init() before backend access.
 
     // Alias so automated tests can use game.creatureManager or game.creatures
     this.creatureManager = this.creatures;
@@ -1251,11 +1270,188 @@ export class Game {
       activeCount,
       maxLights,
       transitionBand: budget.transitionBand,
-      scanInterval: budget.scanInterval,
       retargetInterval: budget.retargetInterval,
+      registrationMode: "explicit",
+      lastRegistrationMs: budget.lastRegistrationMs,
+      registrationEmaMs: budget.registrationEmaMs,
+      lastUnregistrationMs: budget.lastUnregistrationMs,
+      unregistrationEmaMs: budget.unregistrationEmaMs,
+      lastRetargetMs: budget.lastRetargetMs,
+      retargetEmaMs: budget.retargetEmaMs,
+      candidateCount: budget.lastCandidateCount,
+      selectedCount: budget.lastSelectedCount,
+      selectionLimit: budget.lastSelectionLimit,
       managedCategories,
       activeCategories,
     };
+  }
+
+  _recordPointLightBudgetCost(lastKey, emaKey, durationMs) {
+    const budget = this._pointLightBudget;
+    budget[lastKey] = durationMs;
+    budget[emaKey] =
+      budget[emaKey] === 0
+        ? durationMs
+        : THREE.MathUtils.lerp(budget[emaKey], durationMs, budget.profileAlpha);
+  }
+
+  _shouldManagePointLight(light) {
+    if (!light?.isPointLight) return false;
+    if (light === this.player?.subLight) return false;
+
+    const category = light.userData.duwCategory;
+    return category !== "player_practical" && category !== "player_headlight";
+  }
+
+  _prepareManagedPointLight(light) {
+    const baseIntensity = light.userData.duwBaseIntensity ?? light.intensity;
+    light.userData.duwBaseIntensity = baseIntensity;
+    light.userData.duwTargetIntensity = baseIntensity;
+    if (light.intensity <= 0.001) {
+      light.intensity = baseIntensity;
+    }
+    light.visible = baseIntensity > 0.001;
+  }
+
+  _registerManagedPointLightInternal(light) {
+    if (!this._shouldManagePointLight(light)) return false;
+
+    const budget = this._pointLightBudget;
+    const existingIndex = light.userData.duwManagedIndex;
+    if (
+      Number.isInteger(existingIndex) &&
+      budget.managedLights[existingIndex] === light
+    ) {
+      return false;
+    }
+
+    this._prepareManagedPointLight(light);
+    light.userData.duwManagedIndex = budget.managedLights.length;
+    budget.managedLights.push(light);
+    return true;
+  }
+
+  _unregisterManagedPointLightInternal(light) {
+    if (!light?.isPointLight) return false;
+
+    const budget = this._pointLightBudget;
+    const index = light.userData.duwManagedIndex;
+    if (!Number.isInteger(index) || budget.managedLights[index] !== light) {
+      return false;
+    }
+
+    const lastIndex = budget.managedLights.length - 1;
+    const lastLight = budget.managedLights[lastIndex];
+    budget.managedLights.pop();
+
+    if (index < lastIndex && lastLight) {
+      budget.managedLights[index] = lastLight;
+      lastLight.userData.duwManagedIndex = index;
+    }
+
+    delete light.userData.duwManagedIndex;
+    light.userData.duwTargetIntensity = 0;
+    return true;
+  }
+
+  _registerManagedPointLight(light) {
+    const start = performance.now();
+    const result = this._registerManagedPointLightInternal(light);
+    this._recordPointLightBudgetCost(
+      "lastRegistrationMs",
+      "registrationEmaMs",
+      performance.now() - start,
+    );
+    return result;
+  }
+
+  _unregisterManagedPointLight(light) {
+    const start = performance.now();
+    const result = this._unregisterManagedPointLightInternal(light);
+    this._recordPointLightBudgetCost(
+      "lastUnregistrationMs",
+      "unregistrationEmaMs",
+      performance.now() - start,
+    );
+    return result;
+  }
+
+  _registerManagedPointLightsFromRoot(root) {
+    if (!root?.traverse) return 0;
+
+    const start = performance.now();
+    let registeredCount = 0;
+    root.traverse((child) => {
+      if (this._registerManagedPointLightInternal(child)) {
+        registeredCount++;
+      }
+    });
+    this._recordPointLightBudgetCost(
+      "lastRegistrationMs",
+      "registrationEmaMs",
+      performance.now() - start,
+    );
+    return registeredCount;
+  }
+
+  _unregisterManagedPointLightsFromRoot(root) {
+    if (!root?.traverse) return 0;
+
+    const start = performance.now();
+    let unregisteredCount = 0;
+    root.traverse((child) => {
+      if (this._unregisterManagedPointLightInternal(child)) {
+        unregisteredCount++;
+      }
+    });
+    this._recordPointLightBudgetCost(
+      "lastUnregistrationMs",
+      "unregistrationEmaMs",
+      performance.now() - start,
+    );
+    return unregisteredCount;
+  }
+
+  _getPointLightCategoryPriority(category) {
+    if (category === "encounter_hero") return 1.15;
+    if (category === "creature_bio") return 1.1;
+    if (category === "flora_decor") return 1.05;
+    return 1.0;
+  }
+
+  _insertManagedPointLightCandidate(candidates, light, maxCount) {
+    if (maxCount <= 0) return;
+
+    const score = light.userData.duwScore ?? 0;
+    const candidateCount = candidates.length;
+    if (candidateCount >= maxCount) {
+      const lowestScore = candidates[maxCount - 1]?.userData.duwScore ?? 0;
+      if (score <= lowestScore) {
+        return;
+      }
+    }
+
+    let insertIndex = candidateCount;
+    while (
+      insertIndex > 0 &&
+      score > (candidates[insertIndex - 1].userData.duwScore ?? 0)
+    ) {
+      insertIndex--;
+    }
+
+    if (candidateCount < maxCount) {
+      candidates.push(light);
+      for (let i = candidateCount; i > insertIndex; i--) {
+        candidates[i] = candidates[i - 1];
+      }
+      candidates[insertIndex] = light;
+      return;
+    }
+
+    for (let i = maxCount - 1; i > insertIndex; i--) {
+      candidates[i] = candidates[i - 1];
+    }
+    candidates[insertIndex] = light;
   }
 
   _createAutoplayState() {
@@ -1652,12 +1848,8 @@ export class Game {
     const budget = this._pointLightBudget;
 
     // If the current frame is already heavy, defer point-light management work
-    // so we don't compound stalls with extra traversal/sorting cost.
+    // so we don't compound stalls with extra scoring/fade work.
     if (dt > budget.heavyFrameThreshold) {
-      budget.scanElapsed = Math.min(
-        budget.scanElapsed + dt * 0.5,
-        budget.scanInterval,
-      );
       budget.retargetElapsed = Math.min(
         budget.retargetElapsed + dt * 0.5,
         budget.retargetInterval,
@@ -1665,16 +1857,7 @@ export class Game {
       return;
     }
 
-    budget.scanElapsed += dt;
     budget.retargetElapsed += dt;
-
-    if (
-      budget.scanElapsed >= budget.scanInterval ||
-      budget.managedLights.length === 0
-    ) {
-      budget.scanElapsed = 0;
-      this._refreshManagedPointLights();
-    }
 
     if (budget.retargetElapsed >= budget.retargetInterval) {
       budget.retargetElapsed = 0;
@@ -1713,51 +1896,22 @@ export class Game {
     }
   }
 
-  _refreshManagedPointLights() {
-    const budget = this._pointLightBudget;
-    const managedLights = budget.managedLights;
-    managedLights.length = 0;
-    const refreshStart = performance.now();
-
-    this.scene.traverse((obj) => {
-      if (!obj.isPointLight) return;
-      if (obj === this.player.subLight) return;
-      const cat = obj.userData.duwCategory;
-      if (cat === "player_practical" || cat === "player_headlight") return;
-
-      if (obj.userData.duwBaseIntensity === undefined) {
-        obj.userData.duwBaseIntensity = obj.intensity;
-      }
-      if (obj.userData.duwTargetIntensity === undefined) {
-        obj.userData.duwTargetIntensity = obj.intensity;
-      }
-
-      managedLights.push(obj);
-    });
-
-    const refreshCost = performance.now() - refreshStart;
-    if (refreshCost > budget.scanCostAdjustThreshold) {
-      budget.scanInterval = Math.min(
-        budget.maxScanInterval,
-        budget.scanInterval + 0.25,
-      );
-    } else if (refreshCost < budget.scanCostRecoverThreshold) {
-      budget.scanInterval = Math.max(
-        budget.minScanInterval,
-        budget.scanInterval - 0.05,
-      );
-    }
-  }
-
   _retargetPointLights(depth, playerPos) {
     const budget = this._pointLightBudget;
+    const retargetStart = performance.now();
     const depthBlend = THREE.MathUtils.smoothstep(depth, 35, 220);
     const maxLights = Math.round(
       THREE.MathUtils.lerp(budget.shallowMax, budget.deepMax, depthBlend),
     );
+    const selectionLimit = Math.max(0, maxLights + budget.transitionBand);
+
+    const candidates = budget.activeLights;
+    candidates.length = 0;
+    let candidateCount = 0;
 
     for (const light of budget.managedLights) {
       if (!light.parent) continue;
+      candidateCount++;
 
       const baseIntensity = light.userData.duwBaseIntensity ?? light.intensity;
       const worldPos = light.getWorldPosition(budget.tempWorldPos);
@@ -1765,30 +1919,18 @@ export class Game {
       // Hysteresis: boost score for currently-active lights to prevent flip-flopping
       const isActive = (light.userData.duwTargetIntensity ?? 0) > 0.01;
       const hysteresis = isActive ? 1.2 : 1.0;
-      // Category priority tiebreaker: encounter_hero > creature_bio > flora_decor
-      const catPriority =
-        light.userData.duwCategory === "encounter_hero"
-          ? 1.15
-          : light.userData.duwCategory === "creature_bio"
-            ? 1.1
-            : light.userData.duwCategory === "flora_decor"
-              ? 1.05
-              : 1.0;
+      const catPriority = this._getPointLightCategoryPriority(
+        light.userData.duwCategory,
+      );
       light.userData.duwScore =
         ((baseIntensity + 0.001) / (distanceSq + 1)) * hysteresis * catPriority;
       light.userData.duwTargetIntensity = 0;
+      this._insertManagedPointLightCandidate(candidates, light, selectionLimit);
     }
 
-    const candidates = budget.activeLights;
-    candidates.length = 0;
-    for (const light of budget.managedLights) {
-      if (light.parent) {
-        candidates.push(light);
-      }
-    }
-    candidates.sort(
-      (a, b) => (b.userData.duwScore ?? 0) - (a.userData.duwScore ?? 0),
-    );
+    budget.lastCandidateCount = candidateCount;
+    budget.lastSelectedCount = candidates.length;
+    budget.lastSelectionLimit = selectionLimit;
 
     const fullyLitCount = Math.min(maxLights, candidates.length);
     const fadeStartIndex = Math.max(fullyLitCount - 1, 0);
@@ -1827,5 +1969,11 @@ export class Game {
 
       light.userData.duwTargetIntensity = baseIntensity * weight;
     }
+
+    this._recordPointLightBudgetCost(
+      "lastRetargetMs",
+      "retargetEmaMs",
+      performance.now() - retargetStart,
+    );
   }
 }

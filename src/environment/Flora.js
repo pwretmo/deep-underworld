@@ -23,8 +23,9 @@ const KELP_SWAY_DISPLACEMENT_SCALE = KELP_SWAY_DELTA / KELP_SWAY_FREQUENCY;
 const KELP_SWAY_BOUNDS_PADDING = KELP_SWAY_DISPLACEMENT_SCALE * 2;
 
 export class Flora {
-  constructor(scene) {
+  constructor(scene, options = {}) {
     this.scene = scene;
+    this._pointLightBudget = options.pointLightBudget ?? null;
     this.groups = new Map();
     this.chunkSize = 80;
     this.lastChunkX = null;
@@ -349,6 +350,7 @@ export class Flora {
 
       const chunk = this._createFloraChunkFromPayload(cx, cz, payload);
       this.scene.add(chunk);
+      this._pointLightBudget?.registerObjectLights(chunk);
       this.groups.set(key, chunk);
       applied++;
     }
@@ -378,6 +380,7 @@ export class Flora {
   }
 
   _disposeGroup(group) {
+    this._pointLightBudget?.unregisterObjectLights(group);
     group.traverse((child) => {
       if (child.geometry) child.geometry.dispose();
       if (child.material) {

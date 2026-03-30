@@ -238,8 +238,9 @@ function createGodRayMaterial(seedValue) {
 }
 
 export class Ocean {
-  constructor(scene) {
+  constructor(scene, options = {}) {
     this.scene = scene;
+    this._pointLightBudget = options.pointLightBudget ?? null;
     this.particles = [];
     this.time = 0;
     this.particleCount = 0;
@@ -628,6 +629,7 @@ export class Ocean {
         (Math.random() - 0.5) * 50,
       );
       this.scene.add(light);
+      this._pointLightBudget?.registerLight(light);
       this.causticLights.push({
         light,
         offset: Math.random() * Math.PI * 2,
