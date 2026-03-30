@@ -25,6 +25,7 @@ import {
   vec4,
 } from 'three/tsl';
 import { bloom as createBloomNode } from 'three/addons/tsl/display/BloomNode.js';
+import { godrays } from 'three/addons/tsl/display/GodraysNode.js';
 import { qualityManager } from '../QualityManager.js';
 import { DEPTH_THRESHOLDS } from '../lighting/LightingPolicy.js';
 
@@ -350,10 +351,11 @@ function createUnderwaterPostColorNode(sourceNode, uniformNodes) {
 }
 
 export class UnderwaterEffect {
-  constructor(renderer, scene, camera) {
+  constructor(renderer, scene, camera, sunLight = null) {
     this.renderer = renderer;
     this.scene = scene;
     this.camera = camera;
+    this._sunLight = sunLight;
     this.time = 0;
 
     // Phase 2c keeps the existing wrapper boundary intact while porting the
@@ -434,6 +436,18 @@ export class UnderwaterEffect {
     this._bloomPass = null;
     this._setupBloom(qualityManager.tier);
 
+    // Godrays node for ultra tier
+    this._godraysPass = null;
+    this._godraysBaseDensity = 0;
+    this._godraysBaseMaxDensity = 0;
+    this._godraysBloomRenderNode = null;
+    this._godraysBloomRenderTextureNode = null;
+    this._underwaterBloomGodraysOutputNode = null;
+    this._godraysSceneRenderNode = null;
+    this._godraysSceneRenderTextureNode = null;
+    this._underwaterGodraysOutputNode = null;
+    this._setupGodrays(qualityManager.tier);
+
     // Adaptive render guard:
     // creature-dense scenes can cause heavy post-processing stalls on some GPUs.
     this._renderEmaMs = 16;
@@ -469,8 +483,9 @@ export class UnderwaterEffect {
 
     window.addEventListener('qualitychange', (e) => {
       this._qualityMaxScale = e.detail.settings.postProcessScale;
-      this._refreshScaleCap({ force: true, skipCooldown: true });
       this._setupBloom(e.detail.tier);
+      this._setupGodrays(e.detail.tier);
+      this._refreshScaleCap({ force: true, skipCooldown: true });
     });
   }
 
@@ -507,6 +522,10 @@ export class UnderwaterEffect {
     updateRttNodeScale(this._bloomRenderTextureNode, width, height, pixelRatio, scale);
     updateRttNodeScale(this._underwaterSceneOutputNode, width, height, pixelRatio, scale);
     updateRttNodeScale(this._underwaterBloomOutputNode, width, height, pixelRatio, scale);
+    updateRttNodeScale(this._godraysBloomRenderTextureNode, width, height, pixelRatio, scale);
+    updateRttNodeScale(this._underwaterBloomGodraysOutputNode, width, height, pixelRatio, scale);
+    updateRttNodeScale(this._godraysSceneRenderTextureNode, width, height, pixelRatio, scale);
+    updateRttNodeScale(this._underwaterGodraysOutputNode, width, height, pixelRatio, scale);
   }
 
   _setReducedMode(enabled) {
@@ -517,9 +536,16 @@ export class UnderwaterEffect {
   }
 
   _syncOutputNode(force = false) {
-    const nextNode = this._bloomPass && !this._bloomSuspended
-      ? this._underwaterBloomOutputNode
-      : this._underwaterSceneOutputNode;
+    let nextNode;
+    if (this._bloomPass && !this._bloomSuspended && this._godraysPass) {
+      nextNode = this._underwaterBloomGodraysOutputNode;
+    } else if (this._bloomPass && !this._bloomSuspended) {
+      nextNode = this._underwaterBloomOutputNode;
+    } else if (this._godraysPass) {
+      nextNode = this._underwaterGodraysOutputNode;
+    } else {
+      nextNode = this._underwaterSceneOutputNode;
+    }
     this._setOutputNode(nextNode, force);
   }
 
@@ -545,6 +571,88 @@ export class UnderwaterEffect {
 
     const size = this._getDrawingBufferSize();
     this._bloomPass.setSize(size.width, size.height);
+  }
+
+  _updateGodraysNodeSize() {
+    if (!this._godraysPass) {
+      return;
+    }
+
+    const size = this._getDrawingBufferSize();
+    this._godraysPass.setSize(size.width, size.height);
+  }
+
+  /**
+   * Add or remove the godrays node based on quality tier.
+   * Ultra tier only — 60 raymarch steps is expensive.
+   */
+  _setupGodrays(tier) {
+    if (tier === 'ultra' && this._sunLight && !this._godraysPass) {
+      const depthNode = this._scenePass.getTextureNode('depth');
+      this._godraysPass = godrays(depthNode, this.camera, this._sunLight);
+      this._godraysPass.maxDensity.value = 0.5;
+      this._godraysPass.density.value = 0.7;
+      this._godraysPass.raymarchSteps.value = 60;
+      this._godraysPass.distanceAttenuation.value = 2;
+      this._godraysBaseDensity = 0.7;
+      this._godraysBaseMaxDensity = 0.5;
+
+      // Wrap setSize to follow adaptive composer scale
+      const baseSetSize = this._godraysPass.setSize.bind(this._godraysPass);
+      this._godraysPass.setSize = (width, height) => {
+        const scale = THREE.MathUtils.clamp(
+          this._appliedComposerScale || this._composerScale || 1,
+          this.tuning.performance.minScale,
+          1
+        );
+        baseSetSize(
+          Math.max(1, Math.round(width * scale)),
+          Math.max(1, Math.round(height * scale))
+        );
+      };
+      this._updateGodraysNodeSize();
+    } else if (tier !== 'ultra' && this._godraysPass) {
+      this._godraysPass.dispose();
+      this._godraysPass = null;
+    }
+
+    this._rebuildOutputChains();
+  }
+
+  /**
+   * Rebuild godrays-dependent output chain nodes based on current bloom + godrays state.
+   * Called after _setupBloom or _setupGodrays changes pass availability.
+   */
+  _rebuildOutputChains() {
+    // Dispose old godrays-specific chain nodes
+    disposeRttNode(this._godraysBloomRenderTextureNode);
+    disposeRttNode(this._underwaterBloomGodraysOutputNode);
+    this._godraysBloomRenderNode = null;
+    this._godraysBloomRenderTextureNode = null;
+    this._underwaterBloomGodraysOutputNode = null;
+
+    disposeRttNode(this._godraysSceneRenderTextureNode);
+    disposeRttNode(this._underwaterGodraysOutputNode);
+    this._godraysSceneRenderNode = null;
+    this._godraysSceneRenderTextureNode = null;
+    this._underwaterGodraysOutputNode = null;
+
+    if (this._godraysPass) {
+      if (this._bloomPass) {
+        // bloom + godrays chain
+        this._godraysBloomRenderNode = this._sceneColorNode.add(this._bloomPass).add(this._godraysPass);
+        this._godraysBloomRenderTextureNode = convertToTexture(this._godraysBloomRenderNode);
+        this._underwaterBloomGodraysOutputNode = this._createUnderwaterOutputNode(this._godraysBloomRenderTextureNode);
+      }
+
+      // godrays-only chain (used when bloom is suspended or absent)
+      this._godraysSceneRenderNode = this._sceneColorNode.add(this._godraysPass);
+      this._godraysSceneRenderTextureNode = convertToTexture(this._godraysSceneRenderNode);
+      this._underwaterGodraysOutputNode = this._createUnderwaterOutputNode(this._godraysSceneRenderTextureNode);
+    }
+
+    this._updateUnderwaterNodeSizes();
+    this._syncOutputNode(true);
   }
 
   /**
@@ -590,9 +698,7 @@ export class UnderwaterEffect {
       this._updateBloomNodeSize();
     }
 
-    this._updateUnderwaterNodeSizes();
-
-    this._syncOutputNode(true);
+    this._rebuildOutputChains();
   }
 
   resize() {
@@ -803,6 +909,7 @@ export class UnderwaterEffect {
     this._scenePass.setPixelRatio(pixelRatio);
     this._scenePass.setSize(width, height);
     this._updateBloomNodeSize();
+    this._updateGodraysNodeSize();
     this.underwaterPass.uniforms.resolution.value.set(
       width * pixelRatio * nextScale,
       height * pixelRatio * nextScale
@@ -823,6 +930,13 @@ export class UnderwaterEffect {
     this._underwaterUniformNodes.depth.value = depth;
     this._underwaterUniformNodes.exposure.value = exposure;
     this._underwaterUniformNodes.flashlightActive.value = flashlightOn ? 1 : 0;
+
+    // Fade godrays density with depth (matches billboard god ray range 40-80)
+    if (this._godraysPass) {
+      const depthFade = 1.0 - THREE.MathUtils.smoothstep(depth, 40, 80);
+      this._godraysPass.density.value = this._godraysBaseDensity * depthFade;
+      this._godraysPass.maxDensity.value = this._godraysBaseMaxDensity * depthFade;
+    }
 
     // Item 4: quantize inputs — skip expensive bloom target recomputation when nothing meaningful
     // changed. The lerp convergence itself must still run every frame so bloom params converge
