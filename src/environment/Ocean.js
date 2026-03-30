@@ -17,6 +17,7 @@ import {
   instanceIndex,
   max,
   mix,
+  positionLocal,
   positionView,
   positionWorld,
   pow,
@@ -32,6 +33,23 @@ import {
   vec3,
 } from "three/tsl";
 import { qualityManager } from "../QualityManager.js";
+
+const WATER_SURFACE_X_WAVE_SCALE = 0.05;
+const WATER_SURFACE_X_WAVE_SPEED = 0.5;
+const WATER_SURFACE_X_WAVE_AMPLITUDE = 0.5;
+const WATER_SURFACE_Z_WAVE_SCALE = 0.03;
+const WATER_SURFACE_Z_WAVE_SPEED = 0.3;
+const WATER_SURFACE_Z_WAVE_AMPLITUDE = 0.3;
+const WATER_SURFACE_BOUNDS_PADDING = WATER_SURFACE_X_WAVE_AMPLITUDE + WATER_SURFACE_Z_WAVE_AMPLITUDE;
+
+function expandGeometryBounds(geometry, axis, padding) {
+  geometry.computeBoundingBox();
+  if (!geometry.boundingBox) return;
+
+  geometry.boundingBox.min[axis] -= padding;
+  geometry.boundingBox.max[axis] += padding;
+  geometry.boundingSphere = geometry.boundingBox.getBoundingSphere(new THREE.Sphere());
+}
 
 function cloneUniformValue(value) {
   return value?.clone ? value.clone() : value;
@@ -276,13 +294,24 @@ export class Ocean {
       emissive: new THREE.Color(0x336688),
       emissiveIntensity: 0.15,
     });
+    const uniforms = createUniformMap({
+      time: 0,
+    });
+    const wave = sin(positionLocal.x.mul(WATER_SURFACE_X_WAVE_SCALE).add(uniforms.time.mul(WATER_SURFACE_X_WAVE_SPEED)))
+      .mul(WATER_SURFACE_X_WAVE_AMPLITUDE)
+      .add(
+        cos(positionLocal.y.mul(WATER_SURFACE_Z_WAVE_SCALE).add(uniforms.time.mul(WATER_SURFACE_Z_WAVE_SPEED)))
+          .mul(WATER_SURFACE_Z_WAVE_AMPLITUDE)
+      );
+    mat.positionNode = vec3(positionLocal.x, positionLocal.y, positionLocal.z.add(wave));
+    mat.needsUpdate = true;
+    attachUniforms(mat, uniforms);
+    expandGeometryBounds(geo, 'z', WATER_SURFACE_BOUNDS_PADDING);
+
     this.waterSurface = new THREE.Mesh(geo, mat);
     this.waterSurface.rotation.x = -Math.PI / 2;
     this.waterSurface.position.y = 0;
     this.scene.add(this.waterSurface);
-
-    // Store original vertices for animation
-    this.waterVertices = geo.attributes.position.array.slice();
   }
 
   _createParticles() {
@@ -458,18 +487,7 @@ export class Ocean {
     const depthBlend = THREE.MathUtils.smoothstep(depth, 45, 320);
     const abyssBlend = THREE.MathUtils.smoothstep(depth, 380, 760);
 
-    // Animate water surface
-    const posAttr = this.waterSurface.geometry.attributes.position;
-    for (let i = 0; i < posAttr.count; i++) {
-      const baseY = this.waterVertices[i * 3 + 2]; // z in original is y after rotation
-      const x = this.waterVertices[i * 3];
-      const z = this.waterVertices[i * 3 + 1];
-      posAttr.array[i * 3 + 2] =
-        baseY +
-        Math.sin(x * 0.05 + this.time * 0.5) * 0.5 +
-        Math.cos(z * 0.03 + this.time * 0.3) * 0.3;
-    }
-    posAttr.needsUpdate = true;
+    this.waterSurface.material.uniforms.time.value = this.time;
 
     // Dynamic surface emissive: shimmer strongest in shallow water
     const emissivePulse =

@@ -1,6 +1,20 @@
 import * as THREE from 'three/webgpu';
-import { abs, dot, materialColor, materialEmissive, normalView, positionView, pow, sub } from 'three/tsl';
+import { abs, clamp, cos, dot, materialColor, materialEmissive, normalView, positionLocal, positionView, pow, sub, uniform, vec3 } from 'three/tsl';
 import { qualityManager } from '../QualityManager.js';
+
+const KELP_SWAY_FREQUENCY = 0.5;
+const KELP_SWAY_DELTA = 0.3;
+const KELP_SWAY_DISPLACEMENT_SCALE = KELP_SWAY_DELTA / KELP_SWAY_FREQUENCY;
+const KELP_SWAY_BOUNDS_PADDING = KELP_SWAY_DISPLACEMENT_SCALE * 2;
+
+function expandGeometryBounds(geometry, axis, padding) {
+  geometry.computeBoundingBox();
+  if (!geometry.boundingBox) return;
+
+  geometry.boundingBox.min[axis] -= padding;
+  geometry.boundingBox.max[axis] += padding;
+  geometry.boundingSphere = geometry.boundingBox.getBoundingSphere(new THREE.Sphere());
+}
 
 export class Flora {
   constructor(scene) {
@@ -10,7 +24,7 @@ export class Flora {
     this.lastChunkX = null;
     this.lastChunkZ = null;
     this.time = 0;
-    this.kelps = [];
+    this._kelpTime = uniform(0);
     this._pendingChunks = []; // queue for staggered generation
     this._floraDensityScale = qualityManager.getSettings().floraDensityScale;
     this._neededChunkKeys = new Set();
@@ -182,6 +196,24 @@ export class Flora {
     return group;
   }
 
+  _createKelpMaterial(color, emissive) {
+    const material = new THREE.MeshStandardMaterial({
+      color,
+      roughness: 0.5,
+      metalness: 0.02,
+      transparent: true,
+      opacity: 0.85,
+      side: THREE.DoubleSide,
+      emissive,
+      emissiveIntensity: 0.5,
+    });
+    const viewDir = positionView.negate().normalize();
+    const NdV = abs(dot(normalView, viewDir));
+    const rim = pow(sub(1.0, NdV), 2.0);
+    material.emissiveNode = materialEmissive.add(materialColor.mul(rim).mul(0.15));
+    return material;
+  }
+
   _addKelpFromData(parent, kelpData) {
     const segHeight = kelpData.height / kelpData.segments;
 
@@ -192,37 +224,32 @@ export class Flora {
 
     const curve = new THREE.CatmullRomCurve3(points);
     const geo = new THREE.TubeGeometry(curve, kelpData.segments, kelpData.radius, 4, false);
-    const mat = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(0.1, kelpData.green, 0.05),
-      roughness: 0.5,
-      metalness: 0.02,
-      transparent: true,
-      opacity: 0.85,
-      side: THREE.DoubleSide,
-      emissive: new THREE.Color(0.02, kelpData.green * 0.15, 0.01),
-      emissiveIntensity: 0.5,
-    });
-    // TSL: Fresnel rim-light on kelp
-    const viewDir = positionView.negate().normalize();
-    const NdV = abs(dot(normalView, viewDir));
-    const rim = pow(sub(1.0, NdV), 2.0);
-    mat.emissiveNode = materialEmissive.add(materialColor.mul(rim).mul(0.15));
+    expandGeometryBounds(geo, 'x', KELP_SWAY_BOUNDS_PADDING);
+
+    const color = new THREE.Color(0.1, kelpData.green, 0.05);
+    const emissive = new THREE.Color(0.02, kelpData.green * 0.15, 0.01);
+    const kelpHeight = uniform(Math.max(kelpData.height, 0.001));
+    const kelpPhase = uniform(kelpData.phase);
+    const heightRatio = clamp(positionLocal.y.div(kelpHeight), 0.0, 1.0);
+    const swayOffset = cos(kelpPhase)
+      .sub(cos(this._kelpTime.mul(KELP_SWAY_FREQUENCY).add(kelpPhase)))
+      .mul(KELP_SWAY_DISPLACEMENT_SCALE)
+      .mul(heightRatio);
+
+    const mat = this._createKelpMaterial(color, emissive);
+    // Match the previous integrated CPU sway from a fixed rest pose without mutating vertex buffers.
+    mat.positionNode = vec3(positionLocal.x.add(swayOffset), positionLocal.y, positionLocal.z);
+    mat.needsUpdate = true;
+
+    const leafMat = this._createKelpMaterial(color, emissive);
 
     const kelp = new THREE.Mesh(geo, mat);
     kelp.position.set(kelpData.x, kelpData.y, kelpData.z);
     parent.add(kelp);
 
-    this.kelps.push({
-      mesh: kelp,
-      curve,
-      segHeight,
-      segments: kelpData.segments,
-      phase: kelpData.phase,
-    });
-
     for (const leafData of kelpData.leafRotations) {
       const leafGeo = new THREE.PlaneGeometry(0.8, 0.3);
-      const leaf = new THREE.Mesh(leafGeo, mat);
+      const leaf = new THREE.Mesh(leafGeo, leafMat);
       leaf.position.set(kelpData.x + 0.3, kelpData.y + leafData.y, kelpData.z);
       leaf.rotation.y = leafData.ry;
       leaf.rotation.z = Math.PI / 4;
@@ -301,7 +328,6 @@ export class Flora {
       }
     });
     this.scene.remove(group);
-    this.kelps = this.kelps.filter(k => k.mesh.parent !== group);
   }
 
   _rebuildPendingAround(cx, cz) {
@@ -395,16 +421,6 @@ export class Flora {
       this._rebuildPendingAround(cx, cz);
     }
 
-    // Animate kelp swaying
-    for (const kelp of this.kelps) {
-      const posArr = kelp.mesh.geometry.attributes.position.array;
-      const sway = Math.sin(this.time * 0.5 + kelp.phase) * 0.3;
-      // Simple vertex displacement for swaying effect
-      for (let i = 0; i < posArr.length; i += 3) {
-        const heightRatio = posArr[i + 1] / (kelp.segments * kelp.segHeight);
-        posArr[i] += sway * heightRatio * dt;
-      }
-      kelp.mesh.geometry.attributes.position.needsUpdate = true;
-    }
+    this._kelpTime.value = this.time;
   }
 }
