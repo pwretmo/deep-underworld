@@ -1,0 +1,2 @@
+# Keep the generated preload artifact stable across platforms.
+src/generated/preloadLookupArtifact.js text eol=lf

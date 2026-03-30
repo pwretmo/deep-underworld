@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { noise2D } from './utils/noise.js';
+import { PRELOAD_LOOKUP_ARTIFACT } from './generated/preloadLookupArtifact.js';
 
 const SCHEMA_VERSION = 1;
 const GAME_VERSION = '0.16.0';
@@ -44,6 +44,7 @@ export class PreloadCoordinator {
     this.persistenceDisabledForSession = false;
     this._advisorySnapshot = null;
     this._skipLookupWarmupFromSnapshot = false;
+    this._lookupChecksum = PRELOAD_LOOKUP_ARTIFACT.checksum;
     this._descentAssist = {
       active: false,
       prepared: false,
@@ -464,29 +465,11 @@ export class PreloadCoordinator {
 
   _warmNonAudioLookups(token) {
     if (token.cancelled) return true;
-    if (this._skipLookupWarmupFromSnapshot) return true;
-
-    if (!this._lookupPlan) {
-      this._lookupPlan = this._buildLookupPlan();
-      this._lookupCursor = 0;
-      this._lookupChecksum = 0;
-    }
-
-    if (this._lookupCursor >= this._lookupPlan.length) return true;
-
-    const p = this._lookupPlan[this._lookupCursor++];
-    this._lookupChecksum += noise2D(p.x, p.z);
-    return this._lookupCursor >= this._lookupPlan.length;
-  }
-
-  _buildLookupPlan() {
-    const plan = [];
-    for (let x = -8; x <= 8; x++) {
-      for (let z = -8; z <= 8; z++) {
-        plan.push({ x: x * 0.07, z: z * 0.07 });
-      }
-    }
-    return plan;
+    // The lookup checksum is generated ahead of time during build so runtime
+    // warmup preserves the snapshot field without burning idle-frame budget.
+    this._lookupChecksum = PRELOAD_LOOKUP_ARTIFACT.checksum;
+    this._skipLookupWarmupFromSnapshot = true;
+    return true;
   }
 
   _pumpDescentCreatureAssist(maxBudgetMs = Infinity) {
@@ -699,7 +682,7 @@ export class PreloadCoordinator {
       creaturePreloaded: this._clampInt(snapshot.creaturePreloaded, 0, MAX_PRELOADED_CREATURES),
       terrainChunks: this._clampInt(snapshot.terrainChunks, 0, MAX_PRELOADED_TERRAIN_CHUNKS),
       floraChunks: this._clampInt(snapshot.floraChunks, 0, MAX_PRELOADED_FLORA_CHUNKS),
-      lookupChecksum: Number.isFinite(snapshot.lookupChecksum) ? snapshot.lookupChecksum : null,
+      lookupChecksum: Number.isFinite(snapshot.lookupChecksum) ? Number(snapshot.lookupChecksum.toFixed(4)) : null,
       createdAt: this._clampInt(snapshot.createdAt, 0, Number.MAX_SAFE_INTEGER),
     };
   }
@@ -707,7 +690,8 @@ export class PreloadCoordinator {
   _applyAdvisorySnapshot(snapshot) {
     this._advisorySnapshot = snapshot;
     this.runtimeCache.set('startupSnapshot', snapshot);
-    this._skipLookupWarmupFromSnapshot = snapshot.lookupChecksum !== null;
+    this._skipLookupWarmupFromSnapshot = snapshot.lookupChecksum === PRELOAD_LOOKUP_ARTIFACT.checksum;
+    this._lookupChecksum = PRELOAD_LOOKUP_ARTIFACT.checksum;
 
     // Start immediately if gameplay/autoplay already requested assist before
     // the async cache read delivered this advisory snapshot.
