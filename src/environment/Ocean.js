@@ -43,6 +43,11 @@ const WATER_SURFACE_Z_WAVE_SPEED = 0.3;
 const WATER_SURFACE_Z_WAVE_AMPLITUDE = 0.3;
 const WATER_SURFACE_BOUNDS_PADDING =
   WATER_SURFACE_X_WAVE_AMPLITUDE + WATER_SURFACE_Z_WAVE_AMPLITUDE;
+const MARINE_SNOW_PARTICLE_COUNT = 3000;
+const MARINE_SNOW_VIEW_SCALE = 165.0;
+const MARINE_SNOW_MIN_SCREEN_SIZE = 0.35;
+const MARINE_SNOW_MAX_SCREEN_SIZE = 6.0;
+const MARINE_SNOW_TEXTURE_RESOLUTION = 48;
 
 function cloneUniformValue(value) {
   return value?.clone ? value.clone() : value;
@@ -133,49 +138,58 @@ function createParticleMaterial(
   const material = new THREE.PointsNodeMaterial();
   const driftedCenter = centerNode.add(
     vec3(
-      sin(uniforms.time.mul(0.1).add(seedNode).add(phaseNode)).mul(1.5),
-      sin(uniforms.time.mul(0.08).add(phaseNode)).mul(0.6),
-      cos(uniforms.time.mul(0.1).add(seedNode).add(phaseNode).mul(0.7)).mul(
-        1.5,
-      ),
+      sin(uniforms.time.mul(0.05).add(seedNode.mul(0.013)).add(phaseNode))
+        .mul(0.45)
+        .add(
+          cos(uniforms.time.mul(0.023).add(seedNode.mul(0.021))).mul(0.18),
+        ),
+      sin(
+        uniforms.time
+          .mul(0.04)
+          .add(seedNode.mul(0.009))
+          .add(phaseNode.mul(0.6)),
+      ).mul(0.12),
+      cos(
+        uniforms.time
+          .mul(0.047)
+          .add(seedNode.mul(0.015))
+          .add(phaseNode.mul(1.2)),
+      )
+        .mul(0.45)
+        .add(
+          sin(uniforms.time.mul(0.028).add(seedNode.mul(0.019))).mul(0.18),
+        ),
     ),
   );
   material.positionNode = driftedCenter;
   material.sizeAttenuation = true;
 
-  const viewDist = positionView.z.negate();
-  const bokeh = varying(
-    step(0.95, fract(seedNode.mul(127.1).add(phaseNode.mul(311.7)))),
+  const viewDist = varying(positionView.z.negate());
+  const screenScale = float(MARINE_SNOW_VIEW_SCALE).div(max(viewDist, 1.0));
+  const nearFade = smoothstep(3.0, 11.0, viewDist);
+  const farFade = float(1.0).sub(smoothstep(75.0, 150.0, viewDist).mul(0.2));
+  const translucency = float(0.72).add(
+    fract(seedNode.mul(53.17).add(phaseNode.mul(7.13))).mul(0.28),
   );
-  const focusDist = 30.0;
-  const coc = viewDist.sub(focusDist).abs().div(focusDist);
-  const dofScale = float(1.0).add(coc.mul(0.35));
-  const bokehScale = float(1.0).add(bokeh.mul(1.4));
-  const scatter = float(1.0).add(
-    float(0.35).div(float(1.0).add(viewDist.mul(0.02))),
+  const brightness = float(0.68).add(
+    float(0.2).div(float(1.0).add(viewDist.mul(0.04))),
   );
-  const bokehBright = float(1.0).add(bokeh.mul(2.0));
-  const distFade = smoothstep(3.0, 14.0, viewDist);
 
   material.sizeNode = clamp(
-    sizeNode
-      .mul(uniforms.baseSize)
-      .mul(dofScale)
-      .mul(bokehScale)
-      .mul(float(300.0).div(max(viewDist, 1.0))),
-    0.5,
-    16.0,
+    sizeNode.mul(uniforms.baseSize).mul(screenScale),
+    MARINE_SNOW_MIN_SCREEN_SIZE,
+    MARINE_SNOW_MAX_SCREEN_SIZE,
   );
-  material.colorNode = varying(pow(colorNode, vec3(2.2)))
-    .mul(scatter)
-    .mul(bokehBright);
+  material.colorNode = varying(pow(colorNode, vec3(2.2))).mul(brightness);
   material.opacityNode = texture(snowTexture, uv())
     .a.mul(uniforms.baseOpacity)
-    .mul(distFade);
+    .mul(translucency)
+    .mul(nearFade)
+    .mul(farFade);
   material.transparent = true;
-  material.blending = THREE.AdditiveBlending;
+  material.blending = THREE.NormalBlending;
   material.depthWrite = false;
-  material.fog = false;
+  material.fog = true;
 
   return attachUniforms(material, uniforms);
 }
@@ -345,7 +359,7 @@ export class Ocean {
   }
 
   _createParticles() {
-    const count = 3000;
+    const count = MARINE_SNOW_PARTICLE_COUNT;
     const geo = new THREE.Sprite().geometry.clone();
     const positions = new Float32Array(count * 3);
     const sizes = new Float32Array(count);
@@ -357,13 +371,14 @@ export class Ocean {
       positions[i * 3] = (Math.random() - 0.5) * 200;
       positions[i * 3 + 1] = -Math.random() * 800;
       positions[i * 3 + 2] = (Math.random() - 0.5) * 200;
-      sizes[i] = Math.random() * 2 + 0.5;
+      sizes[i] = 0.45 + Math.pow(Math.random(), 1.7) * 1.15;
       seeds[i] = Math.random() * 1000;
       phases[i] = Math.random() * Math.PI * 2;
-      // Whitish particles for marine snow
-      colors[i * 3] = 0.6 + Math.random() * 0.4;
-      colors[i * 3 + 1] = 0.7 + Math.random() * 0.3;
-      colors[i * 3 + 2] = 0.8 + Math.random() * 0.2;
+      const brightness = 0.58 + Math.random() * 0.2;
+      // Muted cool particulate helps the field read as marine snow instead of glow.
+      colors[i * 3] = brightness * 0.9;
+      colors[i * 3 + 1] = brightness;
+      colors[i * 3 + 2] = brightness + 0.08 + Math.random() * 0.06;
     }
 
     // Storage buffer for positions — updated by GPU compute shader
@@ -415,9 +430,37 @@ export class Ocean {
       const pos = posBuffer.element(instanceIndex);
       const seed = seedBuffer.element(instanceIndex).toFloat();
       const phase = phaseBuffer.element(instanceIndex).toFloat();
+      const time = this._computeUniforms.time;
 
-      // Upward drift
-      pos.y.addAssign(this._computeUniforms.dt.mul(0.2));
+      // Suspended marine snow meanders laterally and settles gently instead of rising.
+      const lateralX = sin(time.mul(0.11).add(seed.mul(0.013)).add(phase))
+        .mul(0.28)
+        .add(
+          cos(time.mul(0.043).add(seed.mul(0.021)).add(phase.mul(0.7))).mul(
+            0.12,
+          ),
+        );
+      const lateralZ = cos(
+        time.mul(0.097).add(seed.mul(0.017)).add(phase.mul(1.31)),
+      )
+        .mul(0.24)
+        .add(
+          sin(time.mul(0.051).add(seed.mul(0.019)).add(phase.mul(0.9))).mul(
+            0.14,
+          ),
+        );
+      const verticalDrift = sin(
+        time.mul(0.071).add(seed.mul(0.011)).add(phase.mul(0.5)),
+      )
+        .mul(0.045)
+        .add(
+          cos(time.mul(0.037).add(seed.mul(0.023)).add(phase)).mul(0.02),
+        )
+        .sub(0.028);
+
+      pos.x.addAssign(this._computeUniforms.dt.mul(lateralX));
+      pos.y.addAssign(this._computeUniforms.dt.mul(verticalDrift));
+      pos.z.addAssign(this._computeUniforms.dt.mul(lateralZ));
 
       // Distance check for respawn
       const dx = pos.x.sub(this._computeUniforms.playerPos.x);
@@ -428,7 +471,7 @@ export class Ocean {
       // Respawn when too far (>100 units) or above water surface
       If(distSq.greaterThan(10000.0).or(pos.y.greaterThan(0.0)), () => {
         // Deterministic hash-based pseudo-random using seed + time
-        const t = this._computeUniforms.time;
+        const t = time;
         const rx = fract(
           sin(seed.mul(12.9898).add(t.mul(0.1))).mul(43758.5453),
         ).sub(0.5);
@@ -461,25 +504,33 @@ export class Ocean {
 
     this.particleCompute = computeFn().compute(count);
 
-    // Soft circular particle texture
-    const pSize = 32;
+    // Build an irregular, low-energy flake texture instead of a bright soft disc.
+    const pSize = MARINE_SNOW_TEXTURE_RESOLUTION;
     const canvas = document.createElement("canvas");
     canvas.width = pSize;
     canvas.height = pSize;
     const ctx = canvas.getContext("2d");
-    const gradient = ctx.createRadialGradient(
-      pSize / 2,
-      pSize / 2,
-      0,
-      pSize / 2,
-      pSize / 2,
-      pSize / 2,
-    );
-    gradient.addColorStop(0, "rgba(255,255,255,1)");
-    gradient.addColorStop(0.3, "rgba(255,255,255,0.5)");
-    gradient.addColorStop(1, "rgba(255,255,255,0)");
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, pSize, pSize);
+    const drawParticleLobe = (x, y, radiusX, radiusY, alpha, angle = 0) => {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(angle);
+      ctx.scale(radiusX / radiusY, 1);
+
+      const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, radiusY);
+      gradient.addColorStop(0, `rgba(255,255,255,${alpha})`);
+      gradient.addColorStop(0.58, `rgba(255,255,255,${alpha * 0.35})`);
+      gradient.addColorStop(1, "rgba(255,255,255,0)");
+
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.arc(0, 0, radiusY, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    };
+
+    drawParticleLobe(pSize * 0.46, pSize * 0.54, pSize * 0.2, pSize * 0.15, 0.55, -0.4);
+    drawParticleLobe(pSize * 0.62, pSize * 0.46, pSize * 0.1, pSize * 0.07, 0.28, 0.3);
+    drawParticleLobe(pSize * 0.34, pSize * 0.6, pSize * 0.08, pSize * 0.055, 0.18, -0.75);
     const snowTexture = new THREE.CanvasTexture(canvas);
 
     // Material reads positions from the same storage buffer
@@ -594,22 +645,22 @@ export class Ocean {
     );
     renderer.computeAsync(this.particleCompute);
 
-    // Denser, slightly larger snow in mid/deep water, then tighten in abyss for readability.
+    // Deep water gets a bit denser, but avoid oversized bright discs.
     const deepOpacity = THREE.MathUtils.lerp(
-      this.particleBaseOpacity * 0.68,
-      this.particleBaseOpacity * 1.55,
+      this.particleBaseOpacity * 0.85,
+      this.particleBaseOpacity * 1.4,
       depthBlend,
     );
-    const abyssFade = THREE.MathUtils.lerp(1.0, 0.86, abyssBlend);
+    const abyssFade = THREE.MathUtils.lerp(1.0, 0.9, abyssBlend);
     this.particleSystem.material.uniforms.baseOpacity.value =
       deepOpacity * abyssFade;
 
     const deepSize = THREE.MathUtils.lerp(
-      this.particleBaseSize * 0.9,
-      this.particleBaseSize * 1.45,
+      this.particleBaseSize * 0.95,
+      this.particleBaseSize * 1.18,
       depthBlend,
     );
-    const abyssSizeClamp = THREE.MathUtils.lerp(1.0, 0.9, abyssBlend);
+    const abyssSizeClamp = THREE.MathUtils.lerp(1.0, 0.94, abyssBlend);
     this.particleSystem.material.uniforms.baseSize.value =
       deepSize * abyssSizeClamp;
 
