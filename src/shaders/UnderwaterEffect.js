@@ -174,6 +174,11 @@ function createUnderwaterPostColorNode(sourceNode, uniformNodes) {
   const sourceUVNode = sourceTextureNode.uvNode || screenUV;
   const peakOf = (colorNode) => max(max(colorNode.r, colorNode.g), colorNode.b);
   const samplePeak = (sampleUvNode) => peakOf(sourceTextureNode.sample(sampleUvNode).rgb);
+  const samplePeakCross = (sampleUvNode, probeNode) => samplePeak(sampleUvNode.add(vec2(probeNode.x, 0.0)))
+    .add(samplePeak(sampleUvNode.sub(vec2(probeNode.x, 0.0))))
+    .add(samplePeak(sampleUvNode.add(vec2(0.0, probeNode.y))))
+    .add(samplePeak(sampleUvNode.sub(vec2(0.0, probeNode.y))))
+    .mul(0.25);
 
   return Fn(() => {
     const distortedUv = vec2(sourceUVNode).toVar();
@@ -303,24 +308,36 @@ function createUnderwaterPostColorNode(sourceNode, uniformNodes) {
 
     const highlight = peakOf(color);
     const neighborPeak = highlight.toVar();
+    const coveragePeak = highlight.toVar();
     If(uniformNodes.reducedMode.lessThan(0.5), () => {
       const bloomProbe = max(vec2(1.0).div(uniformNodes.resolution), vec2(0.0006));
+      neighborPeak.assign(samplePeakCross(distortedUv, bloomProbe));
+      coveragePeak.assign(neighborPeak);
 
-      neighborPeak.assign(
-        samplePeak(distortedUv.add(vec2(bloomProbe.x, 0.0)))
-          .add(samplePeak(distortedUv.sub(vec2(bloomProbe.x, 0.0))))
-          .add(samplePeak(distortedUv.add(vec2(0.0, bloomProbe.y))))
-          .add(samplePeak(distortedUv.sub(vec2(0.0, bloomProbe.y))))
-          .mul(0.25)
-      );
+      If(max(highlight, neighborPeak).greaterThan(uniformNodes.bloomParams.y.sub(0.06)), () => {
+        // Probe farther only for likely bloom candidates so the common path does not pay a second 4-tap cross sample.
+        const coverageProbe = bloomProbe.mul(
+          max(float(2.2), uniformNodes.bloomParams.z.mul(0.75).add(1.4))
+        );
+
+        coveragePeak.assign(samplePeakCross(distortedUv, coverageProbe));
+      });
     });
 
-    const sparkleIsolated = smoothstep(0.04, 0.2, highlight.sub(neighborPeak))
-      .mul(float(1.0).sub(smoothstep(0.08, 0.3, neighborPeak)));
+    const highlightCoverage = smoothstep(0.04, 0.18, coveragePeak);
+    const sparkleIsolated = smoothstep(0.03, 0.14, highlight.sub(neighborPeak))
+      .mul(float(1.0).sub(smoothstep(0.1, 0.3, coveragePeak)));
+    const compactHighlight = smoothstep(0.05, 0.2, highlight.sub(coveragePeak))
+      .mul(float(1.0).sub(smoothstep(0.12, 0.34, coveragePeak)));
+    const preservedCore = smoothstep(uniformNodes.bloomParams.y.add(0.14), 1.25, highlight)
+      .mul(0.22);
+    const particulateSuppression = max(sparkleIsolated, compactHighlight);
     const bloomMask = smoothstep(uniformNodes.bloomParams.y, 1.0, highlight)
-      .mul(float(1.0).sub(sparkleIsolated.mul(0.85)));
+      .mul(clamp(highlightCoverage.add(preservedCore), 0.0, 1.0))
+      .mul(float(1.0).sub(particulateSuppression.mul(0.92)));
     const bloomLift = uniformNodes.bloomParams.x.mul(depthBlend.mul(0.22).add(0.18))
-      .mul(float(1.0).sub(sparkleIsolated.mul(0.65)));
+      .mul(mix(0.3, 1.0, highlightCoverage))
+      .mul(float(1.0).sub(particulateSuppression.mul(0.82)));
     color.addAssign(color.mul(bloomMask).mul(bloomLift));
 
     const scanline = sin(distortedUv.y.mul(uniformNodes.resolution.y).mul(1.5)).mul(0.03).add(0.97);
@@ -980,6 +997,7 @@ export class UnderwaterEffect {
     // Lerp convergence runs every frame regardless of cache state so bloom params
     // converge smoothly rather than freezing at stale values on cache hits.
     const shaderBloomScale = this._bloomPass && !this._bloomSuspended ? 0.3 : 1.0;
+    const flashlightBloomRadiusScale = flashlightOn ? 0.82 : 1.0;
     const bloomParams = this.underwaterPass.uniforms.bloomParams.value;
     bloomParams.x = THREE.MathUtils.lerp(bloomParams.x, this._bloomTargetStrength * shaderBloomScale, 0.09);
     bloomParams.y = THREE.MathUtils.lerp(bloomParams.y, this._bloomTargetThreshold, 0.09);
@@ -998,7 +1016,7 @@ export class UnderwaterEffect {
       );
       this._bloomPass.radius.value = THREE.MathUtils.lerp(
         this._bloomPass.radius.value,
-        this.tuning.bloom.radius,
+        this.tuning.bloom.radius * flashlightBloomRadiusScale,
         0.09
       );
     }
