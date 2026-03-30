@@ -8,7 +8,7 @@ const QUALITY_TIERS = {
   low: {
     shadowMapEnabled: false,
     shadowMapSize: 0,
-    particleCount: 100,
+    particleCount: 750,
     floraDensityScale: 0.3,
     maxCreatures: 25,
     maxPointLights: 3,
@@ -20,7 +20,7 @@ const QUALITY_TIERS = {
   medium: {
     shadowMapEnabled: true,
     shadowMapSize: 512,
-    particleCount: 250,
+    particleCount: 1500,
     floraDensityScale: 0.6,
     maxCreatures: 40,
     maxPointLights: 6,
@@ -32,7 +32,7 @@ const QUALITY_TIERS = {
   high: {
     shadowMapEnabled: true,
     shadowMapSize: 1024,
-    particleCount: 500,
+    particleCount: 2250,
     floraDensityScale: 1.0,
     maxCreatures: 60,
     maxPointLights: 10,
@@ -44,7 +44,7 @@ const QUALITY_TIERS = {
   ultra: {
     shadowMapEnabled: true,
     shadowMapSize: 4096,
-    particleCount: 2000,
+    particleCount: 3000,
     floraDensityScale: 1.5,
     maxCreatures: 120,
     maxPointLights: 20,

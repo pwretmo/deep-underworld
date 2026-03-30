@@ -43,7 +43,6 @@ const WATER_SURFACE_Z_WAVE_SPEED = 0.3;
 const WATER_SURFACE_Z_WAVE_AMPLITUDE = 0.3;
 const WATER_SURFACE_BOUNDS_PADDING =
   WATER_SURFACE_X_WAVE_AMPLITUDE + WATER_SURFACE_Z_WAVE_AMPLITUDE;
-const MARINE_SNOW_PARTICLE_COUNT = 3000;
 const MARINE_SNOW_VIEW_SCALE = 165.0;
 const MARINE_SNOW_MIN_SCREEN_SIZE = 0.35;
 const MARINE_SNOW_MAX_SCREEN_SIZE = 6.0;
@@ -243,6 +242,10 @@ export class Ocean {
     this.scene = scene;
     this.particles = [];
     this.time = 0;
+    this.particleCount = 0;
+    this._particleSpawnAnchor = new THREE.Vector3();
+    this._hasParticleSpawnAnchor = false;
+    this._particleTexture = null;
 
     // Ambient light — richer blue fill for underwater atmosphere
     this.ambientLight = new THREE.AmbientLight(0x2a4466, 0.22);
@@ -281,7 +284,7 @@ export class Ocean {
     // Floating particles (marine snow, plankton)
     this.particleBaseSize = 0.15;
     this.particleBaseOpacity = 0.35;
-    this._createParticles();
+    this._rebuildParticles(qualityManager.getSettings());
 
     // Caustics light cookies near surface
     this._createCausticLights();
@@ -312,7 +315,37 @@ export class Ocean {
         this.sunLight.shadow.map.dispose();
         this.sunLight.shadow.map = null;
       }
+      this._rebuildParticles(e.detail.settings);
     });
+  }
+
+  _getMarineSnowParticleCount(settings = qualityManager.getSettings()) {
+    return Math.max(1, Math.round(settings.particleCount ?? 1));
+  }
+
+  _disposeParticles() {
+    if (!this.particleSystem) return;
+
+    this.scene.remove(this.particleSystem);
+    this.particleSystem.geometry?.dispose();
+    this.particleSystem.material?.dispose();
+    this._particleTexture?.dispose();
+
+    this.particleSystem = null;
+    this.particleCompute = null;
+    this._computeUniforms = null;
+    this._particleTexture = null;
+    this.particleCount = 0;
+  }
+
+  _rebuildParticles(settings = qualityManager.getSettings()) {
+    const nextCount = this._getMarineSnowParticleCount(settings);
+    if (this.particleSystem && nextCount === this.particleCount) {
+      return;
+    }
+
+    this._disposeParticles();
+    this._createParticles(nextCount);
   }
 
   _createWaterSurface() {
@@ -358,19 +391,28 @@ export class Ocean {
     this.scene.add(this.waterSurface);
   }
 
-  _createParticles() {
-    const count = MARINE_SNOW_PARTICLE_COUNT;
+  _createParticles(count = this._getMarineSnowParticleCount()) {
+    this.particleCount = count;
     const geo = new THREE.Sprite().geometry.clone();
     const positions = new Float32Array(count * 3);
     const sizes = new Float32Array(count);
     const colors = new Float32Array(count * 3);
     const seeds = new Float32Array(count);
     const phases = new Float32Array(count);
+    const spawnAnchor = this._hasParticleSpawnAnchor
+      ? this._particleSpawnAnchor
+      : null;
 
     for (let i = 0; i < count; i++) {
-      positions[i * 3] = (Math.random() - 0.5) * 200;
-      positions[i * 3 + 1] = -Math.random() * 800;
-      positions[i * 3 + 2] = (Math.random() - 0.5) * 200;
+      if (spawnAnchor) {
+        positions[i * 3] = spawnAnchor.x + (Math.random() - 0.5) * 140;
+        positions[i * 3 + 1] = spawnAnchor.y - (Math.random() * 95 + 8);
+        positions[i * 3 + 2] = spawnAnchor.z + (Math.random() - 0.5) * 140;
+      } else {
+        positions[i * 3] = (Math.random() - 0.5) * 200;
+        positions[i * 3 + 1] = -Math.random() * 800;
+        positions[i * 3 + 2] = (Math.random() - 0.5) * 200;
+      }
       sizes[i] = 0.45 + Math.pow(Math.random(), 1.7) * 1.15;
       seeds[i] = Math.random() * 1000;
       phases[i] = Math.random() * Math.PI * 2;
@@ -532,6 +574,7 @@ export class Ocean {
     drawParticleLobe(pSize * 0.62, pSize * 0.46, pSize * 0.1, pSize * 0.07, 0.28, 0.3);
     drawParticleLobe(pSize * 0.34, pSize * 0.6, pSize * 0.08, pSize * 0.055, 0.18, -0.75);
     const snowTexture = new THREE.CanvasTexture(canvas);
+    this._particleTexture = snowTexture;
 
     // Material reads positions from the same storage buffer
     const posReadNode = storage(posStorageAttr, "vec3", count).toReadOnly();
@@ -609,6 +652,8 @@ export class Ocean {
     this.time += dt;
     const depthBlend = THREE.MathUtils.smoothstep(depth, 45, 320);
     const abyssBlend = THREE.MathUtils.smoothstep(depth, 380, 760);
+    this._particleSpawnAnchor.copy(playerPos);
+    this._hasParticleSpawnAnchor = true;
 
     this.waterSurface.material.uniforms.time.value = this.time;
 
