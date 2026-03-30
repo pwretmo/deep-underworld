@@ -311,13 +311,17 @@ function createUnderwaterPostColorNode(sourceNode, uniformNodes) {
     const coveragePeak = highlight.toVar();
     If(uniformNodes.reducedMode.lessThan(0.5), () => {
       const bloomProbe = max(vec2(1.0).div(uniformNodes.resolution), vec2(0.0006));
-      // Probe farther than a single pixel so true area lights keep bloom support while compact particulate does not.
-      const coverageProbe = bloomProbe.mul(
-        max(float(2.2), uniformNodes.bloomParams.z.mul(0.75).add(1.4))
-      );
-
       neighborPeak.assign(samplePeakCross(distortedUv, bloomProbe));
-      coveragePeak.assign(samplePeakCross(distortedUv, coverageProbe));
+      coveragePeak.assign(neighborPeak);
+
+      If(max(highlight, neighborPeak).greaterThan(uniformNodes.bloomParams.y.sub(0.06)), () => {
+        // Probe farther only for likely bloom candidates so the common path does not pay a second 4-tap cross sample.
+        const coverageProbe = bloomProbe.mul(
+          max(float(2.2), uniformNodes.bloomParams.z.mul(0.75).add(1.4))
+        );
+
+        coveragePeak.assign(samplePeakCross(distortedUv, coverageProbe));
+      });
     });
 
     const highlightCoverage = smoothstep(0.04, 0.18, coveragePeak);
