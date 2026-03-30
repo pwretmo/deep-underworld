@@ -234,6 +234,7 @@ export class Game {
       this.renderer,
       this.scene,
       this.camera,
+      this.ocean.sunLight,
     );
     this.preload = this._createPreloadCoordinator();
 

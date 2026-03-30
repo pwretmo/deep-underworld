@@ -1,5 +1,6 @@
 import * as THREE from "three/webgpu";
 import {
+  abs,
   clamp,
   compute,
   cos,
@@ -215,6 +216,11 @@ export class Ocean {
     this.sunLight.shadow.camera.right = 60;
     this.sunLight.shadow.camera.top = 60;
     this.sunLight.shadow.camera.bottom = -60;
+
+    // Depth-adaptive shadow bias: increase bias in deeper zones where shadow map precision degrades
+    const depthFactor = smoothstep(float(0), float(720), abs(positionWorld.y));
+    this.sunLight.shadow.biasNode = mix(float(-0.001), float(-0.005), depthFactor);
+
     scene.add(this.sunLight);
     scene.add(this.sunLight.target);
 
