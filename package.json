@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "generate:preload-lookup": "node scripts/generate-preload-lookup-artifact.mjs",
+    "prebuild": "npm run generate:preload-lookup",
     "build": "vite build",
     "preview": "vite preview"
   },
