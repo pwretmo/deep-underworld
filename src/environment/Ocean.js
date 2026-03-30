@@ -164,7 +164,7 @@ function createParticleMaterial(
   material.positionNode = driftedCenter;
   material.sizeAttenuation = true;
 
-  const viewDist = positionView.z.negate();
+  const viewDist = varying(positionView.z.negate());
   const screenScale = float(MARINE_SNOW_VIEW_SCALE).div(max(viewDist, 1.0));
   const nearFade = smoothstep(3.0, 11.0, viewDist);
   const farFade = float(1.0).sub(smoothstep(75.0, 150.0, viewDist).mul(0.2));
