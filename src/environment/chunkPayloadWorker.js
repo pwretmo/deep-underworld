@@ -1,4 +1,4 @@
-import { fbm2D, noise2D } from '../utils/noise.js';
+import { fbm2D, noise2D } from "../utils/noise.js";
 
 const TERRAIN_COLORS = {
   shallow: [0.6, 0.5, 0.3],
@@ -193,7 +193,7 @@ function createCoralBranches(baseX, baseY, baseZ, size, out) {
         py + branchSize * 3,
         pz + Math.sin(angle) * branchSize,
         branchSize * 0.65,
-        depth + 1
+        depth + 1,
       );
     }
   }
@@ -201,7 +201,7 @@ function createCoralBranches(baseX, baseY, baseZ, size, out) {
   grow(baseX, baseY, baseZ, size, 0);
 }
 
-function createFloraPayload({ cx, cz, chunkSize, floraDensityScale }) {
+export function createFloraPayload({ cx, cz, chunkSize, floraDensityScale }) {
   const offsetX = cx * chunkSize;
   const offsetZ = cz * chunkSize;
 
@@ -212,7 +212,9 @@ function createFloraPayload({ cx, cz, chunkSize, floraDensityScale }) {
   const tubes = [];
   const tubeTips = [];
 
-  const floraCount = Math.round((12 + Math.floor(Math.random() * 10)) * floraDensityScale);
+  const floraCount = Math.round(
+    (12 + Math.floor(Math.random() * 10)) * floraDensityScale,
+  );
   let lightsInChunk = 0;
 
   for (let i = 0; i < floraCount; i++) {
@@ -222,7 +224,8 @@ function createFloraPayload({ cx, cz, chunkSize, floraDensityScale }) {
     const worldZ = z + offsetZ;
 
     const terrainVal = noise2D(worldX * 0.003, worldZ * 0.003) * 40;
-    const baseDepth = -80 - Math.abs(noise2D(worldX * 0.001, worldZ * 0.001)) * 400;
+    const baseDepth =
+      -80 - Math.abs(noise2D(worldX * 0.001, worldZ * 0.001)) * 400;
     const groundY = baseDepth + terrainVal;
     const depth = -groundY;
 
@@ -309,53 +312,55 @@ function createFloraPayload({ cx, cz, chunkSize, floraDensityScale }) {
   };
 }
 
-self.onmessage = (event) => {
-  const data = event.data;
-  if (!data || typeof data !== 'object') return;
+if (typeof self !== "undefined") {
+  self.onmessage = (event) => {
+    const data = event.data;
+    if (!data || typeof data !== "object") return;
 
-  if (data.type === 'cancel') {
-    cancelledRequests.add(data.requestId);
-    return;
-  }
+    if (data.type === "cancel") {
+      cancelledRequests.add(data.requestId);
+      return;
+    }
 
-  const { requestId } = data;
-  if (cancelledRequests.has(requestId)) {
-    cancelledRequests.delete(requestId);
-    return;
-  }
-
-  if (data.type === 'generateTerrain') {
-    const payload = createTerrainPayload(data);
+    const { requestId } = data;
     if (cancelledRequests.has(requestId)) {
       cancelledRequests.delete(requestId);
       return;
     }
 
-    self.postMessage({
-      type: 'terrainPayload',
-      requestId,
-      key: data.key,
-      cx: data.cx,
-      cz: data.cz,
-      payload,
-    });
-    return;
-  }
+    if (data.type === "generateTerrain") {
+      const payload = createTerrainPayload(data);
+      if (cancelledRequests.has(requestId)) {
+        cancelledRequests.delete(requestId);
+        return;
+      }
 
-  if (data.type === 'generateFlora') {
-    const payload = createFloraPayload(data);
-    if (cancelledRequests.has(requestId)) {
-      cancelledRequests.delete(requestId);
+      self.postMessage({
+        type: "terrainPayload",
+        requestId,
+        key: data.key,
+        cx: data.cx,
+        cz: data.cz,
+        payload,
+      });
       return;
     }
 
-    self.postMessage({
-      type: 'floraPayload',
-      requestId,
-      key: data.key,
-      cx: data.cx,
-      cz: data.cz,
-      payload,
-    });
-  }
-};
+    if (data.type === "generateFlora") {
+      const payload = createFloraPayload(data);
+      if (cancelledRequests.has(requestId)) {
+        cancelledRequests.delete(requestId);
+        return;
+      }
+
+      self.postMessage({
+        type: "floraPayload",
+        requestId,
+        key: data.key,
+        cx: data.cx,
+        cz: data.cz,
+        payload,
+      });
+    }
+  };
+}

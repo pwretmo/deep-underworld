@@ -17,6 +17,7 @@ import {
   instanceIndex,
   max,
   mix,
+  positionLocal,
   positionView,
   positionWorld,
   pow,
@@ -32,6 +33,16 @@ import {
   vec3,
 } from "three/tsl";
 import { qualityManager } from "../QualityManager.js";
+import { expandGeometryBounds } from "../utils/geometryBounds.js";
+
+const WATER_SURFACE_X_WAVE_SCALE = 0.05;
+const WATER_SURFACE_X_WAVE_SPEED = 0.5;
+const WATER_SURFACE_X_WAVE_AMPLITUDE = 0.5;
+const WATER_SURFACE_Z_WAVE_SCALE = 0.03;
+const WATER_SURFACE_Z_WAVE_SPEED = 0.3;
+const WATER_SURFACE_Z_WAVE_AMPLITUDE = 0.3;
+const WATER_SURFACE_BOUNDS_PADDING =
+  WATER_SURFACE_X_WAVE_AMPLITUDE + WATER_SURFACE_Z_WAVE_AMPLITUDE;
 
 function cloneUniformValue(value) {
   return value?.clone ? value.clone() : value;
@@ -90,23 +101,45 @@ function fbm2D(point) {
   return octave0.add(octave1).add(octave2).add(octave3).add(octave4);
 }
 
-function createParticleMaterial(geometry, snowTexture, baseSize, baseOpacity, posStorageNode) {
+function createParticleMaterial(
+  geometry,
+  snowTexture,
+  baseSize,
+  baseOpacity,
+  posStorageNode,
+) {
   const uniforms = createUniformMap({
     time: 0,
     baseSize,
     baseOpacity,
   });
   const centerNode = posStorageNode.element(instanceIndex).toVec3();
-  const sizeNode = instancedBufferAttribute(geometry.getAttribute('particleSize'), 'float');
-  const colorNode = instancedBufferAttribute(geometry.getAttribute('particleColor'), 'vec3');
-  const seedNode = instancedBufferAttribute(geometry.getAttribute('particleSeed'), 'float');
-  const phaseNode = instancedBufferAttribute(geometry.getAttribute('particlePhase'), 'float');
+  const sizeNode = instancedBufferAttribute(
+    geometry.getAttribute("particleSize"),
+    "float",
+  );
+  const colorNode = instancedBufferAttribute(
+    geometry.getAttribute("particleColor"),
+    "vec3",
+  );
+  const seedNode = instancedBufferAttribute(
+    geometry.getAttribute("particleSeed"),
+    "float",
+  );
+  const phaseNode = instancedBufferAttribute(
+    geometry.getAttribute("particlePhase"),
+    "float",
+  );
   const material = new THREE.PointsNodeMaterial();
-  const driftedCenter = centerNode.add(vec3(
-    sin(uniforms.time.mul(0.1).add(seedNode).add(phaseNode)).mul(1.5),
-    sin(uniforms.time.mul(0.08).add(phaseNode)).mul(0.6),
-    cos(uniforms.time.mul(0.1).add(seedNode).add(phaseNode).mul(0.7)).mul(1.5)
-  ));
+  const driftedCenter = centerNode.add(
+    vec3(
+      sin(uniforms.time.mul(0.1).add(seedNode).add(phaseNode)).mul(1.5),
+      sin(uniforms.time.mul(0.08).add(phaseNode)).mul(0.6),
+      cos(uniforms.time.mul(0.1).add(seedNode).add(phaseNode).mul(0.7)).mul(
+        1.5,
+      ),
+    ),
+  );
   material.positionNode = driftedCenter;
   material.sizeAttenuation = true;
 
@@ -207,7 +240,7 @@ export class Ocean {
     const tier = qualityManager.tier;
     this.sunLight = new THREE.DirectionalLight(0x7099bb, 0.45);
     this.sunLight.position.set(50, 100, 30);
-    this.sunLight.castShadow = tier === 'high' || tier === 'ultra';
+    this.sunLight.castShadow = tier === "high" || tier === "ultra";
     const shadowSize = qualityManager.getSettings().shadowMapSize || 1024;
     this.sunLight.shadow.mapSize.set(shadowSize, shadowSize);
     this.sunLight.shadow.camera.near = 10;
@@ -219,7 +252,11 @@ export class Ocean {
 
     // Depth-adaptive shadow bias: increase bias in deeper zones where shadow map precision degrades
     const depthFactor = smoothstep(float(0), float(720), abs(positionWorld.y));
-    this.sunLight.shadow.biasNode = mix(float(-0.001), float(-0.005), depthFactor);
+    this.sunLight.shadow.biasNode = mix(
+      float(-0.001),
+      float(-0.005),
+      depthFactor,
+    );
 
     scene.add(this.sunLight);
     scene.add(this.sunLight.target);
@@ -255,7 +292,7 @@ export class Ocean {
     window.addEventListener("qualitychange", (e) => {
       const newTier = e.detail.tier;
       const size = e.detail.settings.shadowMapSize || 1024;
-      this.sunLight.castShadow = newTier === 'high' || newTier === 'ultra';
+      this.sunLight.castShadow = newTier === "high" || newTier === "ultra";
       this.sunLight.shadow.mapSize.set(size, size);
       if (this.sunLight.shadow.map) {
         this.sunLight.shadow.map.dispose();
@@ -276,13 +313,35 @@ export class Ocean {
       emissive: new THREE.Color(0x336688),
       emissiveIntensity: 0.15,
     });
+    const uniforms = createUniformMap({
+      time: 0,
+    });
+    const wave = sin(
+      positionLocal.x
+        .mul(WATER_SURFACE_X_WAVE_SCALE)
+        .add(uniforms.time.mul(WATER_SURFACE_X_WAVE_SPEED)),
+    )
+      .mul(WATER_SURFACE_X_WAVE_AMPLITUDE)
+      .add(
+        cos(
+          positionLocal.y
+            .mul(WATER_SURFACE_Z_WAVE_SCALE)
+            .add(uniforms.time.mul(WATER_SURFACE_Z_WAVE_SPEED)),
+        ).mul(WATER_SURFACE_Z_WAVE_AMPLITUDE),
+      );
+    mat.positionNode = vec3(
+      positionLocal.x,
+      positionLocal.y,
+      positionLocal.z.add(wave),
+    );
+    mat.needsUpdate = true;
+    attachUniforms(mat, uniforms);
+    expandGeometryBounds(geo, "z", WATER_SURFACE_BOUNDS_PADDING);
+
     this.waterSurface = new THREE.Mesh(geo, mat);
     this.waterSurface.rotation.x = -Math.PI / 2;
     this.waterSurface.position.y = 0;
     this.scene.add(this.waterSurface);
-
-    // Store original vertices for animation
-    this.waterVertices = geo.attributes.position.array.slice();
   }
 
   _createParticles() {
@@ -308,20 +367,38 @@ export class Ocean {
     }
 
     // Storage buffer for positions — updated by GPU compute shader
-    const posStorageAttr = new THREE.StorageInstancedBufferAttribute(positions, 3);
+    const posStorageAttr = new THREE.StorageInstancedBufferAttribute(
+      positions,
+      3,
+    );
     const seedStorageAttr = new THREE.StorageInstancedBufferAttribute(seeds, 1);
-    const phaseStorageAttr = new THREE.StorageInstancedBufferAttribute(phases, 1);
+    const phaseStorageAttr = new THREE.StorageInstancedBufferAttribute(
+      phases,
+      1,
+    );
 
-    geo.setAttribute('particleCenter', posStorageAttr);
-    geo.setAttribute('particleSize', new THREE.InstancedBufferAttribute(sizes, 1));
-    geo.setAttribute('particleColor', new THREE.InstancedBufferAttribute(colors, 3));
-    geo.setAttribute('particleSeed', new THREE.InstancedBufferAttribute(seeds.slice(), 1));
-    geo.setAttribute('particlePhase', new THREE.InstancedBufferAttribute(phases.slice(), 1));
+    geo.setAttribute("particleCenter", posStorageAttr);
+    geo.setAttribute(
+      "particleSize",
+      new THREE.InstancedBufferAttribute(sizes, 1),
+    );
+    geo.setAttribute(
+      "particleColor",
+      new THREE.InstancedBufferAttribute(colors, 3),
+    );
+    geo.setAttribute(
+      "particleSeed",
+      new THREE.InstancedBufferAttribute(seeds.slice(), 1),
+    );
+    geo.setAttribute(
+      "particlePhase",
+      new THREE.InstancedBufferAttribute(phases.slice(), 1),
+    );
 
     // TSL storage buffer nodes for the compute shader
-    const posBuffer = storage(posStorageAttr, 'vec3', count);
-    const seedBuffer = storage(seedStorageAttr, 'float', count).toReadOnly();
-    const phaseBuffer = storage(phaseStorageAttr, 'float', count).toReadOnly();
+    const posBuffer = storage(posStorageAttr, "vec3", count);
+    const seedBuffer = storage(seedStorageAttr, "float", count).toReadOnly();
+    const phaseBuffer = storage(phaseStorageAttr, "float", count).toReadOnly();
 
     // Compute shader uniforms
     this._computeUniforms = {
@@ -352,15 +429,33 @@ export class Ocean {
       If(distSq.greaterThan(10000.0).or(pos.y.greaterThan(0.0)), () => {
         // Deterministic hash-based pseudo-random using seed + time
         const t = this._computeUniforms.time;
-        const rx = fract(sin(seed.mul(12.9898).add(t.mul(0.1))).mul(43758.5453)).sub(0.5);
-        const ry = fract(sin(seed.mul(78.233).add(t.mul(0.07))).mul(43758.5453));
-        const rz = fract(sin(seed.mul(45.164).add(t.mul(0.13))).mul(43758.5453)).sub(0.5);
+        const rx = fract(
+          sin(seed.mul(12.9898).add(t.mul(0.1))).mul(43758.5453),
+        ).sub(0.5);
+        const ry = fract(
+          sin(seed.mul(78.233).add(t.mul(0.07))).mul(43758.5453),
+        );
+        const rz = fract(
+          sin(seed.mul(45.164).add(t.mul(0.13))).mul(43758.5453),
+        ).sub(0.5);
 
-        pos.x.assign(this._computeUniforms.playerPos.x.add(rx.mul(this._computeUniforms.respawnRadius)));
-        pos.y.assign(this._computeUniforms.playerPos.y.sub(
-          ry.mul(this._computeUniforms.respawnVertical).add(this._computeUniforms.respawnOffset)
-        ));
-        pos.z.assign(this._computeUniforms.playerPos.z.add(rz.mul(this._computeUniforms.respawnRadius)));
+        pos.x.assign(
+          this._computeUniforms.playerPos.x.add(
+            rx.mul(this._computeUniforms.respawnRadius),
+          ),
+        );
+        pos.y.assign(
+          this._computeUniforms.playerPos.y.sub(
+            ry
+              .mul(this._computeUniforms.respawnVertical)
+              .add(this._computeUniforms.respawnOffset),
+          ),
+        );
+        pos.z.assign(
+          this._computeUniforms.playerPos.z.add(
+            rz.mul(this._computeUniforms.respawnRadius),
+          ),
+        );
       });
     });
 
@@ -388,8 +483,14 @@ export class Ocean {
     const snowTexture = new THREE.CanvasTexture(canvas);
 
     // Material reads positions from the same storage buffer
-    const posReadNode = storage(posStorageAttr, 'vec3', count).toReadOnly();
-    const mat = createParticleMaterial(geo, snowTexture, this.particleBaseSize, this.particleBaseOpacity, posReadNode);
+    const posReadNode = storage(posStorageAttr, "vec3", count).toReadOnly();
+    const mat = createParticleMaterial(
+      geo,
+      snowTexture,
+      this.particleBaseSize,
+      this.particleBaseOpacity,
+      posReadNode,
+    );
 
     // WebGPU honors textured particle sizing for PointsNodeMaterial on instanced Sprites.
     this.particleSystem = new THREE.Sprite(mat);
@@ -458,18 +559,7 @@ export class Ocean {
     const depthBlend = THREE.MathUtils.smoothstep(depth, 45, 320);
     const abyssBlend = THREE.MathUtils.smoothstep(depth, 380, 760);
 
-    // Animate water surface
-    const posAttr = this.waterSurface.geometry.attributes.position;
-    for (let i = 0; i < posAttr.count; i++) {
-      const baseY = this.waterVertices[i * 3 + 2]; // z in original is y after rotation
-      const x = this.waterVertices[i * 3];
-      const z = this.waterVertices[i * 3 + 1];
-      posAttr.array[i * 3 + 2] =
-        baseY +
-        Math.sin(x * 0.05 + this.time * 0.5) * 0.5 +
-        Math.cos(z * 0.03 + this.time * 0.3) * 0.3;
-    }
-    posAttr.needsUpdate = true;
+    this.waterSurface.material.uniforms.time.value = this.time;
 
     // Dynamic surface emissive: shimmer strongest in shallow water
     const emissivePulse =
@@ -487,9 +577,21 @@ export class Ocean {
     this._computeUniforms.dt.value = dt;
     this._computeUniforms.time.value = this.time;
     this._computeUniforms.playerPos.value.copy(playerPos);
-    this._computeUniforms.respawnRadius.value = THREE.MathUtils.lerp(140, 85, depthBlend);
-    this._computeUniforms.respawnVertical.value = THREE.MathUtils.lerp(95, 180, depthBlend);
-    this._computeUniforms.respawnOffset.value = THREE.MathUtils.lerp(8, 30, abyssBlend);
+    this._computeUniforms.respawnRadius.value = THREE.MathUtils.lerp(
+      140,
+      85,
+      depthBlend,
+    );
+    this._computeUniforms.respawnVertical.value = THREE.MathUtils.lerp(
+      95,
+      180,
+      depthBlend,
+    );
+    this._computeUniforms.respawnOffset.value = THREE.MathUtils.lerp(
+      8,
+      30,
+      abyssBlend,
+    );
     renderer.computeAsync(this.particleCompute);
 
     // Denser, slightly larger snow in mid/deep water, then tighten in abyss for readability.
