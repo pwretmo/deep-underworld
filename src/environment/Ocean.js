@@ -42,9 +42,9 @@ const WATER_SURFACE_X_WAVE_AMPLITUDE = 0.5;
 const WATER_SURFACE_Z_WAVE_SCALE = 0.03;
 const WATER_SURFACE_Z_WAVE_SPEED = 0.3;
 const WATER_SURFACE_Z_WAVE_AMPLITUDE = 0.3;
-const WATER_SURFACE_WAVE_FALLOFF_START = 28;
-const WATER_SURFACE_WAVE_FALLOFF_END = 160;
-const WATER_SURFACE_HORIZON_WAVE_FACTOR = 0.04;
+const WATER_SURFACE_WAVE_FALLOFF_START = 10;
+const WATER_SURFACE_WAVE_FALLOFF_END = 32;
+const WATER_SURFACE_HORIZON_WAVE_FACTOR = 0.0;
 const WATER_SURFACE_BOUNDS_PADDING =
   WATER_SURFACE_X_WAVE_AMPLITUDE + WATER_SURFACE_Z_WAVE_AMPLITUDE;
 const MARINE_SNOW_VIEW_SCALE = 165.0;
@@ -374,12 +374,15 @@ export class Ocean {
   _createWaterSurface() {
     const geo = new THREE.PlaneGeometry(2000, 2000, 100, 100);
     const mat = new THREE.MeshStandardMaterial({
-      color: 0x4488bb,
+      // Keep the underwater ceiling largely diffuse. Highly reflective back-face
+      // shading produces yaw-linked dark wedges near the top of frame.
+      color: 0x2d6388,
       transparent: true,
-      opacity: 0.3,
+      opacity: 0.26,
       side: THREE.DoubleSide,
-      metalness: 0.9,
-      roughness: 0.1,
+      metalness: 0.0,
+      roughness: 1.0,
+      envMapIntensity: 0.0,
       emissive: new THREE.Color(0x336688),
       emissiveIntensity: 0.15,
     });
