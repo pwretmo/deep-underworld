@@ -77,6 +77,8 @@ const PROFILE_EMA_ALPHA = 0.2;
 const SLOW_FINALIZATION_STAGE_MS = 2.5;
 const SLOW_FINALIZATION_TOTAL_MS = 6;
 const PROFILE_HISTORY_LIMIT = 24;
+const TERRAIN_CHUNK_PROFILE_QUERY_KEY = 'terrainChunkProfile';
+const SLOW_FINALIZATION_LOG_INTERVAL_MS = 5000;
 
 function updateEma(current, next) {
   return current === 0 ? next : current + (next - current) * PROFILE_EMA_ALPHA;
@@ -85,6 +87,16 @@ function updateEma(current, next) {
 function trimHistory(history, maxEntries) {
   if (history.length > maxEntries) {
     history.splice(0, history.length - maxEntries);
+  }
+}
+
+function isChunkApplyDiagnosticsEnabled() {
+  if (typeof window === 'undefined') return false;
+
+  try {
+    return new URLSearchParams(window.location.search).has(TERRAIN_CHUNK_PROFILE_QUERY_KEY);
+  } catch {
+    return false;
   }
 }
 
@@ -129,6 +141,8 @@ export class Terrain {
     this._inFlightByKey = new Map();
     this._maxInFlight = 2;
     this._chunkApplyProfile = createChunkApplyProfile();
+    this._chunkApplyLoggingEnabled = isChunkApplyDiagnosticsEnabled();
+    this._lastChunkApplyLogMs = Number.NEGATIVE_INFINITY;
     this._chunkWorker = new Worker(new URL('./chunkPayloadWorker.js', import.meta.url), { type: 'module' });
     this._chunkWorker.onmessage = (event) => {
       const data = event.data;
@@ -333,7 +347,7 @@ export class Terrain {
       inst.castShadow = true;
       inst.receiveShadow = true;
 
-      inst.instanceMatrix.array.set(batch.matrices);
+      inst.instanceMatrix = new THREE.InstancedBufferAttribute(batch.matrices, 16);
       inst.instanceMatrix.needsUpdate = true;
 
       if (batch.colors && batch.colors.length > 0) {
@@ -447,12 +461,20 @@ export class Terrain {
       profile.slowSamples.push(sample);
       trimHistory(profile.slowSamples, PROFILE_HISTORY_LIMIT);
 
-      const breakdown = CHUNK_FINALIZATION_STAGES
-        .map((stageName) => `${stageName}=${stages[stageName].toFixed(2)}ms`)
-        .join(', ');
-      console.warn(
-        `[Terrain] Slow chunk finalization ${job.key}: total=${totalMs.toFixed(2)}ms (${breakdown})`,
-      );
+      const now = performance.now();
+      if (
+        this._chunkApplyLoggingEnabled &&
+        now - this._lastChunkApplyLogMs >= SLOW_FINALIZATION_LOG_INTERVAL_MS
+      ) {
+        this._lastChunkApplyLogMs = now;
+
+        const breakdown = CHUNK_FINALIZATION_STAGES
+          .map((stageName) => `${stageName}=${stages[stageName].toFixed(2)}ms`)
+          .join(', ');
+        console.warn(
+          `[Terrain] Slow chunk finalization ${job.key}: total=${totalMs.toFixed(2)}ms (${breakdown})`,
+        );
+      }
     }
   }
 
@@ -529,9 +551,11 @@ export class Terrain {
     return true;
   }
 
-  _drainFinalizationStages(maxStages, maxCostMs, cancelToken) {
+  _drainFinalizationStages(maxStages, maxCostMs, cancelToken, options = undefined) {
     if (maxStages <= 0 || maxCostMs <= 0) return 0;
 
+    const progressedKeys = options?.progressedKeys;
+    const maxChunks = options?.maxChunks ?? Infinity;
     let completedStages = 0;
     const sliceStart = performance.now();
 
@@ -540,11 +564,16 @@ export class Terrain {
       if (performance.now() - sliceStart >= maxCostMs) break;
 
       if (!this._activeFinalization) {
+        if (progressedKeys && progressedKeys.size >= maxChunks) break;
         this._activeFinalization = this._takeNextFinalization();
         if (!this._activeFinalization) break;
       }
 
       const job = this._activeFinalization;
+      if (progressedKeys && progressedKeys.size >= maxChunks && !progressedKeys.has(job.key)) {
+        break;
+      }
+
       if (!this._neededChunkKeys.has(job.key) || this.chunks.has(job.key)) {
         this._disposePendingFinalization(job);
         this._activeFinalization = null;
@@ -558,6 +587,7 @@ export class Terrain {
       }
 
       completedStages += 1;
+      progressedKeys?.add(job.key);
       if (job.stageIndex >= CHUNK_FINALIZATION_STAGES.length) {
         this._recordChunkApplySample(job);
         this._pendingFinalizationKeys.delete(job.key);
@@ -666,29 +696,26 @@ export class Terrain {
 
   preloadDrain(maxCount, cancelToken) {
     if (maxCount <= 0) return 0;
-    let progress = 0;
-    const batchStart = performance.now();
+    const progressedKeys = new Set();
+    this._drainFinalizationStages(
+      maxCount * CHUNK_FINALIZATION_STAGES.length,
+      PRELOAD_FINALIZATION_BUDGET_MS,
+      cancelToken,
+      {
+        progressedKeys,
+        maxChunks: maxCount,
+      },
+    );
+
+    let progress = progressedKeys.size;
     while (progress < maxCount) {
       if (cancelToken?.cancelled) break;
 
-      const elapsed = performance.now() - batchStart;
-      const remainingBudget = Math.max(0, PRELOAD_FINALIZATION_BUDGET_MS - elapsed);
-      if (remainingBudget <= 0) break;
-
-      const finalizedStages = this._drainFinalizationStages(1, remainingBudget, cancelToken);
-      if (finalizedStages > 0) {
-        progress += finalizedStages;
-        continue;
-      }
-
       const requested = this._requestPendingChunks(1, cancelToken);
-      if (requested > 0) {
-        progress += requested;
-        continue;
-      }
-
-      break;
+      if (requested <= 0) break;
+      progress += requested;
     }
+
     return progress;
   }
 
