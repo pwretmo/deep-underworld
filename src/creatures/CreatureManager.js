@@ -59,8 +59,9 @@ const CREATURE_VISIBILITY_DEPTH_BUDGETS = [
 ];
 
 export class CreatureManager {
-  constructor(scene) {
+  constructor(scene, options = {}) {
     this.scene = scene;
+    this._pointLightBudget = options.pointLightBudget ?? null;
     this.creatures = [];
     this.spawnTimer = 0;
     this.lastDepth = 0;
@@ -147,7 +148,16 @@ export class CreatureManager {
     );
   }
 
+  _registerCreatureLights(instance) {
+    this._pointLightBudget?.registerObjectLights(instance?.group ?? instance);
+  }
+
+  _unregisterCreatureLights(instance) {
+    this._pointLightBudget?.unregisterObjectLights(instance?.group ?? instance);
+  }
+
   _add(type, instance, depthMin, depthMax) {
+    this._registerCreatureLights(instance);
     this.creatures.push({ type, instance, depthMin, depthMax });
   }
 
@@ -473,6 +483,7 @@ export class CreatureManager {
       const c = this.creatures[i];
       const pos = c.instance.getPosition ? c.instance.getPosition() : null;
       if (pos && pos.distanceTo(playerPos) > DESPAWN_DISTANCE) {
+        this._unregisterCreatureLights(c.instance);
         c.instance.dispose();
         this.creatures.splice(i, 1);
       }
@@ -684,6 +695,7 @@ export class CreatureManager {
 
   reset() {
     for (const creature of this.creatures) {
+      this._unregisterCreatureLights(creature.instance);
       creature.instance.dispose();
     }
     this.creatures = [];

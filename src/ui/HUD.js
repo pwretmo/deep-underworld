@@ -314,6 +314,7 @@ export class HUD {
       this._diagRow('Bloom mode', `${bloomMode} | ${bloomStatus}`, bloomClass),
       this._diagRow('Light budget', `${this._fmtNumber(snapshot.pointLights?.activeCount, 0)} active / ${this._fmtNumber(snapshot.pointLights?.maxLights, 0)} budget | ${this._fmtNumber(snapshot.pointLights?.managedCount, 0)} managed`),
       this._diagRow('Light cats', `active ${this._formatCategorySummary(snapshot.pointLights?.activeCategories)} | managed ${this._formatCategorySummary(snapshot.pointLights?.managedCategories)}`),
+      this._diagRow('Light work', `${snapshot.pointLights?.registrationMode ?? 'scan'} | reg ${this._fmtFixed(snapshot.pointLights?.registrationEmaMs, 3)}ms | unreg ${this._fmtFixed(snapshot.pointLights?.unregistrationEmaMs, 3)}ms | retarget ${this._fmtFixed(snapshot.pointLights?.retargetEmaMs, 3)}ms | top ${this._fmtNumber(snapshot.pointLights?.selectedCount, 0)}/${this._fmtNumber(snapshot.pointLights?.candidateCount, 0)}`),
       this._diagRow('Modifiers', this._formatModifierSummary(snapshot.lighting?.modifiers)),
       this._diagRow('Creatures', `${this._fmtNumber(snapshot.creaturesActive, 0)} active | ${this._fmtNumber(snapshot.queuedSpawns, 0)} queued`),
       this._diagRow('Quality', `${snapshot.qualityTier ?? 'unknown'} | ${snapshot.graphics?.context ?? 'webgl'}`),

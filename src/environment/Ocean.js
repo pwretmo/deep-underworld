@@ -242,8 +242,9 @@ function createGodRayMaterial(seedValue) {
 }
 
 export class Ocean {
-  constructor(scene) {
+  constructor(scene, options = {}) {
     this.scene = scene;
+    this._pointLightBudget = options.pointLightBudget ?? null;
     this.particles = [];
     this.time = 0;
     this.particleCount = 0;
@@ -648,6 +649,7 @@ export class Ocean {
         (Math.random() - 0.5) * 50,
       );
       this.scene.add(light);
+      this._pointLightBudget?.registerLight(light);
       this.causticLights.push({
         light,
         offset: Math.random() * Math.PI * 2,
@@ -760,14 +762,18 @@ export class Ocean {
       deepSize * abyssSizeClamp;
 
     // Animate caustic lights (only near surface)
+    // Route intensity through the budget system's duwTargetIntensity so the
+    // per-frame lerp and retarget scoring stay in sync with the caustic fade.
     for (const c of this.causticLights) {
       const causticFade = 1.0 - THREE.MathUtils.smoothstep(depth, 40, 100);
-      c.light.intensity =
+      const desired =
         causticFade > 0
           ? c.baseIntensity *
             (1 + Math.sin(this.time * c.speed + c.offset) * 0.6) *
             causticFade
           : 0;
+      c.light.userData.duwBaseIntensity = desired;
+      c.light.userData.duwTargetIntensity = desired;
       // Follow player horizontally
       c.light.position.x =
         playerPos.x + Math.sin(c.offset + this.time * 0.2) * 20;

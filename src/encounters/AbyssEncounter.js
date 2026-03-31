@@ -25,12 +25,14 @@ const RETREAT_DURATION = 6.0;
  * modifier to the LightingPolicy which blends it on top of the depth-zone base.
  */
 export class AbyssEncounter {
-  constructor() {
+  constructor(options = {}) {
     this.state = State.IDLE;
     this.stateTime = 0;
     this.completed = false;
     this.entity = null;
     this.entityLights = [];
+    this._pointLightBudget = options.pointLightBudget ?? null;
+    this._pulseTargets = [];
 
     // Saved base-profile values captured at trigger time
     this._savedFogNear = 0;
@@ -63,6 +65,7 @@ export class AbyssEncounter {
     this._entityStartPos.set(0, 0, 0);
     this._entityEndPos.set(0, 0, 0);
     this._entityDriftDir.set(0, 0, 0);
+    this._pulseTargets = [];
   }
 
   update(delta, depth, player, scene, lightingPolicy, hud, audio) {
@@ -198,9 +201,12 @@ export class AbyssEncounter {
       }
     });
 
-    // Dim entity lights
+    // Dim entity lights — route through the budget system to avoid
+    // intensity-fighting with the managed-light lerp.
     for (const light of this.entityLights) {
-      light.intensity = light.userData.baseIntensity * (1 - ease);
+      const dimmed = light.userData.baseIntensity * (1 - ease);
+      light.userData.duwBaseIntensity = dimmed;
+      light.userData.duwTargetIntensity = dimmed;
     }
 
     // Blend modifier back toward current depth-zone base values
@@ -251,9 +257,21 @@ export class AbyssEncounter {
     this.entity.lookAt(this._entityEndPos);
 
     scene.add(this.entity);
+    for (const light of this.entityLights) {
+      this._pointLightBudget?.registerLight(light);
+    }
   }
 
   _buildAbyssEntity() {
+    const trackPulseMaterial = (material, pulseStrength = 1) => {
+      this._pulseTargets.push({
+        material,
+        baseIntensity: material.emissiveIntensity ?? 0,
+        pulseStrength,
+      });
+      return material;
+    };
+
     // Dark biomechanical material for main body
     const bodyMat = new THREE.MeshPhysicalMaterial({
       color: 0x040408,
@@ -275,13 +293,12 @@ export class AbyssEncounter {
       transparent: true,
       opacity: 1,
     });
-    this._veinMat = veinMat;
 
     // Eye material — deep red/orange glow
     const eyeMat = new THREE.MeshPhysicalMaterial({
       color: 0xff2200,
       emissive: 0xff3300,
-      emissiveIntensity: 4,
+      emissiveIntensity: 4.5,
       roughness: 0.0,
       clearcoat: 1.0,
       transparent: true,
@@ -329,6 +346,7 @@ export class AbyssEncounter {
       }
       veinGeo.computeVertexNormals();
       const vein = new THREE.Mesh(veinGeo, veinMat.clone());
+      trackPulseMaterial(vein.material, 1.0);
       const angle = (i / 12) * Math.PI * 2;
       const radius = 18 + Math.random() * 6;
       vein.position.set(
@@ -345,16 +363,18 @@ export class AbyssEncounter {
       for (let i = 0; i < 5; i++) {
         const eyeGeo = new THREE.SphereGeometry(1.5 + Math.random() * 1, 16, 16);
         eyeGeo.scale(1.3, 0.6, 1);
-        const eye = new THREE.Mesh(eyeGeo, eyeMat.clone());
+        const eyeMaterial = eyeMat.clone();
+        trackPulseMaterial(eyeMaterial, 0.35);
+        const eye = new THREE.Mesh(eyeGeo, eyeMaterial);
         const xPos = -60 + i * 30 + (Math.random() - 0.5) * 10;
         eye.position.set(xPos, 10 + Math.random() * 5, side * (22 + Math.random() * 4));
         this.entity.add(eye);
 
-        // Eye glow light
-        if (i % 2 === 0) {
-          const eyeLight = new THREE.PointLight(0xff3300, 3, 40);
+        // Keep a sparse set of hero eye lights and let the rest read via emissive glow.
+        if (i === 1 || i === 3) {
+          const eyeLight = new THREE.PointLight(0xff3300, 3.4, 46);
           eyeLight.position.copy(eye.position);
-          eyeLight.userData.baseIntensity = 3;
+          eyeLight.userData.baseIntensity = 3.4;
           eyeLight.userData.duwCategory = 'encounter_hero';
           this.entity.add(eyeLight);
           this.entityLights.push(eyeLight);
@@ -362,19 +382,39 @@ export class AbyssEncounter {
       }
     }
 
-    // --- Bioluminescent point lights along body ---
+    // --- Bioluminescent body glows with only a couple of shared hero lights ---
     const bioColors = [0x0044ff, 0x0066cc, 0x2244ff, 0x0088ff];
     for (let i = 0; i < 4; i++) {
-      const bioLight = new THREE.PointLight(bioColors[i], 5, 80);
-      bioLight.position.set(
+      const glowPosition = new THREE.Vector3(
         -80 + i * 50,
         -5 + Math.random() * 10,
         (Math.random() - 0.5) * 30
       );
-      bioLight.userData.baseIntensity = 5;
-      bioLight.userData.duwCategory = 'encounter_hero';
-      this.entity.add(bioLight);
-      this.entityLights.push(bioLight);
+      const glowGeo = new THREE.SphereGeometry(4.5, 14, 10);
+      glowGeo.scale(1.6, 0.7, 1.0);
+      const glowMat = new THREE.MeshPhysicalMaterial({
+        color: 0x081428,
+        emissive: bioColors[i],
+        emissiveIntensity: 2.8,
+        transparent: true,
+        opacity: 0.78,
+        roughness: 0.08,
+        metalness: 0.12,
+      });
+      trackPulseMaterial(glowMat, 1.0);
+      const glowMesh = new THREE.Mesh(glowGeo, glowMat);
+      glowMesh.position.copy(glowPosition);
+      this.entity.add(glowMesh);
+
+      if (i === 1 || i === 2) {
+        const bioLight = new THREE.PointLight(bioColors[i], 5.6, 88);
+        bioLight.position.copy(glowPosition);
+        bioLight.userData.baseIntensity = 5.6;
+        bioLight.userData.duwCategory = 'encounter_hero';
+        bioLight.userData.duwPulseGroup = 'bio';
+        this.entity.add(bioLight);
+        this.entityLights.push(bioLight);
+      }
     }
 
     // --- Trailing tendrils/appendages ---
@@ -420,6 +460,10 @@ export class AbyssEncounter {
   _despawnEntity(scene) {
     if (!this.entity) return;
 
+    for (const light of this.entityLights) {
+      this._pointLightBudget?.unregisterLight(light);
+    }
+
     // Dispose geometry and materials
     this.entity.traverse((child) => {
       if (child.isMesh) {
@@ -434,7 +478,7 @@ export class AbyssEncounter {
     scene.remove(this.entity);
     this.entity = null;
     this.entityLights = [];
-    this._veinMat = null;
+    this._pulseTargets = [];
   }
 
   // --- Animation ---
@@ -460,24 +504,24 @@ export class AbyssEncounter {
   }
 
   _pulseBioluminescence(intensity) {
-    if (!this._veinMat) return;
-    const pulse = 1.5 + Math.sin(performance.now() * 0.002) * 1.0;
-    // Update all vein meshes' emissive intensity
-    this.entity.traverse((child) => {
-      if (child.isMesh && child.material && child.material.emissive) {
-        if (child.material.emissive.r < 0.1 && child.material.emissive.b > 0.1) {
-          // Blue-ish emissive = bioluminescent vein
-          child.material.emissiveIntensity = pulse * intensity;
-        }
-      }
-    });
+    const now = performance.now();
+    const pulse = 1.5 + Math.sin(now * 0.002) * 1.0;
+    for (const target of this._pulseTargets) {
+      const pulseScale = THREE.MathUtils.lerp(1, pulse, target.pulseStrength);
+      target.material.emissiveIntensity =
+        target.baseIntensity * pulseScale * intensity;
+    }
 
-    // Pulse bioluminescent point lights
+    // Pulse bioluminescent point lights — drive duwTargetIntensity so the
+    // budget manager's per-frame lerp stays in sync with the pulse.
     for (const light of this.entityLights) {
-      if (light.color.b > light.color.r) {
-        // Blue lights = bio lights
-        light.intensity = light.userData.baseIntensity * (0.5 + Math.sin(performance.now() * 0.003) * 0.5) * intensity;
-      }
+      if (light.userData.duwPulseGroup !== 'bio') continue;
+      const pulsed =
+        light.userData.baseIntensity *
+        (0.5 + Math.sin(now * 0.003) * 0.5) *
+        intensity;
+      light.userData.duwBaseIntensity = pulsed;
+      light.userData.duwTargetIntensity = pulsed;
     }
   }
 
