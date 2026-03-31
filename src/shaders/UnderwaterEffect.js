@@ -52,14 +52,14 @@ function cloneUniforms(uniforms) {
 const RENDER_PIPELINE_TUNING = deepFreeze({
   depthThresholds: DEPTH_THRESHOLDS,
   extinction: {
-    r: 0.22,
+    r: 0.12,
     g: 0.045,
     b: 0.014,
   },
   scatter: {
-    r: 0.012,
-    g: 0.048,
-    b: 0.075,
+    r: 0.04,
+    g: 0.12,
+    b: 0.18,
     density: 0.003,
   },
   grading: {
@@ -230,7 +230,7 @@ function createUnderwaterPostColorNode(sourceNode, uniformNodes) {
     const vignetteStrength = min(depthBlend.mul(uniformNodes.grading.y).add(0.12), 0.65);
     const vignetteDistance = dot(distortedUv.sub(0.5), distortedUv.sub(0.5));
     const vignetteMask = float(1.0).sub(smoothstep(0.12, 0.42, vignetteDistance).mul(vignetteStrength));
-    color.assign(color.mul(max(vignetteMask, 0.2)));
+    color.assign(color.mul(max(vignetteMask, 0.35)));
 
     const transmittance = exp(uniformNodes.extinction.mul(uniformNodes.depth).mul(-1.0));
     const scatterMix = float(1.0).sub(exp(uniformNodes.scatterDensity.mul(uniformNodes.depth).mul(-1.0)));

@@ -253,7 +253,7 @@ export class Ocean {
     this._particleRenderer = null;
 
     // Ambient light — richer blue fill for underwater atmosphere
-    this.ambientLight = new THREE.AmbientLight(0x2a4466, 0.22);
+    this.ambientLight = new THREE.AmbientLight(0x2a4466, 0.28);
     scene.add(this.ambientLight);
 
     // Sun light from above (only visible near surface).
