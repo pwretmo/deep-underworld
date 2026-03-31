@@ -66,7 +66,8 @@ function fbm3D(inputPosition) {
 const CHUNK_FINALIZATION_STAGES = [
   'geometry',
   'rocks',
-  'terrainCollider',
+  'terrainColliderPrepare',
+  'terrainColliderBuild',
   'rockColliders',
   'attach',
 ];
@@ -143,6 +144,7 @@ export class Terrain {
     this._chunkApplyProfile = createChunkApplyProfile();
     this._chunkApplyLoggingEnabled = isChunkApplyDiagnosticsEnabled();
     this._lastChunkApplyLogMs = Number.NEGATIVE_INFINITY;
+    this._lastPlayerPos = null;
     this._chunkWorker = new Worker(new URL('./chunkPayloadWorker.js', import.meta.url), { type: 'module' });
     this._chunkWorker.onmessage = (event) => {
       const data = event.data;
@@ -531,10 +533,33 @@ export class Terrain {
       job.mesh = mesh;
     } else if (stageName === 'rocks') {
       this._addRockVisualsFromPayload(job.mesh, job.payload);
-    } else if (stageName === 'terrainCollider') {
-      if (this._physicsWorld) {
-        this._createChunkCollider(job.mesh, job.payload.colliderVertices, job.payload.indices);
+    } else if (stageName === 'terrainColliderPrepare') {
+      // Cache collider data references so terrainColliderBuild can run in a later frame
+      if (this._physicsWorld && job.payload.colliderVertices && job.payload.indices) {
+        job._colliderVertices = job.payload.colliderVertices;
+        job._colliderIndices = job.payload.indices;
       }
+    } else if (stageName === 'terrainColliderBuild') {
+      if (this._physicsWorld && job._colliderVertices && job._colliderIndices) {
+        // Skip detailed collider for chunks beyond 2x view distance
+        let skip = false;
+        if (this._lastPlayerPos && job.mesh) {
+          const chunkPos = job.mesh.position;
+          const dx = chunkPos.x - this._lastPlayerPos.x;
+          const dz = chunkPos.z - this._lastPlayerPos.z;
+          const distSq = dx * dx + dz * dz;
+          const viewDist = this.chunkSize * (this.viewDistance || 3);
+          if (distSq > viewDist * viewDist * 4) {
+            skip = true;
+          }
+        }
+        if (!skip) {
+          this._createChunkCollider(job.mesh, job._colliderVertices, job._colliderIndices);
+        }
+      }
+      // Clean up cached data
+      job._colliderVertices = null;
+      job._colliderIndices = null;
     } else if (stageName === 'rockColliders') {
       if (this._physicsWorld) {
         this._createRockCollidersFromPayload(job.mesh, job.payload);
@@ -578,6 +603,12 @@ export class Terrain {
         this._disposePendingFinalization(job);
         this._activeFinalization = null;
         continue;
+      }
+
+      // Defer expensive collider build if budget is already half consumed
+      const nextStage = CHUNK_FINALIZATION_STAGES[job.stageIndex];
+      if (nextStage === 'terrainColliderBuild' && (performance.now() - sliceStart) > maxCostMs * 0.5) {
+        break;
       }
 
       if (!this._runFinalizationStage(job)) {
@@ -728,6 +759,7 @@ export class Terrain {
   }
 
   update(playerPos, allowChunkWork = true) {
+    this._lastPlayerPos = playerPos;
     const cx = Math.round(playerPos.x / this.chunkSize);
     const cz = Math.round(playerPos.z / this.chunkSize);
 
