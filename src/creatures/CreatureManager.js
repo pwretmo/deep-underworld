@@ -497,13 +497,15 @@ export class CreatureManager {
     // prevents compounding expensive initialization operations.
     const frameIsHeavy = dt >= HEAVY_FRAME_DT;
     const cappedSpawnBudget = Math.min(MAX_SPAWN_BUDGET_MS, Math.max(0, spawnBudgetMs));
-    if (this._spawnQueue.length > 0 && cappedSpawnBudget > 1 && !frameIsHeavy && this._spawnCooldown <= 0) {
-      const drained = this.preloadDrain(QUEUE_DRAIN_PER_FRAME, undefined, depth, cappedSpawnBudget);
+    const allowLightweightSpawn = frameIsHeavy && this._spawnCostEmaMs < 8 && this._spawnCostEmaMs > 0;
+    if (this._spawnQueue.length > 0 && cappedSpawnBudget > 1 && (!frameIsHeavy || allowLightweightSpawn) && this._spawnCooldown <= 0) {
+      const drainCount = cappedSpawnBudget > 6 ? 2 : QUEUE_DRAIN_PER_FRAME;
+      const drained = this.preloadDrain(drainCount, undefined, depth, cappedSpawnBudget);
       if (drained > 0) {
         // Back off after heavy constructors so expensive spawns don't chain
         // into repeated long-frame stalls.
         if (this._lastSpawnCostMs > cappedSpawnBudget || this._spawnCostEmaMs > cappedSpawnBudget * 1.5) {
-          const cooldown = Math.min(2.5, Math.max(0.2, this._lastSpawnCostMs / 220));
+          const cooldown = Math.min(1.0, Math.max(0.2, this._lastSpawnCostMs / 220));
           this._spawnCooldown = Math.max(this._spawnCooldown, cooldown);
         }
       }
