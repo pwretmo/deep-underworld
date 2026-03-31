@@ -51,7 +51,7 @@ const WATER_SURFACE_BOUNDS_PADDING =
   WATER_SURFACE_X_WAVE_AMPLITUDE + WATER_SURFACE_Z_WAVE_AMPLITUDE;
 const MARINE_SNOW_VIEW_SCALE = 165.0;
 const MARINE_SNOW_MIN_SCREEN_SIZE = 0.35;
-const MARINE_SNOW_MAX_SCREEN_SIZE = 6.0;
+const MARINE_SNOW_MAX_SCREEN_SIZE = 4.0;
 const MARINE_SNOW_TEXTURE_RESOLUTION = 48;
 
 function cloneUniformValue(value) {
@@ -287,8 +287,8 @@ export class Ocean {
     this._createWaterSurface();
 
     // Floating particles (marine snow, plankton)
-    this.particleBaseSize = 0.15;
-    this.particleBaseOpacity = 0.35;
+    this.particleBaseSize = 0.12;
+    this.particleBaseOpacity = 0.22;
     this._rebuildParticles(qualityManager.getSettings());
 
     // Caustics light cookies near surface
@@ -768,8 +768,8 @@ export class Ocean {
 
     // Deep water gets a bit denser, but avoid oversized bright discs.
     const deepOpacity = THREE.MathUtils.lerp(
-      this.particleBaseOpacity * 0.85,
-      this.particleBaseOpacity * 1.4,
+      this.particleBaseOpacity * 0.7,
+      this.particleBaseOpacity * 1.0,
       depthBlend,
     );
     const abyssFade = THREE.MathUtils.lerp(1.0, 0.9, abyssBlend);
@@ -777,8 +777,8 @@ export class Ocean {
       deepOpacity * abyssFade;
 
     const deepSize = THREE.MathUtils.lerp(
-      this.particleBaseSize * 0.95,
-      this.particleBaseSize * 1.18,
+      this.particleBaseSize * 0.85,
+      this.particleBaseSize * 1.05,
       depthBlend,
     );
     const abyssSizeClamp = THREE.MathUtils.lerp(1.0, 0.94, abyssBlend);
