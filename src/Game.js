@@ -1010,6 +1010,8 @@ export class Game {
       return;
 
     try {
+      const _frameStart = performance.now();
+
       // FPS counter
       this._fpsFrames++;
       this._fpsTime += dt;
@@ -1107,7 +1109,7 @@ export class Game {
       // Keep descent assist pumping in both regular and autoplay starts,
       // but only when the frame hasn't already spent its initialization budget
       // on terrain/flora/creature work.
-      if (performance.now() - _initStart < 14) {
+      if (performance.now() - _frameStart < 12) {
         this.preload.pumpDescentAssist();
       }
 
