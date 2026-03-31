@@ -21,8 +21,8 @@ export const DEPTH_ZONE_PROFILES = Object.freeze({
     colors: Object.freeze({
       surface: 0x006b8f,
       twilight: 0x003352,
-      darkZone: 0x081018,
-      abyss: 0x030608,
+      darkZone: 0x0c1820,
+      abyss: 0x060c12,
     }),
     bands: Object.freeze({
       twilight: Object.freeze({ start: 35, end: 210 }),
@@ -49,10 +49,10 @@ export const DEPTH_ZONE_PROFILES = Object.freeze({
     abyss: 0.055,
   }),
   exposure: Object.freeze({
-    surface: 0.76,
+    surface: 0.85,
     mid: 0.7,
     deep: 0.65,
-    abyss: 0.62,
+    abyss: 0.70,
     flashlightBoost: 0.12,
     easing: 0.08,
   }),
