@@ -143,6 +143,23 @@ export class SporeCloud {
     });
     _patchBioMaterial(sporeMat, false);
 
+    // Separate unpatched material for tendrils — tendrils don't need
+    // per-instance pulse/cascade animation (they ride their parent spore's glow).
+    const tendrilMat = new THREE.MeshPhysicalMaterial({
+      color: 0x0a2010,
+      roughness: 0.25,
+      metalness: 0.05,
+      clearcoat: 0.9,
+      clearcoatRoughness: 0.2,
+      transparent: true,
+      opacity: 0.75,
+      emissive: new THREE.Color(0x10a030),
+      emissiveIntensity: 0.5,
+      transmission: 0.3,
+      thickness: 0.5,
+    });
+    this._nearTendrilMat = tendrilMat;
+
     const coreMat = new THREE.MeshPhysicalMaterial({
       color: 0x00ff66,
       emissive: new THREE.Color(0x00dd44),
@@ -190,7 +207,7 @@ export class SporeCloud {
     this._nearCoreMesh  = coreMesh;
 
     // Tendrils: NEAR_COUNT * TENDRILS_PER_SPORE instances — one draw call
-    const tendrilMesh = new THREE.InstancedMesh(tendrilGeo, sporeMat, NEAR_COUNT * TENDRILS_PER_SPORE);
+    const tendrilMesh = new THREE.InstancedMesh(tendrilGeo, tendrilMat, NEAR_COUNT * TENDRILS_PER_SPORE);
     tendrilMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this._nearTendrilMesh = tendrilMesh;
 
