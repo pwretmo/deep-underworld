@@ -235,7 +235,7 @@ export class PreloadCoordinator {
     _finalization = {
       label: "Finishing nearby spawns",
       stepIndex: 1,
-      stepTotal: 4,
+      stepTotal: 5,
       current: 0,
       total: 0,
       unit: "creatures",
@@ -245,7 +245,7 @@ export class PreloadCoordinator {
       _finalization = {
         ...progress,
         stepIndex: 1,
-        stepTotal: 4,
+        stepTotal: 5,
       };
       reportProgress();
     });
@@ -253,7 +253,7 @@ export class PreloadCoordinator {
       _finalization = {
         ...progress,
         stepIndex: 2,
-        stepTotal: 4,
+        stepTotal: 5,
       };
       reportProgress();
     }, VIEW_WARMUP_TIMEOUT_MS);
@@ -263,16 +263,24 @@ export class PreloadCoordinator {
         _finalization = {
           ...progress,
           stepIndex: 3,
-          stepTotal: 4,
+          stepTotal: 5,
         };
         reportProgress();
       },
       CREATURE_SHOWCASE_TIMEOUT_MS,
     );
+    await this._reWarmFlashlightWithCreatures((progress) => {
+      _finalization = {
+        ...progress,
+        stepIndex: 4,
+        stepTotal: 5,
+      };
+      reportProgress();
+    });
     _finalization = {
       label: "Handing off to live render",
-      stepIndex: 4,
-      stepTotal: 4,
+      stepIndex: 5,
+      stepTotal: 5,
       current: 0,
       total: 1,
       unit: "frames",
@@ -283,8 +291,8 @@ export class PreloadCoordinator {
     );
     _finalization = {
       label: "Handing off to live render",
-      stepIndex: 4,
-      stepTotal: 4,
+      stepIndex: 5,
+      stepTotal: 5,
       current: 1,
       total: 1,
       unit: "frames",
@@ -460,6 +468,36 @@ export class PreloadCoordinator {
       flashlightVisible: true,
       exposure: this.renderer.toneMappingExposure,
     });
+  }
+
+  async _reWarmFlashlightWithCreatures(onProgress) {
+    const wasVisible = this.player.flashlight.visible;
+    this.player.flashlight.visible = true;
+    const depths = [0, 160];
+    let completed = 0;
+    onProgress?.({
+      label: "Warming flashlight with creatures",
+      current: completed,
+      total: depths.length,
+      unit: "passes",
+    });
+    for (const depth of depths) {
+      this.underwaterEffect.warmRender(depth, {
+        flashlightOn: true,
+        exposure: this.renderer.toneMappingExposure,
+      });
+      completed++;
+      onProgress?.({
+        label: "Warming flashlight with creatures",
+        current: completed,
+        total: depths.length,
+        unit: "passes",
+      });
+      await new Promise((resolve) =>
+        window.requestAnimationFrame(() => resolve()),
+      );
+    }
+    this.player.flashlight.visible = wasVisible;
   }
 
   async _warmRenderAsync({
