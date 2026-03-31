@@ -1107,8 +1107,8 @@ export class Game {
       this._updatePointLightBudget(dt, depth, this.player.position);
 
       // Keep descent assist pumping in both regular and autoplay starts,
-      // but only when the frame hasn't already spent its initialization budget
-      // on terrain/flora/creature work.
+      // but only when the entire frame (all systems) has spent less than
+      // 12 ms so far, to avoid pushing total frame time over budget.
       if (performance.now() - _frameStart < 12) {
         this.preload.pumpDescentAssist();
       }
