@@ -36,6 +36,8 @@ const _qSettings = qualityManager.getSettings();
 let DESPAWN_DISTANCE = _qSettings.creatureDespawnDistance;
 let CULL_DISTANCE = _qSettings.creatureCullDistance;
 let MAX_CREATURES = _qSettings.maxCreatures;
+let DESPAWN_DISTANCE_SQ = DESPAWN_DISTANCE * DESPAWN_DISTANCE;
+let CULL_DISTANCE_SQ = CULL_DISTANCE * CULL_DISTANCE;
 const QUEUE_DRAIN_PER_FRAME = 1;
 
 window.addEventListener('qualitychange', (e) => {
@@ -43,7 +45,14 @@ window.addEventListener('qualitychange', (e) => {
   DESPAWN_DISTANCE = s.creatureDespawnDistance;
   CULL_DISTANCE = s.creatureCullDistance;
   MAX_CREATURES = s.maxCreatures;
+  DESPAWN_DISTANCE_SQ = DESPAWN_DISTANCE * DESPAWN_DISTANCE;
+  CULL_DISTANCE_SQ = CULL_DISTANCE * CULL_DISTANCE;
 });
+
+function _distSq(a, b) {
+  const dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
+  return dx * dx + dy * dy + dz * dz;
+}
 const DYNAMIC_SPAWNS_PER_CYCLE = 2;
 const SPAWN_LOOKAHEAD_DEPTH = 45;
 const HEAVY_FRAME_DT = 1 / 20;
@@ -73,6 +82,10 @@ export class CreatureManager {
     this._spawnCostEmaMs = 0;
     this._lastSpawnCostMs = 0;
     this._visibilityScratch = [];
+    // Diagnostic counters (read by profiling; negligible overhead)
+    this._diagCandidateCount = 0;
+    this._diagBroadPhaseCount = 0;
+    this._diagVisSelectUs = 0;
   }
 
   prepareInitialQueue(playerPos) {
@@ -411,37 +424,63 @@ export class CreatureManager {
     return CREATURE_VISIBILITY_DEPTH_BUDGETS[CREATURE_VISIBILITY_DEPTH_BUDGETS.length - 1].maxVisible;
   }
 
-  _applyVisibilityBudget(playerPos, depth) {
+  _applyVisibilityBudget(depth) {
     const maxVisible = this._resolveVisibleCreatureBudget(depth);
-    const candidates = this._visibilityScratch;
-    candidates.length = 0;
+    const topK = this._visibilityScratch;
+    topK.length = 0;
+
+    const t0 = performance.now();
+    let candidateCount = 0;
+    let broadPhaseCount = 0;
 
     for (const creature of this.creatures) {
       const root = creature.instance?.group;
-      const pos = creature.instance.getPosition ? creature.instance.getPosition() : null;
-      if (!root || !pos) continue;
+      if (!root || !creature._fPos) continue;
 
-      const dist = pos.distanceTo(playerPos);
-      if (dist > CULL_DISTANCE) {
+      candidateCount++;
+
+      // Broad-phase: skip creatures beyond cull distance using cached
+      // squared distance — avoids sqrt for the majority of creatures.
+      if (creature._fDistSq > CULL_DISTANCE_SQ) {
         root.visible = false;
         continue;
       }
 
-      // Bias toward already-visible creatures so the budget doesn't flicker
-      // constantly when several neighbors sit at similar distances.
+      broadPhaseCount++;
+
+      // Hysteresis bias: already-visible creatures score lower so the
+      // budget doesn't flicker when several sit at similar distances.
       const visibilityBias = root.visible ? 10 : 0;
-      candidates.push({
-        creature,
-        root,
-        score: dist - visibilityBias,
-      });
+      const dist = Math.sqrt(creature._fDistSq);
+      const score = dist - visibilityBias;
+
+      // Top-K insertion: maintain a bounded sorted list of size maxVisible.
+      // K is small (3-6), so linear insertion is faster than a full sort.
+      let insertAt = topK.length;
+      for (let i = topK.length - 1; i >= 0; i--) {
+        if (topK[i].score <= score) break;
+        insertAt = i;
+      }
+
+      if (insertAt < maxVisible) {
+        topK.splice(insertAt, 0, { root, score });
+        if (topK.length > maxVisible) {
+          topK.pop().root.visible = false;
+        }
+      } else {
+        root.visible = false;
+      }
     }
 
-    candidates.sort((a, b) => a.score - b.score);
-
-    for (let i = 0; i < candidates.length; i++) {
-      candidates[i].root.visible = i < maxVisible;
+    // Mark top-K survivors visible
+    for (let i = 0; i < topK.length; i++) {
+      topK[i].root.visible = true;
     }
+
+    // Diagnostics (read-only counters, no runtime cost beyond assignments)
+    this._diagCandidateCount = candidateCount;
+    this._diagBroadPhaseCount = broadPhaseCount;
+    this._diagVisSelectUs = (performance.now() - t0) * 1000;
   }
 
   update(dt, playerPos, depth, spawnBudgetMs = 8) {
@@ -478,24 +517,30 @@ export class CreatureManager {
       this._dynamicSpawn(playerPos, depth);
     }
 
+    // ── Per-frame distance cache ──
+    // Compute position + squared distance once per creature; reused by
+    // despawn, visibility budgeting, and update culling.
+    for (const c of this.creatures) {
+      const pos = c.instance.getPosition ? c.instance.getPosition() : null;
+      c._fPos = pos;
+      c._fDistSq = pos ? _distSq(pos, playerPos) : Infinity;
+    }
+
     // Remove creatures that have drifted far away (bounds total count)
     for (let i = this.creatures.length - 1; i >= 0; i--) {
       const c = this.creatures[i];
-      const pos = c.instance.getPosition ? c.instance.getPosition() : null;
-      if (pos && pos.distanceTo(playerPos) > DESPAWN_DISTANCE) {
+      if (c._fDistSq > DESPAWN_DISTANCE_SQ) {
         this._unregisterCreatureLights(c.instance);
         c.instance.dispose();
         this.creatures.splice(i, 1);
       }
     }
 
-    this._applyVisibilityBudget(playerPos, depth);
+    this._applyVisibilityBudget(depth);
 
-    // Update creatures with distance culling — skip far-away updates
+    // Update only visible creatures (visibility already set by budget pass)
     for (const creature of this.creatures) {
       if (creature.instance?.group?.visible === false) continue;
-      const pos = creature.instance.getPosition ? creature.instance.getPosition() : null;
-      if (pos && pos.distanceTo(playerPos) > CULL_DISTANCE) continue;
       creature.instance.update(dt, playerPos);
     }
   }

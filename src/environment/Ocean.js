@@ -16,8 +16,10 @@ import {
   instancedBufferAttribute,
   instanceIndex,
   length,
+  materialOpacity,
   max,
   mix,
+  normalView,
   positionLocal,
   positionView,
   positionWorld,
@@ -143,9 +145,7 @@ function createParticleMaterial(
     vec3(
       sin(uniforms.time.mul(0.05).add(seedNode.mul(0.013)).add(phaseNode))
         .mul(0.45)
-        .add(
-          cos(uniforms.time.mul(0.023).add(seedNode.mul(0.021))).mul(0.18),
-        ),
+        .add(cos(uniforms.time.mul(0.023).add(seedNode.mul(0.021))).mul(0.18)),
       sin(
         uniforms.time
           .mul(0.04)
@@ -159,9 +159,7 @@ function createParticleMaterial(
           .add(phaseNode.mul(1.2)),
       )
         .mul(0.45)
-        .add(
-          sin(uniforms.time.mul(0.028).add(seedNode.mul(0.019))).mul(0.18),
-        ),
+        .add(sin(uniforms.time.mul(0.028).add(seedNode.mul(0.019))).mul(0.18)),
     ),
   );
   material.positionNode = driftedCenter;
@@ -387,6 +385,9 @@ export class Ocean {
       emissive: new THREE.Color(0x336688),
       emissiveIntensity: 0.15,
     });
+    const viewDir = positionView.negate().normalize();
+    const surfaceFacing = abs(dot(normalView, viewDir));
+    const horizonFade = smoothstep(0.08, 0.34, surfaceFacing);
     const uniforms = createUniformMap({
       time: 0,
       surfacePhaseOffset: new THREE.Vector2(0, 0),
@@ -421,6 +422,10 @@ export class Ocean {
       positionLocal.y,
       positionLocal.z.add(wave),
     );
+    // Fade the ceiling mesh out at grazing angles so the shallow horizon
+    // blends into fog instead of switching abruptly from surface to open water.
+    mat.opacityNode = materialOpacity.mul(pow(horizonFade, 1.35));
+    mat.depthWrite = false;
     mat.needsUpdate = true;
     attachUniforms(mat, uniforms);
     expandGeometryBounds(geo, "z", WATER_SURFACE_BOUNDS_PADDING);
@@ -535,9 +540,7 @@ export class Ocean {
         time.mul(0.071).add(seed.mul(0.011)).add(phase.mul(0.5)),
       )
         .mul(0.045)
-        .add(
-          cos(time.mul(0.037).add(seed.mul(0.023)).add(phase)).mul(0.02),
-        )
+        .add(cos(time.mul(0.037).add(seed.mul(0.023)).add(phase)).mul(0.02))
         .sub(0.028);
 
       pos.x.addAssign(this._computeUniforms.dt.mul(lateralX));
@@ -614,9 +617,30 @@ export class Ocean {
       ctx.restore();
     };
 
-    drawParticleLobe(pSize * 0.46, pSize * 0.54, pSize * 0.2, pSize * 0.15, 0.55, -0.4);
-    drawParticleLobe(pSize * 0.62, pSize * 0.46, pSize * 0.1, pSize * 0.07, 0.28, 0.3);
-    drawParticleLobe(pSize * 0.34, pSize * 0.6, pSize * 0.08, pSize * 0.055, 0.18, -0.75);
+    drawParticleLobe(
+      pSize * 0.46,
+      pSize * 0.54,
+      pSize * 0.2,
+      pSize * 0.15,
+      0.55,
+      -0.4,
+    );
+    drawParticleLobe(
+      pSize * 0.62,
+      pSize * 0.46,
+      pSize * 0.1,
+      pSize * 0.07,
+      0.28,
+      0.3,
+    );
+    drawParticleLobe(
+      pSize * 0.34,
+      pSize * 0.6,
+      pSize * 0.08,
+      pSize * 0.055,
+      0.18,
+      -0.75,
+    );
     const snowTexture = new THREE.CanvasTexture(canvas);
     this._particleTexture = snowTexture;
 
