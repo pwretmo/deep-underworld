@@ -64,8 +64,8 @@ const RENDER_PIPELINE_TUNING = deepFreeze({
   },
   grading: {
     contrast: 1.08,
-    vignette: 0.28,
-    grain: 0.018,
+    vignette: 0.22,
+    grain: 0.010,
     scanline: 0.0,
     eyeAdapt: 0.12,
   },
@@ -76,9 +76,9 @@ const RENDER_PIPELINE_TUNING = deepFreeze({
   },
   bloom: {
     surfaceStrength: 0.28,
-    deepStrength: 0.55,
+    deepStrength: 0.42,
     surfaceThreshold: 0.78,
-    deepThreshold: 0.58,
+    deepThreshold: 0.65,
     radius: 0.62,
   },
   performance: {
@@ -183,7 +183,7 @@ function createUnderwaterPostColorNode(sourceNode, uniformNodes) {
   return Fn(() => {
     const distortedUv = vec2(sourceUVNode).toVar();
     const lumaWeights = vec3(0.2126, 0.7152, 0.0722);
-    const distortionStrength = uniformNodes.depth.mul(0.0000055).add(0.0011);
+    const distortionStrength = uniformNodes.depth.mul(0.0000040).add(0.0009);
 
     distortedUv.assign(vec2(
       distortedUv.x.add(sin(distortedUv.y.mul(15.0).add(uniformNodes.time)).mul(distortionStrength)),
@@ -218,8 +218,8 @@ function createUnderwaterPostColorNode(sourceNode, uniformNodes) {
       const edgeDist = distance(distortedUv, vec2(0.5));
       const edgeMask = smoothstep(0.2, 0.74, edgeDist);
       const aberrationStrength = min(
-        depthBlend.mul(0.00014).add(abyssBlend.mul(0.00005)).mul(edgeMask),
-        0.00022,
+        depthBlend.mul(0.00010).add(abyssBlend.mul(0.00003)).mul(edgeMask),
+        0.00015,
       );
       const red = sourceTextureNode.sample(distortedUv.add(vec2(aberrationStrength, aberrationStrength.mul(0.3)))).r;
       const blue = sourceTextureNode.sample(distortedUv.sub(vec2(aberrationStrength, aberrationStrength.mul(0.2)))).b;
@@ -230,7 +230,7 @@ function createUnderwaterPostColorNode(sourceNode, uniformNodes) {
     const vignetteStrength = min(depthBlend.mul(uniformNodes.grading.y).add(0.12), 0.65);
     const vignetteDistance = dot(distortedUv.sub(0.5), distortedUv.sub(0.5));
     const vignetteMask = float(1.0).sub(smoothstep(0.12, 0.42, vignetteDistance).mul(vignetteStrength));
-    color.assign(color.mul(max(vignetteMask, 0.35)));
+    color.assign(color.mul(max(vignetteMask, 0.42)));
 
     const transmittance = exp(uniformNodes.extinction.mul(uniformNodes.depth).mul(-1.0));
     const scatterMix = float(1.0).sub(exp(uniformNodes.scatterDensity.mul(uniformNodes.depth).mul(-1.0)));
@@ -292,7 +292,7 @@ function createUnderwaterPostColorNode(sourceNode, uniformNodes) {
     const silhouetteLift = smoothstep(0.02, 0.25, dot(color, lumaWeights)).mul(0.028).mul(abyssBlend);
     color.addAssign(vec3(silhouetteLift));
 
-    const grainStrength = uniformNodes.grading.z.add(depthBlend.mul(0.02))
+    const grainStrength = uniformNodes.grading.z.add(depthBlend.mul(0.012))
       .mul(float(1.0).sub(uniformNodes.reducedMode.mul(0.7)));
     const grain = fract(
       sin(dot(distortedUv.mul(uniformNodes.time).mul(0.01), vec2(12.9898, 78.233))).mul(43758.5453)
@@ -302,7 +302,7 @@ function createUnderwaterPostColorNode(sourceNode, uniformNodes) {
     const dither = fract(
       fract(dot(fragCoord, vec2(0.06711056, 0.00583715)).add(uniformNodes.time.mul(0.003))).mul(52.9829189)
     );
-    const ditherStrength = mix(0.0016, 0.0065, abyssBlend)
+    const ditherStrength = mix(0.0016, 0.0040, abyssBlend)
       .mul(float(1.0).sub(uniformNodes.reducedMode.mul(0.75)));
     color.addAssign(vec3(dither.sub(0.5).mul(ditherStrength)));
 
