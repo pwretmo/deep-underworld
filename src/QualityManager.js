@@ -168,7 +168,7 @@ class QualityManager {
     this._highEndGpuDetected = false;
 
     // Spike detection & anti-ping-pong state
-    this._lastTierChangeTime = 0;
+    this._lastTierChangeTime = -Infinity;
     this._spikeDowngrade = false;
   }
 
@@ -296,6 +296,7 @@ class QualityManager {
     this._downgradeDuration = 0;
     this._upgradeDuration = 0;
     this._ultraUpgradeDuration = 0;
+    this._lastTierChangeTime = performance.now();
     // Don't persist auto changes to localStorage
     window.dispatchEvent(
       new CustomEvent("qualitychange", {
