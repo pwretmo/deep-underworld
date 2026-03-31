@@ -201,27 +201,14 @@ export class Player {
 
     this._accel.set(0, 0, 0);
 
-    const forwardInput = THREE.MathUtils.clamp(
-      (this.keys["KeyW"] ? 1 : 0) -
-        (this.keys["KeyS"] ? 1 : 0) +
-        this.autoplayInput.forward,
-      -1,
-      1,
-    );
-    const rightInput = THREE.MathUtils.clamp(
-      (this.keys["KeyD"] ? 1 : 0) -
-        (this.keys["KeyA"] ? 1 : 0) +
-        this.autoplayInput.right,
-      -1,
-      1,
-    );
-    const verticalInput = THREE.MathUtils.clamp(
-      (this.keys["Space"] ? 1 : 0) -
-        (this.keys["ShiftLeft"] || this.keys["ShiftRight"] ? 1 : 0) +
-        this.autoplayInput.vertical,
-      -1,
-      1,
-    );
+    const keyForward = (this.keys["KeyW"] ? 1 : 0) - (this.keys["KeyS"] ? 1 : 0);
+    const keyRight = (this.keys["KeyD"] ? 1 : 0) - (this.keys["KeyA"] ? 1 : 0);
+    const keyVertical = (this.keys["Space"] ? 1 : 0) -
+      (this.keys["ShiftLeft"] || this.keys["ShiftRight"] ? 1 : 0);
+
+    const forwardInput = keyForward !== 0 ? keyForward : this.autoplayInput.forward;
+    const rightInput = keyRight !== 0 ? keyRight : this.autoplayInput.right;
+    const verticalInput = keyVertical !== 0 ? keyVertical : this.autoplayInput.vertical;
 
     if (forwardInput !== 0)
       this._accel.addScaledVector(this._forward, forwardInput);
