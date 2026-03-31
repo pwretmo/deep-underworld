@@ -60,10 +60,15 @@ const STORAGE_KEY = "qualityTier";
 
 // Auto-quality thresholds
 const AUTO_DOWNGRADE_MS = 33; // < 30 fps
-const AUTO_DOWNGRADE_SECS = 3;
+const AUTO_DOWNGRADE_SECS = 1.5;
 const AUTO_UPGRADE_MS = 20; // > 50 fps
-const AUTO_UPGRADE_SECS = 5;
+const AUTO_UPGRADE_SECS = 4;
 const EMA_ALPHA = 2 / (30 + 1); // ~30-frame EMA
+
+// Spike detection
+const SPIKE_THRESHOLD_MS = 50;
+const SPIKE_RECOVERY_SECS = 2;
+const ANTI_PING_PONG_MS = 1500;
 
 // GPU patterns that qualify for automatic ultra tier selection
 const HIGH_END_GPU_PATTERNS = [
@@ -161,6 +166,10 @@ class QualityManager {
     this._upgradeDuration = 0;
     this._ultraUpgradeDuration = 0;
     this._highEndGpuDetected = false;
+
+    // Spike detection & anti-ping-pong state
+    this._lastTierChangeTime = -Infinity;
+    this._spikeDowngrade = false;
   }
 
   /** Current tier name. */
@@ -237,20 +246,37 @@ class QualityManager {
 
     if (!this._autoQuality) return;
 
+    const now = performance.now();
+    const inCooldown = now - this._lastTierChangeTime < ANTI_PING_PONG_MS;
     const idx = TIER_ORDER.indexOf(this._tier);
+
+    // Spike detection: immediate one-tier downgrade on single-frame stall
+    if (frameMs > SPIKE_THRESHOLD_MS && !inCooldown && idx > 0) {
+      this._spikeDowngrade = true;
+      this._applyAutoTier(TIER_ORDER[idx - 1]);
+      this._lastTierChangeTime = now;
+      return;
+    }
 
     if (this._frameTimeEma > AUTO_DOWNGRADE_MS) {
       this._upgradeDuration = 0;
       this._downgradeDuration += dt;
-      if (this._downgradeDuration >= AUTO_DOWNGRADE_SECS && idx > 0) {
+      if (this._downgradeDuration >= AUTO_DOWNGRADE_SECS && idx > 0 && !inCooldown) {
         this._applyAutoTier(TIER_ORDER[idx - 1]);
+        this._lastTierChangeTime = now;
+        this._spikeDowngrade = false;
       }
     } else if (this._frameTimeEma < AUTO_UPGRADE_MS) {
       this._downgradeDuration = 0;
+      const upgradeThreshold = this._spikeDowngrade
+        ? SPIKE_RECOVERY_SECS
+        : AUTO_UPGRADE_SECS;
       this._upgradeDuration += dt;
       const maxGenericIdx = TIER_ORDER.indexOf("high");
-      if (this._upgradeDuration >= AUTO_UPGRADE_SECS && idx < maxGenericIdx) {
+      if (this._upgradeDuration >= upgradeThreshold && idx < maxGenericIdx && !inCooldown) {
         this._applyAutoTier(TIER_ORDER[idx + 1]);
+        this._lastTierChangeTime = now;
+        this._spikeDowngrade = false;
       }
       // Keep ultra opt-in. Runtime promotion to ultra can introduce large
       // mid-session hitches when bloom and higher-resolution targets spin up.
@@ -270,6 +296,7 @@ class QualityManager {
     this._downgradeDuration = 0;
     this._upgradeDuration = 0;
     this._ultraUpgradeDuration = 0;
+    this._lastTierChangeTime = performance.now();
     // Don't persist auto changes to localStorage
     window.dispatchEvent(
       new CustomEvent("qualitychange", {
