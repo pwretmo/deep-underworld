@@ -201,9 +201,12 @@ export class AbyssEncounter {
       }
     });
 
-    // Dim entity lights
+    // Dim entity lights — route through the budget system to avoid
+    // intensity-fighting with the managed-light lerp.
     for (const light of this.entityLights) {
-      light.intensity = light.userData.baseIntensity * (1 - ease);
+      const dimmed = light.userData.baseIntensity * (1 - ease);
+      light.userData.duwBaseIntensity = dimmed;
+      light.userData.duwTargetIntensity = dimmed;
     }
 
     // Blend modifier back toward current depth-zone base values
@@ -509,13 +512,16 @@ export class AbyssEncounter {
         target.baseIntensity * pulseScale * intensity;
     }
 
-    // Pulse bioluminescent point lights
+    // Pulse bioluminescent point lights — drive duwTargetIntensity so the
+    // budget manager's per-frame lerp stays in sync with the pulse.
     for (const light of this.entityLights) {
       if (light.userData.duwPulseGroup !== 'bio') continue;
-      light.intensity =
+      const pulsed =
         light.userData.baseIntensity *
         (0.5 + Math.sin(now * 0.003) * 0.5) *
         intensity;
+      light.userData.duwBaseIntensity = pulsed;
+      light.userData.duwTargetIntensity = pulsed;
     }
   }
 
