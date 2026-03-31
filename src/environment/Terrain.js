@@ -1,4 +1,4 @@
-import * as THREE from 'three/webgpu';
+import * as THREE from "three/webgpu";
 import {
   abs,
   attribute,
@@ -18,11 +18,13 @@ import {
   smoothstep,
   varying,
   vec3,
-} from 'three/tsl';
-import { qualityManager } from '../QualityManager.js';
+} from "three/tsl";
+import { qualityManager } from "../QualityManager.js";
 
 const hash3D = Fn(([inputPosition]) => {
-  const p = fract(vec3(inputPosition).mul(vec3(443.897, 441.423, 437.195))).toVar();
+  const p = fract(
+    vec3(inputPosition).mul(vec3(443.897, 441.423, 437.195)),
+  ).toVar();
   const offset = dot(p, p.yzx.add(vec3(19.19)));
   p.addAssign(vec3(offset));
 
@@ -64,12 +66,12 @@ function fbm3D(inputPosition) {
 }
 
 const CHUNK_FINALIZATION_STAGES = [
-  'geometry',
-  'rocks',
-  'terrainColliderPrepare',
-  'terrainColliderBuild',
-  'rockColliders',
-  'attach',
+  "geometry",
+  "rocks",
+  "terrainColliderPrepare",
+  "terrainColliderBuild",
+  "rockColliders",
+  "attach",
 ];
 const STREAM_FINALIZATION_BUDGET_MS = 4;
 const PRELOAD_FINALIZATION_BUDGET_MS = 8;
@@ -78,7 +80,7 @@ const PROFILE_EMA_ALPHA = 0.2;
 const SLOW_FINALIZATION_STAGE_MS = 2.5;
 const SLOW_FINALIZATION_TOTAL_MS = 6;
 const PROFILE_HISTORY_LIMIT = 24;
-const TERRAIN_CHUNK_PROFILE_QUERY_KEY = 'terrainChunkProfile';
+const TERRAIN_CHUNK_PROFILE_QUERY_KEY = "terrainChunkProfile";
 const SLOW_FINALIZATION_LOG_INTERVAL_MS = 5000;
 
 function updateEma(current, next) {
@@ -92,10 +94,12 @@ function trimHistory(history, maxEntries) {
 }
 
 function isChunkApplyDiagnosticsEnabled() {
-  if (typeof window === 'undefined') return false;
+  if (typeof window === "undefined") return false;
 
   try {
-    return new URLSearchParams(window.location.search).has(TERRAIN_CHUNK_PROFILE_QUERY_KEY);
+    return new URLSearchParams(window.location.search).has(
+      TERRAIN_CHUNK_PROFILE_QUERY_KEY,
+    );
   } catch {
     return false;
   }
@@ -145,10 +149,13 @@ export class Terrain {
     this._chunkApplyLoggingEnabled = isChunkApplyDiagnosticsEnabled();
     this._lastChunkApplyLogMs = Number.NEGATIVE_INFINITY;
     this._lastPlayerPos = null;
-    this._chunkWorker = new Worker(new URL('./chunkPayloadWorker.js', import.meta.url), { type: 'module' });
+    this._chunkWorker = new Worker(
+      new URL("./chunkPayloadWorker.js", import.meta.url),
+      { type: "module" },
+    );
     this._chunkWorker.onmessage = (event) => {
       const data = event.data;
-      if (!data || data.type !== 'terrainPayload') return;
+      if (!data || data.type !== "terrainPayload") return;
 
       const request = this._inFlightById.get(data.requestId);
       if (!request) return;
@@ -170,7 +177,7 @@ export class Terrain {
       this._enqueueFinalization(request.key, data.cx, data.cz, data.payload);
     };
 
-    window.addEventListener('qualitychange', (e) => {
+    window.addEventListener("qualitychange", (e) => {
       this.viewDistance = e.detail.settings.terrainViewDistance;
       if (this.lastChunkX !== null) {
         this._rebuildPendingAround(this.lastChunkX, this.lastChunkZ);
@@ -194,7 +201,7 @@ export class Terrain {
   _createRockGeometries() {
     const geos = [];
     geos.push(this._distortGeo(new THREE.DodecahedronGeometry(1, 1), 0.15));
-    geos.push(this._distortGeo(new THREE.IcosahedronGeometry(1, 2), 0.10));
+    geos.push(this._distortGeo(new THREE.IcosahedronGeometry(1, 2), 0.1));
     const slab = new THREE.DodecahedronGeometry(1, 0);
     const sp = slab.attributes.position;
     for (let i = 0; i < sp.count; i++) sp.setY(i, sp.getY(i) * 0.4);
@@ -209,7 +216,9 @@ export class Terrain {
   _distortGeo(geo, amount) {
     const pos = geo.attributes.position;
     for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+      const x = pos.getX(i),
+        y = pos.getY(i),
+        z = pos.getZ(i);
       const h = Math.sin(x * 12.9898 + y * 78.233 + z * 45.164) * 43758.5453;
       const d = (h - Math.floor(h)) * amount;
       const len = Math.sqrt(x * x + y * y + z * z) || 1;
@@ -255,18 +264,25 @@ export class Terrain {
       metalness: 0.05,
     });
     const worldPos = varying(positionWorld);
-    const vertexColor = varying(attribute('color', 'vec3'));
+    const vertexColor = varying(attribute("color", "vec3"));
     const depth = worldPos.y.negate();
     const slope = float(1.0).sub(abs(normalWorldGeometry.y));
-    const rockColor = vec3(0.25, 0.22, 0.2).add(vec3(noise3D(worldPos.mul(0.5)).mul(0.06)));
-    const siltColor = vec3(0.18, 0.15, 0.13).add(vec3(noise3D(worldPos.mul(0.3).add(vec3(100.0))).mul(0.04)));
-    const algaeColor = vec3(0.12, 0.2, 0.08).add(vec3(noise3D(worldPos.mul(0.8).add(vec3(200.0))).mul(0.05)));
+    const rockColor = vec3(0.25, 0.22, 0.2).add(
+      vec3(noise3D(worldPos.mul(0.5)).mul(0.06)),
+    );
+    const siltColor = vec3(0.18, 0.15, 0.13).add(
+      vec3(noise3D(worldPos.mul(0.3).add(vec3(100.0))).mul(0.04)),
+    );
+    const algaeColor = vec3(0.12, 0.2, 0.08).add(
+      vec3(noise3D(worldPos.mul(0.8).add(vec3(200.0))).mul(0.05)),
+    );
     const algaeMask = float(1.0)
       .sub(smoothstep(80.0, 200.0, depth))
       .mul(float(1.0).sub(slope));
     const rockMask = smoothstep(0.3, 0.7, slope);
     const siltMask = max(float(1.0).sub(rockMask).sub(algaeMask), 0.0);
-    const layered = rockColor.mul(rockMask)
+    const layered = rockColor
+      .mul(rockMask)
       .add(siltColor.mul(siltMask))
       .add(algaeColor.mul(algaeMask));
     const detail = float(0.9).add(fbm3D(worldPos.mul(4.0)).mul(0.2));
@@ -307,7 +323,7 @@ export class Terrain {
     if (this._inFlightByKey.get(req.key) === requestId) {
       this._inFlightByKey.delete(req.key);
     }
-    this._chunkWorker.postMessage({ type: 'cancel', requestId });
+    this._chunkWorker.postMessage({ type: "cancel", requestId });
   }
 
   _requestChunkPayload(key, cx, cz) {
@@ -316,7 +332,7 @@ export class Terrain {
     this._inFlightById.set(requestId, { key, cancelled: false });
     this._inFlightByKey.set(key, requestId);
     this._chunkWorker.postMessage({
-      type: 'generateTerrain',
+      type: "generateTerrain",
       requestId,
       key,
       cx,
@@ -331,7 +347,10 @@ export class Terrain {
    * Build a trimesh collider from worker-generated world-space vertices.
    */
   _createChunkCollider(mesh, colliderVertices, indices) {
-    const handle = this._physicsWorld.createTrimeshCollider(colliderVertices, indices);
+    const handle = this._physicsWorld.createTrimeshCollider(
+      colliderVertices,
+      indices,
+    );
     const handles = mesh.userData.physicsColliderHandles || [];
     handles.push(handle);
     mesh.userData.physicsColliderHandles = handles;
@@ -349,11 +368,17 @@ export class Terrain {
       inst.castShadow = true;
       inst.receiveShadow = true;
 
-      inst.instanceMatrix = new THREE.InstancedBufferAttribute(batch.matrices, 16);
+      inst.instanceMatrix = new THREE.InstancedBufferAttribute(
+        batch.matrices,
+        16,
+      );
       inst.instanceMatrix.needsUpdate = true;
 
       if (batch.colors && batch.colors.length > 0) {
-        inst.instanceColor = new THREE.InstancedBufferAttribute(batch.colors, 3);
+        inst.instanceColor = new THREE.InstancedBufferAttribute(
+          batch.colors,
+          3,
+        );
         inst.instanceColor.needsUpdate = true;
       }
 
@@ -362,11 +387,17 @@ export class Terrain {
   }
 
   _createRockCollidersFromPayload(parent, payload) {
-    if (!this._physicsWorld || !payload.rockColliders || payload.rockColliders.length === 0) {
+    if (
+      !this._physicsWorld ||
+      !payload.rockColliders ||
+      payload.rockColliders.length === 0
+    ) {
       return;
     }
 
-    const handles = this._physicsWorld.createSphereColliders(payload.rockColliders);
+    const handles = this._physicsWorld.createSphereColliders(
+      payload.rockColliders,
+    );
     if (handles.length === 0) return;
 
     const colliderHandles = parent.userData.physicsColliderHandles || [];
@@ -412,9 +443,18 @@ export class Terrain {
 
   _createChunkMeshFromPayload(cx, cz, payload) {
     const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(payload.positions, 3));
-    geometry.setAttribute('normal', new THREE.BufferAttribute(payload.normals, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(payload.colors, 3));
+    geometry.setAttribute(
+      "position",
+      new THREE.BufferAttribute(payload.positions, 3),
+    );
+    geometry.setAttribute(
+      "normal",
+      new THREE.BufferAttribute(payload.normals, 3),
+    );
+    geometry.setAttribute(
+      "color",
+      new THREE.BufferAttribute(payload.colors, 3),
+    );
     geometry.setIndex(new THREE.BufferAttribute(payload.indices, 1));
 
     const mesh = new THREE.Mesh(geometry, this._terrainMat);
@@ -470,9 +510,9 @@ export class Terrain {
       ) {
         this._lastChunkApplyLogMs = now;
 
-        const breakdown = CHUNK_FINALIZATION_STAGES
-          .map((stageName) => `${stageName}=${stages[stageName].toFixed(2)}ms`)
-          .join(', ');
+        const breakdown = CHUNK_FINALIZATION_STAGES.map(
+          (stageName) => `${stageName}=${stages[stageName].toFixed(2)}ms`,
+        ).join(", ");
         console.warn(
           `[Terrain] Slow chunk finalization ${job.key}: total=${totalMs.toFixed(2)}ms (${breakdown})`,
         );
@@ -527,19 +567,27 @@ export class Terrain {
 
     const stageStart = performance.now();
 
-    if (stageName === 'geometry') {
-      const { geometry, mesh } = this._createChunkMeshFromPayload(job.cx, job.cz, job.payload);
+    if (stageName === "geometry") {
+      const { geometry, mesh } = this._createChunkMeshFromPayload(
+        job.cx,
+        job.cz,
+        job.payload,
+      );
       job.geometry = geometry;
       job.mesh = mesh;
-    } else if (stageName === 'rocks') {
+    } else if (stageName === "rocks") {
       this._addRockVisualsFromPayload(job.mesh, job.payload);
-    } else if (stageName === 'terrainColliderPrepare') {
+    } else if (stageName === "terrainColliderPrepare") {
       // Cache collider data references so terrainColliderBuild can run in a later frame
-      if (this._physicsWorld && job.payload.colliderVertices && job.payload.indices) {
+      if (
+        this._physicsWorld &&
+        job.payload.colliderVertices &&
+        job.payload.indices
+      ) {
         job._colliderVertices = job.payload.colliderVertices;
         job._colliderIndices = job.payload.indices;
       }
-    } else if (stageName === 'terrainColliderBuild') {
+    } else if (stageName === "terrainColliderBuild") {
       if (this._physicsWorld && job._colliderVertices && job._colliderIndices) {
         // Skip detailed collider for chunks beyond 2x view distance
         let skip = false;
@@ -554,17 +602,21 @@ export class Terrain {
           }
         }
         if (!skip) {
-          this._createChunkCollider(job.mesh, job._colliderVertices, job._colliderIndices);
+          this._createChunkCollider(
+            job.mesh,
+            job._colliderVertices,
+            job._colliderIndices,
+          );
         }
       }
       // Clean up cached data
       job._colliderVertices = null;
       job._colliderIndices = null;
-    } else if (stageName === 'rockColliders') {
+    } else if (stageName === "rockColliders") {
       if (this._physicsWorld) {
         this._createRockCollidersFromPayload(job.mesh, job.payload);
       }
-    } else if (stageName === 'attach') {
+    } else if (stageName === "attach") {
       this.scene.add(job.mesh);
       this.chunks.set(job.key, job.mesh);
     }
@@ -576,7 +628,12 @@ export class Terrain {
     return true;
   }
 
-  _drainFinalizationStages(maxStages, maxCostMs, cancelToken, options = undefined) {
+  _drainFinalizationStages(
+    maxStages,
+    maxCostMs,
+    cancelToken,
+    options = undefined,
+  ) {
     if (maxStages <= 0 || maxCostMs <= 0) return 0;
 
     const progressedKeys = options?.progressedKeys;
@@ -595,7 +652,11 @@ export class Terrain {
       }
 
       const job = this._activeFinalization;
-      if (progressedKeys && progressedKeys.size >= maxChunks && !progressedKeys.has(job.key)) {
+      if (
+        progressedKeys &&
+        progressedKeys.size >= maxChunks &&
+        !progressedKeys.has(job.key)
+      ) {
         break;
       }
 
@@ -605,9 +666,18 @@ export class Terrain {
         continue;
       }
 
-      // Defer expensive collider build if budget is already half consumed
+      // terrainColliderPrepare is cheap (<1ms) and always runs in the current
+      // frame.  terrainColliderBuild hosts the expensive createTrimeshCollider
+      // call (10-30ms for large chunks) and is deferred to the NEXT frame
+      // whenever any budget has been consumed (>1ms elapsed).  This ensures it
+      // always gets a fresh slice with full budget, so even though its cost may
+      // exceed the per-frame target, it runs in isolation without compounding
+      // with other stages in the same slice.
       const nextStage = CHUNK_FINALIZATION_STAGES[job.stageIndex];
-      if (nextStage === 'terrainColliderBuild' && (performance.now() - sliceStart) > maxCostMs * 0.5) {
+      if (
+        nextStage === "terrainColliderBuild" &&
+        performance.now() - sliceStart > 1
+      ) {
         break;
       }
 
@@ -671,7 +741,8 @@ export class Terrain {
 
     if (
       this._activeFinalization &&
-      (!needed.has(this._activeFinalization.key) || this.chunks.has(this._activeFinalization.key))
+      (!needed.has(this._activeFinalization.key) ||
+        this.chunks.has(this._activeFinalization.key))
     ) {
       this._disposePendingFinalization(this._activeFinalization);
       this._activeFinalization = null;
@@ -711,7 +782,7 @@ export class Terrain {
         !this._inFlightByKey.has(key) &&
         !this._pendingFinalizationKeys.has(key)
       ) {
-        const [x, z] = key.split(',').map(Number);
+        const [x, z] = key.split(",").map(Number);
         this._pendingChunks.push({ key, x, z });
       }
     }
@@ -751,7 +822,11 @@ export class Terrain {
   }
 
   getPendingCount() {
-    return this._pendingChunks.length + this._inFlightById.size + this._pendingFinalizationKeys.size;
+    return (
+      this._pendingChunks.length +
+      this._inFlightById.size +
+      this._pendingFinalizationKeys.size
+    );
   }
 
   getChunkCount() {
