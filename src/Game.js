@@ -1048,7 +1048,7 @@ export class Game {
       const _initElapsed = performance.now() - _initStart;
       const _spawnBudget = Math.max(0, 12 - _initElapsed);
       const _descentAssistActive = this.preload.isDescentAssistActive();
-      const _effectiveSpawnBudget = _descentAssistActive ? 0 : _spawnBudget;
+      const _effectiveSpawnBudget = _descentAssistActive ? Math.min(2, _spawnBudget) : _spawnBudget;
       this.creatures.update(
         dt,
         this.player.position,
