@@ -47,6 +47,7 @@ window.addEventListener('qualitychange', (e) => {
   MAX_CREATURES = s.maxCreatures;
   DESPAWN_DISTANCE_SQ = DESPAWN_DISTANCE * DESPAWN_DISTANCE;
   CULL_DISTANCE_SQ = CULL_DISTANCE * CULL_DISTANCE;
+  CREATURE_VISIBILITY_DEPTH_BUDGETS = VISIBILITY_BUDGETS_BY_TIER[e.detail.tier] || VISIBILITY_BUDGETS_BY_TIER.high;
 });
 
 function _distSq(a, b) {
@@ -59,13 +60,13 @@ const HEAVY_FRAME_DT = 1 / 20;
 const MAX_SPAWN_BUDGET_MS = 10;
 const SPAWN_EMA_ALPHA = 0.2;
 const HEAVY_SPAWN_WARN_MS = 50;
-const CREATURE_VISIBILITY_DEPTH_BUDGETS = [
-  { depth: 80, maxVisible: 6 },
-  { depth: 160, maxVisible: 5 },
-  { depth: 260, maxVisible: 4 },
-  { depth: 380, maxVisible: 3 },
-  { depth: Infinity, maxVisible: 3 },
-];
+const VISIBILITY_BUDGETS_BY_TIER = {
+  low:    [{ depth: 80, maxVisible: 6 },  { depth: 160, maxVisible: 5 },  { depth: 260, maxVisible: 4 },  { depth: 380, maxVisible: 3 },  { depth: Infinity, maxVisible: 3 }],
+  medium: [{ depth: 80, maxVisible: 9 },  { depth: 160, maxVisible: 8 },  { depth: 260, maxVisible: 6 },  { depth: 380, maxVisible: 5 },  { depth: Infinity, maxVisible: 4 }],
+  high:   [{ depth: 80, maxVisible: 12 }, { depth: 160, maxVisible: 10 }, { depth: 260, maxVisible: 8 },  { depth: 380, maxVisible: 6 },  { depth: Infinity, maxVisible: 6 }],
+  ultra:  [{ depth: 80, maxVisible: 15 }, { depth: 160, maxVisible: 13 }, { depth: 260, maxVisible: 10 }, { depth: 380, maxVisible: 8 },  { depth: Infinity, maxVisible: 8 }],
+};
+let CREATURE_VISIBILITY_DEPTH_BUDGETS = VISIBILITY_BUDGETS_BY_TIER[qualityManager.tier] || VISIBILITY_BUDGETS_BY_TIER.high;
 
 export class CreatureManager {
   constructor(scene, options = {}) {
@@ -542,6 +543,13 @@ export class CreatureManager {
     for (const creature of this.creatures) {
       if (creature.instance?.group?.visible === false) continue;
       creature.instance.update(dt, playerPos);
+    }
+
+    // Sync invisible creature positions to prevent pop-in when they become visible
+    for (const creature of this.creatures) {
+      if (creature.instance?.group?.visible === false && creature._fPos) {
+        creature.instance.group.position.copy(creature._fPos);
+      }
     }
   }
 
