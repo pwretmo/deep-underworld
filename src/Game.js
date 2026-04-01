@@ -1,5 +1,4 @@
 import * as THREE from "three/webgpu";
-import StatsGl from "stats-gl";
 import { Player } from "./player/Player.js";
 import { Ocean } from "./environment/Ocean.js";
 import { Terrain } from "./environment/Terrain.js";
@@ -269,11 +268,10 @@ export class Game {
     this._setupEvents();
     this.preload.startMenuIdleWarmup();
 
-    // stats-gl: GPU/CPU frame timing panel — visible in dev or when ?debug is in the URL
-    const _debugStats =
-      new URLSearchParams(window.location.search).has("debug") ||
-      import.meta.env.DEV;
-    if (_debugStats) {
+    // stats-gl: GPU/CPU frame timing panel — opt-in via ?debug in the URL
+    const debugEnabled = new URLSearchParams(window.location.search).has("debug");
+    if (debugEnabled) {
+      const { default: StatsGl } = await import("stats-gl");
       this._stats = new StatsGl({ trackGPU: true });
       this._stats.init(this.renderer);
       this._stats.dom.style.position = "fixed";
