@@ -406,24 +406,17 @@ export class CreatureManager {
   }
 
   _simulatePrimeDrainCount(maxDepth) {
-    const queue = this._spawnQueue
-      .filter((entry) => entry.countsTowardLoad !== false)
-      .map((entry) => ({ depthMin: entry.depthMin }));
-    let drained = 0;
-
-    while (queue.some((entry) => entry.depthMin <= maxDepth)) {
-      const entryIndex = queue.findIndex(
-        (entry) => entry.depthMin <= maxDepth + SPAWN_LOOKAHEAD_DEPTH,
-      );
-      if (entryIndex === -1) {
-        break;
+    // O(n) single pass — counts entries that preloadDrain would consume at
+    // this depth. Equivalent to the previous sort-then-drain simulation
+    // because sorted drain order exhausts all depthMin <= maxDepth entries
+    // before the loop condition (some entry <= maxDepth) can fail.
+    let count = 0;
+    for (const entry of this._spawnQueue) {
+      if (entry.countsTowardLoad !== false && entry.depthMin <= maxDepth) {
+        count++;
       }
-
-      queue.splice(entryIndex, 1);
-      drained++;
     }
-
-    return drained;
+    return count;
   }
 
   _resolveVisibleCreatureBudget(depth) {
