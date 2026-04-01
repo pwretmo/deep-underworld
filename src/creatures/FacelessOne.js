@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import { LOD_NEAR_DISTANCE, LOD_MEDIUM_DISTANCE, toStandardMaterial } from './lodUtils.js';
 
+const _tmpDir = new THREE.Vector3();
+const _tmpVec = new THREE.Vector3();
+
 const FACELESS_LOD = {
   near:   { headSegs: [32, 24], torsoSegs: [12, 8], armSegs: 8, tendrils: true, veins: true, spines: true, fingers: true },
   medium: { headSegs: [18, 14], torsoSegs: [8, 5],  armSegs: 6, tendrils: false, veins: false, spines: false, fingers: false },
@@ -277,10 +280,10 @@ export class FacelessOne {
       }
     }
 
-    this.group.position.add(this.direction.clone().multiplyScalar(this.speed * dt));
+    this.group.position.add(_tmpDir.copy(this.direction).multiplyScalar(this.speed * dt));
 
     // Face player slowly - always watching
-    const toPlayer = new THREE.Vector3().subVectors(playerPos, this.group.position);
+    const toPlayer = _tmpVec.subVectors(playerPos, this.group.position);
     const targetY = Math.atan2(toPlayer.x, toPlayer.z);
     this.group.rotation.y = THREE.MathUtils.lerp(this.group.rotation.y, targetY + Math.PI / 2, dt * 0.5);
 

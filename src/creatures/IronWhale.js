@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { LOD_NEAR_DISTANCE, LOD_MEDIUM_DISTANCE, toStandardMaterial } from './lodUtils.js';
 
+const _tmpDir = new THREE.Vector3();
+
 const WHALE_LOD = {
   near:   { bodySegs: [24, 18], dorsalPlates: 8, barnacles: 15, baleen: 12 },
   medium: { bodySegs: [14, 10], dorsalPlates: 4, barnacles: 7,  baleen: 6 },
@@ -153,7 +155,7 @@ export class IronWhale {
       this.direction.set(Math.random() - 0.5, (Math.random() - 0.5) * 0.02, Math.random() - 0.5).normalize();
     }
 
-    this.group.position.add(this.direction.clone().multiplyScalar(this.speed * dt));
+    this.group.position.add(_tmpDir.copy(this.direction).multiplyScalar(this.speed * dt));
     this.group.position.y += Math.sin(this.time * 0.2) * 0.1 * dt;
 
     // Slow majestic turn

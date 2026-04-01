@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 
+const _tmpDir = new THREE.Vector3();
+
 // Multi-armed industrial harvester - collects biomass, mechanical gripper arms
 export class Harvester {
   constructor(scene, position) {
@@ -128,7 +130,7 @@ export class Harvester {
       }
     }
 
-    this.group.position.add(this.direction.clone().multiplyScalar(this.speed * dt));
+    this.group.position.add(_tmpDir.copy(this.direction).multiplyScalar(this.speed * dt));
 
     // Face forward
     const angle = Math.atan2(this.direction.x, this.direction.z);

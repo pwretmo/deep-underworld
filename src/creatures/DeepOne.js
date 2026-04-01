@@ -923,7 +923,7 @@ export class DeepOne {
   }
 
   getPosition() {
-    return this.group.position.clone();
+    return this.group.position;
   }
 
   dispose() {

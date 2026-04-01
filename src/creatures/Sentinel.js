@@ -1,5 +1,8 @@
 import * as THREE from 'three';
 
+const _tmpDir = new THREE.Vector3();
+const _tmpVec = new THREE.Vector3();
+
 // Tall thin sentinel - single cyclopean eye, watches from distance, biomechanical stilt creature
 export class Sentinel {
   constructor(scene, position) {
@@ -125,10 +128,10 @@ export class Sentinel {
       this.direction.set(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
     }
 
-    this.group.position.add(this.direction.clone().multiplyScalar(this.speed * dt));
+    this.group.position.add(_tmpDir.copy(this.direction).multiplyScalar(this.speed * dt));
 
     // Always face the player (watching)
-    const toPlayer = new THREE.Vector3().subVectors(playerPos, this.group.position);
+    const toPlayer = _tmpVec.subVectors(playerPos, this.group.position);
     const targetAngle = Math.atan2(toPlayer.x, toPlayer.z);
     this.group.rotation.y = THREE.MathUtils.lerp(this.group.rotation.y, targetAngle, dt * 1);
 
