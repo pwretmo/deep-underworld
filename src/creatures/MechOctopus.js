@@ -447,12 +447,12 @@ export class MechOctopus {
 
   // ─── Update ──────────────────────────────────────────────────────────────────
 
-  update(dt, playerPos) {
+  update(dt, playerPos, distSq) {
     this.time += dt;
     this.turnTimer += dt;
     this._frameCounter++;
 
-    this._playerDist = this.group.position.distanceTo(playerPos);
+    this._playerDist = Math.sqrt(distSq);
 
     // --- Direction / steering ---
     if (this.turnTimer > this.turnInterval) {

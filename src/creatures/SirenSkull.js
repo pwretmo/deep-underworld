@@ -722,13 +722,13 @@ export class SirenSkull {
     geometry.computeVertexNormals();
   }
 
-  update(dt, playerPos) {
+  update(dt, playerPos, distSq) {
     this.time += dt;
     this._frameCount++;
     this.turnTimer += dt;
     this.listeningTimer += dt;
 
-    const distToPlayer = this.group.position.distanceTo(playerPos);
+    const distToPlayer = Math.sqrt(distSq);
     const proximity = THREE.MathUtils.clamp(1 - distToPlayer / 55, 0, 1);
     const songPulse = 0.5 + Math.sin(this.time * 2.8 + this.songPhase) * 0.5;
 

@@ -592,7 +592,7 @@ export class TendrilHunter {
   }
 
   // ── Per-frame update ──────────────────────────────────────────────────────
-  update(dt, playerPos) {
+  update(dt, playerPos, distSq) {
     this.time += dt;
     this._frameCount++;
 
@@ -619,7 +619,7 @@ export class TendrilHunter {
 
     // Respawn when too far from player; recompute distance after reposition
     // so the rest of this frame's state/animation reflects actual position.
-    let distToPlayer = this.group.position.distanceTo(playerPos);
+    let distToPlayer = Math.sqrt(distSq);
     if (distToPlayer > RESPAWN_DISTANCE) {
       const a = Math.random() * TWO_PI;
       this.group.position.set(

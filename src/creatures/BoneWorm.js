@@ -518,7 +518,7 @@ export class BoneWorm {
   }
 
   // ── Update ──────────────────────────────────────────────────────────────────
-  update(dt, playerPos) {
+  update(dt, playerPos, distSq) {
     this.time += dt;
     this._frameCounter += 1;
     this.turnTimer += dt;
@@ -547,7 +547,7 @@ export class BoneWorm {
     this.group.rotation.y = THREE.MathUtils.lerp(this.group.rotation.y, angle + Math.PI / 2, dt * 2);
 
     // ── LOD Switching ─────────────────────────────────────────────────────
-    const distToPlayer = this.group.position.distanceTo(playerPos);
+    const distToPlayer = Math.sqrt(distSq);
     this._lodTier = this._resolveLodTier(distToPlayer);
     this._lastLodTier = this._lodTier;
 

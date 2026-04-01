@@ -485,7 +485,7 @@ export class NeedleFish {
     this.group.rotation.y = THREE.MathUtils.lerp(this.group.rotation.y, angle + Math.PI / 2, dt * turnRate);
 
     // Respawn if too far
-    if (this.group.position.distanceTo(playerPos) > 200) {
+    if (this._distToPlayer > 200) {
       const a = Math.random() * Math.PI * 2;
       this.group.position.set(
         playerPos.x + Math.cos(a) * 60,
@@ -582,12 +582,12 @@ export class NeedleFish {
 
   // ─── Update ────────────────────────────────────────────────────────────────
 
-  update(dt, playerPos) {
+  update(dt, playerPos, distSq) {
     this.time += dt;
     this._frameCounter++;
 
     this._toPlayer.subVectors(playerPos, this.group.position);
-    this._distToPlayer = this._toPlayer.length();
+    this._distToPlayer = Math.sqrt(distSq);
 
     this._lodTier = this._resolveLodTier(this._distToPlayer);
     this._lastLodTier = this._lodTier;

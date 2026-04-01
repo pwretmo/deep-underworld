@@ -113,7 +113,7 @@ export class Harvester {
     this.group.scale.setScalar(s);
   }
 
-  update(dt, playerPos) {
+  update(dt, playerPos, distSq) {
     this.time += dt;
     this.turnTimer += dt;
 
@@ -144,7 +144,7 @@ export class Harvester {
     // Eye tracking
     this.eyeLight.intensity = 0.8 + Math.sin(this.time * 3) * 0.3;
 
-    if (this.group.position.distanceTo(playerPos) > 200) {
+    if (distSq > 40000) {
       const a = Math.random() * Math.PI * 2;
       this.group.position.set(playerPos.x + Math.cos(a) * 70, playerPos.y - Math.random() * 15, playerPos.z + Math.sin(a) * 70);
     }

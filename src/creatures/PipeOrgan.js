@@ -633,15 +633,13 @@ export class PipeOrgan {
 
   // ── Update ─────────────────────────────────────────────────────────────────
 
-  update(dt, playerPos) {
+  update(dt, playerPos, distSq) {
     this.time        += dt;
     this._uTime.value = this.time;
 
-    const dist = _tmpVec3.copy(this.group.position).distanceTo(playerPos);
-
     // Hydraulic state machine
-    if      (this._state === 'idle'      && dist < 15) this._state = 'retracting';
-    else if (this._state === 'retracted' && dist > 25) this._state = 'extending';
+    if      (this._state === 'idle'      && distSq < 225) this._state = 'retracting';
+    else if (this._state === 'retracted' && distSq > 625) this._state = 'extending';
 
     if      (this._state === 'retracting') {
       this._retractT = Math.min(1, this._retractT + dt * 2.5);

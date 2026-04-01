@@ -742,11 +742,11 @@ export class Anglerfish {
     this.group.rotation.z = THREE.MathUtils.lerp(this.group.rotation.z, bodyRoll * (0.45 + velocityInput * 0.02), 1 - Math.exp(-4 * dt));
   }
 
-  update(dt, playerPos) {
+  update(dt, playerPos, distSq) {
     this.time += dt;
     this._frameCounter += 1;
 
-    const preMoveDistToPlayer = playerPos.distanceTo(this.group.position);
+    const preMoveDistToPlayer = Math.sqrt(distSq);
 
     this._updateStateAndVelocity(dt, playerPos, preMoveDistToPlayer);
     this._toPlayer.subVectors(playerPos, this.group.position);

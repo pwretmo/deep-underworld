@@ -477,11 +477,11 @@ export class GhostShark {
 
   // ── Update ───────────────────────────────────────────────────────────────
 
-  update(dt, playerPos) {
+  update(dt, playerPos, distSq) {
     this.time += dt;
     this._frameCounter++;
 
-    const dist     = this.group.position.distanceTo(playerPos);
+    const dist     = Math.sqrt(distSq);
     const tierName = this._resolveLodTier(dist);
 
     // LOD switch

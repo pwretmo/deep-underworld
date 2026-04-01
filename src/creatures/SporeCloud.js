@@ -321,7 +321,7 @@ export class SporeCloud {
 
   // ─── Update ──────────────────────────────────────────────────────────────
 
-  update(dt, playerPos) {
+  update(dt, playerPos, distSq) {
     this.time += dt;
     this.turnTimer += dt;
 
@@ -340,7 +340,7 @@ export class SporeCloud {
     this.group.position.add(_vec3a);
 
     // Respawn when too far from player
-    if (this.group.position.distanceTo(playerPos) > RESPAWN_DISTANCE) {
+    if (distSq > RESPAWN_DISTANCE * RESPAWN_DISTANCE) {
       const a = Math.random() * Math.PI * 2;
       this.group.position.set(
         playerPos.x + Math.cos(a) * RESPAWN_RADIUS,
@@ -359,13 +359,11 @@ export class SporeCloud {
       this._farMat.opacity = 0.5 + 0.3 * Math.sin(this.time * 1.5);
     }
 
-    const dist = this.group.position.distanceTo(playerPos);
-
     // Far LOD — no per-spore work
-    if (dist > LOD_MEDIUM_DISTANCE) return;
+    if (distSq > LOD_MEDIUM_DISTANCE * LOD_MEDIUM_DISTANCE) return;
 
     // Medium LOD — simple whole-cloud emissive throb, no matrix updates
-    if (dist > LOD_NEAR_DISTANCE) {
+    if (distSq > LOD_NEAR_DISTANCE * LOD_NEAR_DISTANCE) {
       this._midSporeMat.emissiveIntensity = 0.3 + 0.15 * Math.sin(this.time * 1.2);
       this._midCoreMat.emissiveIntensity  = 1.8 + 0.5  * Math.sin(this.time * 1.5);
       return;

@@ -616,7 +616,7 @@ export class ChainDragger {
   // Per-frame update
   // ---------------------------------------------------------------------------
 
-  update(dt, playerPos) {
+  update(dt, playerPos, distSq) {
     this.time += dt;
     this.turnTimer += dt;
 
@@ -651,7 +651,7 @@ export class ChainDragger {
     const angle = Math.atan2(this.direction.x, this.direction.z);
     this.group.rotation.y = THREE.MathUtils.lerp(this.group.rotation.y, angle, dt * 2);
 
-    const dist = this.group.position.distanceTo(playerPos);
+    const dist = Math.sqrt(distSq);
 
     // Near LOD: Verlet physics + instance matrix update + all secondary motion
     if (dist <= LOD_NEAR_DISTANCE) {
