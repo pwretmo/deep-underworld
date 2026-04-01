@@ -321,6 +321,12 @@ export class Ocean {
         this.sunLight.shadow.map = null;
       }
       this._rebuildParticles(e.detail.settings);
+
+      const wasTransmission = this._waterSurfaceUsesTransmission;
+      const nowTransmission = newTier === "high" || newTier === "ultra";
+      if (wasTransmission !== nowTransmission) {
+        this._rebuildWaterSurface();
+      }
     });
   }
 
@@ -371,20 +377,43 @@ export class Ocean {
   }
 
   _createWaterSurface() {
+    const tier = qualityManager.tier;
+    const useTransmission = tier === "high" || tier === "ultra";
+
     const geo = new THREE.PlaneGeometry(2000, 2000, 100, 100);
-    const mat = new THREE.MeshStandardMaterial({
-      // Keep the underwater ceiling largely diffuse. Highly reflective back-face
-      // shading produces yaw-linked dark wedges near the top of frame.
-      color: 0x2d6388,
-      transparent: true,
-      opacity: 0.26,
-      side: THREE.DoubleSide,
-      metalness: 0.0,
-      roughness: 1.0,
-      envMapIntensity: 0.0,
-      emissive: new THREE.Color(0x336688),
-      emissiveIntensity: 0.15,
-    });
+
+    let mat;
+    if (useTransmission) {
+      mat = new THREE.MeshPhysicalMaterial({
+        color: 0x4488bb,
+        transparent: true,
+        opacity: 1.0,
+        transmission: 0.9,
+        thickness: 1.5,
+        ior: 1.333,
+        roughness: 0.05,
+        metalness: 0.0,
+        attenuationColor: new THREE.Color(0x1a5c6e),
+        attenuationDistance: 8.0,
+        side: THREE.DoubleSide,
+        emissive: new THREE.Color(0x336688),
+        emissiveIntensity: 0.15,
+        envMapIntensity: 0.0,
+      });
+    } else {
+      mat = new THREE.MeshStandardMaterial({
+        color: 0x2d6388,
+        transparent: true,
+        opacity: 0.26,
+        side: THREE.DoubleSide,
+        metalness: 0.0,
+        roughness: 0.05,
+        envMapIntensity: 0.0,
+        emissive: new THREE.Color(0x336688),
+        emissiveIntensity: 0.15,
+      });
+    }
+
     const viewDir = positionView.negate().normalize();
     const surfaceFacing = abs(dot(normalView, viewDir));
     const horizonFade = smoothstep(0.08, 0.34, surfaceFacing);
@@ -434,6 +463,18 @@ export class Ocean {
     this.waterSurface.rotation.x = -Math.PI / 2;
     this.waterSurface.position.y = 0;
     this.scene.add(this.waterSurface);
+
+    this._waterSurfaceUsesTransmission = useTransmission;
+  }
+
+  _rebuildWaterSurface() {
+    if (this.waterSurface) {
+      this.scene.remove(this.waterSurface);
+      this.waterSurface.geometry.dispose();
+      this.waterSurface.material.dispose();
+      this.waterSurface = null;
+    }
+    this._createWaterSurface();
   }
 
   _createParticles(count = this._getMarineSnowParticleCount()) {
