@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 
+const _tmpDir = new THREE.Vector3();
+
 // Spectral wraith of the abyss - elongated skull, trailing shadow membrane, inner jaw
 export class AbyssWraith {
   constructor(scene, position) {
@@ -155,7 +157,7 @@ export class AbyssWraith {
       }
     }
 
-    this.group.position.add(this.direction.clone().multiplyScalar(this.speed * dt));
+    this.group.position.add(_tmpDir.copy(this.direction).multiplyScalar(this.speed * dt));
 
     // Face direction
     const angle = Math.atan2(this.direction.x, this.direction.z);

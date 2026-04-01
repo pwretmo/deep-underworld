@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 
+const _tmpDir = new THREE.Vector3();
+
 // Floating biomechanical ribcage structure with pulsing organs inside
 export class RibCage {
   constructor(scene, position) {
@@ -117,7 +119,7 @@ export class RibCage {
       this.direction.set(Math.random() - 0.5, (Math.random() - 0.5) * 0.05, Math.random() - 0.5).normalize();
     }
 
-    this.group.position.add(this.direction.clone().multiplyScalar(this.speed * dt));
+    this.group.position.add(_tmpDir.copy(this.direction).multiplyScalar(this.speed * dt));
 
     // Slow majestic rotation
     this.group.rotation.y += dt * 0.05;

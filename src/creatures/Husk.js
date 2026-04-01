@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 
+const _tmpDir = new THREE.Vector3();
+
 // Empty biomechanical exoskeleton husk that drifts and occasionally twitches
 export class Husk {
   constructor(scene, position) {
@@ -101,7 +103,7 @@ export class Husk {
     this.twitchTimer += dt;
 
     // Very slow dead drift
-    this.group.position.add(this.direction.clone().multiplyScalar(this.speed * dt));
+    this.group.position.add(_tmpDir.copy(this.direction).multiplyScalar(this.speed * dt));
     this.group.position.y += Math.sin(this.time * 0.15) * 0.05 * dt;
 
     // Dead tumble
