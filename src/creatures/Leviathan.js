@@ -20,6 +20,7 @@ export class Leviathan {
     this.passing = false;
     this.passTimer = 0;
 
+    this._lastLodTier = 'near';
     this._buildModel();
     this.group.position.copy(position);
     scene.add(this.group);
@@ -213,6 +214,16 @@ export class Leviathan {
     return { group: tierGroup, segments, jaw };
   }
 
+  _getVisibleTierName() {
+    if (!this.lod || !this.lod.levels) return 'near';
+    for (let i = 0; i < this.lod.levels.length; i++) {
+      if (this.lod.levels[i].object.visible) {
+        return i === 0 ? 'near' : i === 1 ? 'medium' : 'far';
+      }
+    }
+    return this._lastLodTier;
+  }
+
   update(dt, playerPos, distSq) {
     this.time += dt;
 
@@ -230,18 +241,20 @@ export class Leviathan {
     const angle = Math.atan2(nextX - targetX, nextZ - targetZ);
     this.group.rotation.y = angle + Math.PI / 2;
 
-    // Undulate body segments across all tiers
-    for (const tier of Object.values(this.tiers)) {
-      for (let i = 1; i < tier.segments.length; i++) {
-        const seg = tier.segments[i];
-        const phase = this.time * 1.5 - i * 0.3;
-        seg.position.z = Math.sin(phase) * i * 0.15;
-        seg.position.y = Math.cos(phase * 0.7) * i * 0.08;
-      }
-      // Jaw movement
-      if (tier.jaw) {
-        tier.jaw.rotation.z = Math.PI / 2 + 0.3 + Math.sin(this.time * 1.5) * 0.1;
-      }
+    // Undulate body segments (active LOD tier only)
+    const activeTierName = this._getVisibleTierName();
+    this._lastLodTier = activeTierName;
+    const activeTier = this.tiers[activeTierName];
+    if (!activeTier) return;
+    for (let i = 1; i < activeTier.segments.length; i++) {
+      const seg = activeTier.segments[i];
+      const phase = this.time * 1.5 - i * 0.3;
+      seg.position.z = Math.sin(phase) * i * 0.15;
+      seg.position.y = Math.cos(phase * 0.7) * i * 0.08;
+    }
+    // Jaw movement
+    if (activeTier.jaw) {
+      activeTier.jaw.rotation.z = Math.PI / 2 + 0.3 + Math.sin(this.time * 1.5) * 0.1;
     }
 
     // Eye glow pulsing

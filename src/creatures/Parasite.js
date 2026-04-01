@@ -553,9 +553,11 @@ export class Parasite {
     const t = this.time;
     const heartbeatFast = Math.sin(t * (this._heartbeatRate + this._proximityPulse * 2) + this._heartbeatPhase);
 
-    // Update shader uniforms on near/medium sac materials
-    this._updateSacUniforms(this.tiers.near, t);
-    this._updateSacUniforms(this.tiers.medium, t);
+    // Update shader uniforms on active sac material (skip far tier — no sac mat)
+    if (tierName !== 'far') {
+      const tier = this.tiers[tierName];
+      if (tier) this._updateSacUniforms(tier, t);
+    }
 
     // Near LOD: per-vertex deformation (shader), proboscis IK, tendrils, vein pulse
     if (tierName === 'near') {

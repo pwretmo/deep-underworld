@@ -926,13 +926,11 @@ export class SpinalEel {
     const tierName = this._getVisibleTierName();
     this._lastLodTier = tierName;
 
-    this._updateTierUniforms('near');
-    this._updateTierUniforms('medium');
-
     const farStep = qualityManager.tier === 'ultra' ? LOD_PROFILE.far.animStep : 3;
-    if (this._frameCount % farStep === 0) {
-      this._updateTierUniforms('far');
-    }
+    if (tierName === 'far' && this._frameCount % farStep !== 0) return;
+
+    // Update shader uniforms for the active tier only
+    this._updateTierUniforms(tierName);
 
     if (tierName === 'near') {
       this._updateDetailedTier('near', dt, distToPlayer);

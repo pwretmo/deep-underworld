@@ -490,9 +490,11 @@ export class BirthSac {
     const effectiveRate = this._heartbeatRate + this._proximityPulse * 1.5;
     const heartbeat     = Math.sin(t * effectiveRate + this._heartbeatPhase);
 
-    // Update sac shader uniforms (near + medium share the same sacMat per tier)
-    this._updateSacUniforms(this.tiers.near, t);
-    this._updateSacUniforms(this.tiers.medium, t);
+    // Update sac shader uniforms (active tier only)
+    if (tierName !== 'far') {
+      const tier = this.tiers[tierName];
+      if (tier) this._updateSacUniforms(tier, t);
+    }
 
     // Near LOD: per-vertex deformation (GPU shader), embryo twitching, stalk tension, vein pulse
     if (tierName === 'near') {

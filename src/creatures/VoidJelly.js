@@ -911,24 +911,23 @@ export class VoidJelly {
       this._lastTierName = tierName;
     }
 
-    // ── Bell shader uniforms (near + medium tiers) ──
+    // ── Bell shader uniforms (active tier only, skip far — no bell mat) ──
     const pulseShape = Math.sign(pulse) * Math.pow(Math.abs(pulse), 1.3);
-    this._updateBellUniforms(this._tiers.near, pulseShape, t, flashWave);
-    this._updateBellUniforms(this._tiers.medium, pulseShape, t, flashWave);
+    if (tierName !== 'far') {
+      this._updateBellUniforms(tier, pulseShape, t, flashWave);
+    }
 
-    // ── Bell squish ──
+    // ── Bell squish (active tier only) ──
     const squishX = 1 + pulseShape * 0.1;
     const squishY = 1 - pulseShape * 0.14;
-    if (this._tiers.near.interior) {
-      this._tiers.near.interior.inner.scale.set(squishX * 0.97, squishY * 0.9, squishX * 0.97);
-    }
-    if (this._tiers.medium.interior) {
-      this._tiers.medium.interior.inner.scale.set(squishX * 0.97, squishY * 0.92, squishX * 0.97);
+    if (tier.interior) {
+      const squishScale = tierName === 'near' ? 0.9 : 0.92;
+      tier.interior.inner.scale.set(squishX * 0.97, squishY * squishScale, squishX * 0.97);
     }
 
-    // ── Gonad visibility cycle: opacity/emissive pulsation ──
-    if (this._tiers.near.interior) {
-      for (const g of this._tiers.near.interior.gonads) {
+    // ── Gonad visibility cycle: opacity/emissive pulsation (near only) ──
+    if (tierName === 'near' && tier.interior) {
+      for (const g of tier.interior.gonads) {
         const gPulse = Math.sin(t * 1.2 + g.phaseOffset) * 0.5 + 0.5;
         g.mat.emissiveIntensity = g.baseEmissive * (0.6 + gPulse * 0.8);
         g.mat.opacity = 0.3 + gPulse * 0.35;
