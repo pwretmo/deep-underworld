@@ -222,6 +222,9 @@ export class Game {
       started: false,
     };
     this._eventsBound = false;
+    // Draw-call diagnostics (enabled with ?debug URL param)
+    this._debugMode = false;
+    this._lastDrawCallLog = 0;
     // Preload warmup and event binding are deferred to async init() because
     // those paths touch renderer-dependent systems that require renderer.init().
     // _initEnvironmentColors() and _animate() are deferred to async init()
@@ -234,6 +237,10 @@ export class Game {
    */
   async init() {
     await this.renderer.init();
+
+    this._debugMode =
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).has("debug");
 
     this.player = new Player(
       this.camera,
@@ -1118,6 +1125,19 @@ export class Game {
         flashlightOn: this.flashlightOn,
         exposure: this.renderer.toneMappingExposure,
       });
+
+      // Draw-call diagnostics — log once per second when ?debug is set.
+      // renderer.info auto-resets at the start of each render call, so
+      // reading it here gives the count for the frame we just rendered.
+      if (this._debugMode) {
+        const _now = performance.now();
+        if (_now - this._lastDrawCallLog >= 1000) {
+          this._lastDrawCallLog = _now;
+          console.log(
+            `[deep-underworld] draw calls: ${this.renderer.info.render.calls}`,
+          );
+        }
+      }
 
       if (this.hud.isDiagnosticsVisible()) {
         this.hud.updateDiagnostics(this._getDiagnosticsSnapshot());

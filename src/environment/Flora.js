@@ -103,6 +103,87 @@ export class Flora {
       metalness: 0.1,
     });
 
+    // Shared geometry for kelp leaves (used in per-kelp InstancedMesh)
+    this._leafGeo = new THREE.PlaneGeometry(0.8, 0.3);
+
+    // Shared geometry and materials for batched coral branches.
+    // A unit cylinder (radiusTop=0.6, radiusBottom=1, height=3) is scaled per
+    // instance via the matrix so that all branches share a single draw call
+    // per chunk instead of one draw call per branch mesh.
+    this._coralBranchGeo = new THREE.CylinderGeometry(0.6, 1, 3, 5);
+    this._coralMatShallow = new THREE.MeshStandardMaterial({
+      roughness: 0.45,
+      metalness: 0.05,
+    });
+    // Deep-zone coral gets a per-instance emissive derived from its base color.
+    this._coralMatDeep = new THREE.MeshStandardNodeMaterial({
+      roughness: 0.45,
+      metalness: 0.05,
+    });
+    this._coralMatDeep.emissiveNode = materialColor.mul(0.1);
+
+    // Matrix used to hide inactive global-pool instances (zero scale = invisible).
+    this._zeroScaleMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
+
+    // Global InstancedMesh pools for orbs, tubes, and tips.
+    // Instead of creating per-chunk InstancedMesh objects (25 × 3 = 75 draw
+    // calls), all visible instances share 3 global meshes = 3 draw calls total.
+    const MAX_ORB_INSTANCES = 500;
+    const MAX_TUBE_INSTANCES = 1200;
+    const MAX_TIP_INSTANCES = 1200;
+
+    this._orbPool = new THREE.InstancedMesh(
+      this._orbGeo,
+      this._orbMat,
+      MAX_ORB_INSTANCES,
+    );
+    this._orbPool.instanceColor = new THREE.InstancedBufferAttribute(
+      new Float32Array(MAX_ORB_INSTANCES * 3),
+      3,
+    );
+    for (let i = 0; i < MAX_ORB_INSTANCES; i++)
+      this._orbPool.setMatrixAt(i, this._zeroScaleMatrix);
+    this._orbPool.instanceMatrix.needsUpdate = true;
+    this._orbPool.instanceColor.needsUpdate = true;
+    this._orbFreeSlots = Array.from(
+      { length: MAX_ORB_INSTANCES },
+      (_, i) => i,
+    ).reverse();
+
+    this._tubePool = new THREE.InstancedMesh(
+      this._tubeGeo,
+      this._tubeMat,
+      MAX_TUBE_INSTANCES,
+    );
+    for (let i = 0; i < MAX_TUBE_INSTANCES; i++)
+      this._tubePool.setMatrixAt(i, this._zeroScaleMatrix);
+    this._tubePool.instanceMatrix.needsUpdate = true;
+    this._tubeFreeSlots = Array.from(
+      { length: MAX_TUBE_INSTANCES },
+      (_, i) => i,
+    ).reverse();
+
+    this._tipPool = new THREE.InstancedMesh(
+      this._tipGeo,
+      this._tipMat,
+      MAX_TIP_INSTANCES,
+    );
+    for (let i = 0; i < MAX_TIP_INSTANCES; i++)
+      this._tipPool.setMatrixAt(i, this._zeroScaleMatrix);
+    this._tipPool.instanceMatrix.needsUpdate = true;
+    this._tipFreeSlots = Array.from(
+      { length: MAX_TIP_INSTANCES },
+      (_, i) => i,
+    ).reverse();
+
+    // Add global pools to scene once; they persist for the lifetime of Flora.
+    this.scene.add(this._orbPool);
+    this.scene.add(this._tubePool);
+    this.scene.add(this._tipPool);
+
+    // Scratch color for pool slot allocation
+    this._tmpColor = new THREE.Color();
+
     window.addEventListener("qualitychange", (e) => {
       this._floraDensityScale = e.detail.settings.floraDensityScale;
       // Mark all chunks for rebuild on next move
@@ -154,35 +235,84 @@ export class Flora {
       this._addKelpFromData(group, kelp);
     }
 
-    for (const coral of payload.corals) {
-      this._addCoralFromData(group, coral);
+    // Batch all coral branches in the chunk into at most two InstancedMesh
+    // objects (one for shallow corals with no emissive, one for deep corals
+    // with a per-instance emissive derived from the branch color).  This
+    // replaces the old per-branch THREE.Mesh approach (~10-20 draw calls per
+    // chunk for corals → 2 draw calls per chunk).
+    {
+      const shallowBranches = [];
+      const deepBranches = [];
+      for (const coralData of payload.corals) {
+        const color = new THREE.Color(coralData.color);
+        const target = coralData.emissiveFactor > 0 ? deepBranches : shallowBranches;
+        for (const branchData of coralData.branches) {
+          target.push({
+            x: branchData.x,
+            y: branchData.y,
+            z: branchData.z,
+            size: branchData.size,
+            rx: branchData.rx,
+            rz: branchData.rz,
+            color,
+          });
+        }
+      }
+
+      const _buildCoralIM = (branches, mat) => {
+        const im = new THREE.InstancedMesh(
+          this._coralBranchGeo,
+          mat,
+          branches.length,
+        );
+        im.instanceColor = new THREE.InstancedBufferAttribute(
+          new Float32Array(branches.length * 3),
+          3,
+        );
+        // Geometry and material are shared — do not dispose them on group removal.
+        im.userData.sharedResources = true;
+        const dummy = new THREE.Object3D();
+        for (let i = 0; i < branches.length; i++) {
+          const d = branches[i];
+          dummy.position.set(d.x, d.y, d.z);
+          dummy.scale.setScalar(d.size);
+          dummy.rotation.set(d.rx, 0, d.rz);
+          dummy.updateMatrix();
+          im.setMatrixAt(i, dummy.matrix);
+          im.setColorAt(i, d.color);
+        }
+        im.instanceMatrix.needsUpdate = true;
+        im.instanceColor.needsUpdate = true;
+        group.add(im);
+      };
+
+      if (shallowBranches.length > 0)
+        _buildCoralIM(shallowBranches, this._coralMatShallow);
+      if (deepBranches.length > 0)
+        _buildCoralIM(deepBranches, this._coralMatDeep);
     }
 
-    // Batch bio-orbs into InstancedMesh
-    if (payload.orbs.length > 0) {
-      const instancedOrbs = new THREE.InstancedMesh(
-        this._orbGeo,
-        this._orbMat,
-        payload.orbs.length,
-      );
-      instancedOrbs.instanceColor = new THREE.InstancedBufferAttribute(
-        new Float32Array(payload.orbs.length * 3),
-        3,
-      );
+    // Allocate bio-orbs from the global pool instead of creating a new
+    // InstancedMesh per chunk (25 per-chunk IMs → 1 global IM = 1 draw call).
+    {
+      const orbSlots = [];
       const dummy = new THREE.Object3D();
-      const tmpColor = new THREE.Color();
-      for (let i = 0; i < payload.orbs.length; i++) {
-        const d = payload.orbs[i];
-        dummy.position.set(d.x, d.y, d.z);
+      for (const d of payload.orbs) {
+        const slot = this._orbFreeSlots.pop();
+        if (slot == null) break; // pool exhausted — skip gracefully
+        dummy.position.set(d.x + offsetX, d.y, d.z + offsetZ);
         dummy.scale.setScalar(d.size);
         dummy.updateMatrix();
-        instancedOrbs.setMatrixAt(i, dummy.matrix);
-        tmpColor.setHex(d.color);
-        instancedOrbs.setColorAt(i, tmpColor);
+        this._orbPool.setMatrixAt(slot, dummy.matrix);
+        this._tmpColor.setHex(d.color);
+        this._orbPool.setColorAt(slot, this._tmpColor);
+        orbSlots.push(slot);
       }
-      instancedOrbs.instanceMatrix.needsUpdate = true;
-      instancedOrbs.instanceColor.needsUpdate = true;
-      group.add(instancedOrbs);
+      if (orbSlots.length > 0) {
+        this._orbPool.instanceMatrix.needsUpdate = true;
+        this._orbPool.instanceColor.needsUpdate = true;
+      }
+      group.userData.orbSlots = orbSlots;
     }
 
     for (const lightData of payload.orbLights) {
@@ -196,43 +326,39 @@ export class Flora {
       group.add(light);
     }
 
-    // Batch tube worm cylinders into InstancedMesh
-    if (payload.tubes.length > 0) {
-      const instancedTubes = new THREE.InstancedMesh(
-        this._tubeGeo,
-        this._tubeMat,
-        payload.tubes.length,
-      );
+    // Allocate tube worm cylinders from the global tube pool.
+    {
+      const tubeSlots = [];
       const dummy = new THREE.Object3D();
-      for (let i = 0; i < payload.tubes.length; i++) {
-        const d = payload.tubes[i];
-        dummy.position.set(d.x, d.y, d.z);
+      for (const d of payload.tubes) {
+        const slot = this._tubeFreeSlots.pop();
+        if (slot == null) break;
+        dummy.position.set(d.x + offsetX, d.y, d.z + offsetZ);
         dummy.scale.set(1, d.height, 1);
         dummy.rotation.set(d.rx, 0, d.rz);
         dummy.updateMatrix();
-        instancedTubes.setMatrixAt(i, dummy.matrix);
+        this._tubePool.setMatrixAt(slot, dummy.matrix);
+        tubeSlots.push(slot);
       }
-      instancedTubes.instanceMatrix.needsUpdate = true;
-      group.add(instancedTubes);
+      if (tubeSlots.length > 0) this._tubePool.instanceMatrix.needsUpdate = true;
+      group.userData.tubeSlots = tubeSlots;
     }
 
-    // Batch tube worm tips into InstancedMesh
-    if (payload.tubeTips.length > 0) {
-      const instancedTips = new THREE.InstancedMesh(
-        this._tipGeo,
-        this._tipMat,
-        payload.tubeTips.length,
-      );
+    // Allocate tube worm tips from the global tip pool.
+    {
+      const tipSlots = [];
       const dummy = new THREE.Object3D();
-      for (let i = 0; i < payload.tubeTips.length; i++) {
-        const d = payload.tubeTips[i];
-        dummy.position.set(d.x, d.y, d.z);
+      for (const d of payload.tubeTips) {
+        const slot = this._tipFreeSlots.pop();
+        if (slot == null) break;
+        dummy.position.set(d.x + offsetX, d.y, d.z + offsetZ);
         dummy.scale.setScalar(1);
         dummy.updateMatrix();
-        instancedTips.setMatrixAt(i, dummy.matrix);
+        this._tipPool.setMatrixAt(slot, dummy.matrix);
+        tipSlots.push(slot);
       }
-      instancedTips.instanceMatrix.needsUpdate = true;
-      group.add(instancedTips);
+      if (tipSlots.length > 0) this._tipPool.instanceMatrix.needsUpdate = true;
+      group.userData.tipSlots = tipSlots;
     }
 
     group.position.set(offsetX, 0, offsetZ);
@@ -296,19 +422,44 @@ export class Flora {
     );
     mat.needsUpdate = true;
 
-    const leafMat = this._createKelpMaterial(color, emissive);
-
     const kelp = new THREE.Mesh(geo, mat);
     kelp.position.set(kelpData.x, kelpData.y, kelpData.z);
     parent.add(kelp);
 
-    for (const leafData of kelpData.leafRotations) {
-      const leafGeo = new THREE.PlaneGeometry(0.8, 0.3);
-      const leaf = new THREE.Mesh(leafGeo, leafMat);
-      leaf.position.set(kelpData.x + 0.3, kelpData.y + leafData.y, kelpData.z);
-      leaf.rotation.y = leafData.ry;
-      leaf.rotation.z = Math.PI / 4;
-      parent.add(leaf);
+    // Batch all leaves belonging to this kelp stalk into a single InstancedMesh
+    // using the shared leaf geometry.  Each stalk still needs its own material
+    // (because the sway animation embeds per-stalk uniforms via positionNode),
+    // so this saves N−1 draw calls per stalk (N leaves → 1 draw call).
+    if (kelpData.leafRotations.length > 0) {
+      const leafMat2 = this._createKelpMaterial(color, emissive);
+      leafMat2.positionNode = vec3(
+        positionLocal.x.add(swayOffset),
+        positionLocal.y,
+        positionLocal.z,
+      );
+      leafMat2.needsUpdate = true;
+
+      const leafIM = new THREE.InstancedMesh(
+        this._leafGeo,
+        leafMat2,
+        kelpData.leafRotations.length,
+      );
+      // Geometry is shared across all kelp stalks — do not dispose on group unload.
+      leafIM.userData.sharedGeometry = true;
+      const dummy = new THREE.Object3D();
+      for (let i = 0; i < kelpData.leafRotations.length; i++) {
+        const leafData = kelpData.leafRotations[i];
+        dummy.position.set(
+          kelpData.x + 0.3,
+          kelpData.y + leafData.y,
+          kelpData.z,
+        );
+        dummy.rotation.set(0, leafData.ry, Math.PI / 4);
+        dummy.updateMatrix();
+        leafIM.setMatrixAt(i, dummy.matrix);
+      }
+      leafIM.instanceMatrix.needsUpdate = true;
+      parent.add(leafIM);
     }
   }
 
@@ -400,7 +551,11 @@ export class Flora {
   _disposeGroup(group) {
     this._pointLightBudget?.unregisterObjectLights(group);
     group.traverse((child) => {
-      if (child.geometry) child.geometry.dispose();
+      // Skip meshes whose geometry/material is shared across chunks — only
+      // dispose resources that belong exclusively to this group.
+      if (child.userData?.sharedResources) return;
+      if (child.geometry && !child.userData?.sharedGeometry)
+        child.geometry.dispose();
       if (child.material) {
         if (Array.isArray(child.material)) {
           child.material.forEach((m) => m.dispose());
@@ -409,6 +564,38 @@ export class Flora {
         }
       }
     });
+
+    // Return orb, tube, and tip instances to the global pools so that their
+    // slots can be reused by newly-loaded chunks.
+    const zeroM = this._zeroScaleMatrix;
+
+    const orbSlots = group.userData.orbSlots;
+    if (orbSlots?.length) {
+      for (const slot of orbSlots) {
+        this._orbPool.setMatrixAt(slot, zeroM);
+        this._orbFreeSlots.push(slot);
+      }
+      this._orbPool.instanceMatrix.needsUpdate = true;
+    }
+
+    const tubeSlots = group.userData.tubeSlots;
+    if (tubeSlots?.length) {
+      for (const slot of tubeSlots) {
+        this._tubePool.setMatrixAt(slot, zeroM);
+        this._tubeFreeSlots.push(slot);
+      }
+      this._tubePool.instanceMatrix.needsUpdate = true;
+    }
+
+    const tipSlots = group.userData.tipSlots;
+    if (tipSlots?.length) {
+      for (const slot of tipSlots) {
+        this._tipPool.setMatrixAt(slot, zeroM);
+        this._tipFreeSlots.push(slot);
+      }
+      this._tipPool.instanceMatrix.needsUpdate = true;
+    }
+
     this.scene.remove(group);
   }
 
