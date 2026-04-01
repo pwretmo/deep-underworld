@@ -346,6 +346,10 @@ export class VoidJelly {
       rootX += rest[i]; rootZ += rest[i + 2]; rootCount++;
     }
 
+    // One-time bounding sphere — padded to cover deformation range
+    geom.computeBoundingSphere();
+    geom.boundingSphere.radius *= 1.5;
+
     return {
       mesh, geometry: geom, restPositions: rest,
       rootCenter: {
@@ -408,9 +412,6 @@ export class VoidJelly {
     }
 
     positions.needsUpdate = true;
-    app.geometry.computeVertexNormals();
-    app.geometry.attributes.normal.needsUpdate = true;
-    app.geometry.computeBoundingSphere();
   }
 
   // ─── Oral arms — TubeGeometry with ruffled edges (CatmullRomCurve3) ────────
@@ -456,6 +457,7 @@ export class VoidJelly {
         thickness: 0.25,
         side: THREE.DoubleSide,
         depthWrite: false,
+        flatShading: true,
       });
       const mesh = new THREE.Mesh(armGeo, armMat);
       group.add(mesh);
@@ -480,6 +482,7 @@ export class VoidJelly {
         transmission: 0.18,
         side: THREE.DoubleSide,
         depthWrite: false,
+        flatShading: true,
       });
       const frill = new THREE.Mesh(frillGeo, frillMat);
       group.add(frill);
@@ -549,6 +552,7 @@ export class VoidJelly {
         transparent: true, opacity: 0.32,
         roughness: 0.28,
         depthWrite: false,
+        flatShading: true,
       });
       const mesh = new THREE.Mesh(tentGeo, tentMat);
       group.add(mesh);
@@ -601,6 +605,7 @@ export class VoidJelly {
         transparent: true, opacity: 0.28,
         roughness: 0.3,
         depthWrite: false,
+        flatShading: true,
       });
       const mesh = new THREE.Mesh(geo, mat);
       group.add(mesh);
