@@ -553,7 +553,7 @@ export class AbyssalMaw {
     }
 
     // ── Player proximity ────────────────────────────────────────────────
-    const distToPlayer = this.group.position.distanceTo(playerPos);
+    const distToPlayer = Math.sqrt(distSq);
     const targetProximity = THREE.MathUtils.clamp(1 - distToPlayer / 40, 0, 1);
     this._playerProximity += (targetProximity - this._playerProximity) * Math.min(dt * 2, 1);
 
