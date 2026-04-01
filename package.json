@@ -21,6 +21,7 @@
     "chrome-devtools-mcp": "^0.20.3",
     "eslint": "^10.1.0",
     "lighthouse": "^13.0.3",
+    "stats-gl": "^4.1.0",
     "typescript": "^6.0.2",
     "vite": "^8.0.3"
   }
