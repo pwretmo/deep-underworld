@@ -581,7 +581,7 @@ export class UnderwaterEffect {
     this._causticPass = new CausticPass(renderer);
     this._causticIntensityNode = this._causticPass.createCausticSampleNode(
       screenUV,
-      this._underwaterUniformNodes.depth,
+      this._scenePass.getTextureNode("depth"),
     );
 
     this._underwaterSceneOutputNode = this._createUnderwaterOutputNode(
@@ -1280,7 +1280,7 @@ export class UnderwaterEffect {
    * @param {THREE.Vector3} playerPos - Current player position
    */
   updateCausticPass(dt, playerPos) {
-    this._causticPass.update(dt, playerPos);
+    this._causticPass.update(dt, playerPos, this.camera);
   }
 
   /** Expose the caustic pass for diagnostics / disposal. */

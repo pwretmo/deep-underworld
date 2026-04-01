@@ -24,6 +24,9 @@ import {
 } from "three/tsl";
 import { qualityManager } from "../QualityManager.js";
 
+/** Cached matrix to avoid per-frame allocation. */
+const _invProjView = new THREE.Matrix4();
+
 /**
  * Quality-tier caustic settings.
  * Low tier uses an animated tiled texture (no refraction mesh).
@@ -66,6 +69,9 @@ export class CausticPass {
     this._projectionArea = uniform(settings.projectionArea);
     this._texelSnappedOrigin = uniform(new THREE.Vector2(0, 0));
 
+    // Inverse projection-view matrix uniform for world-position reconstruction
+    this._invProjViewMatrix = uniform(new THREE.Matrix4());
+
     // Tiled fallback texture node for low tier (procedural, no RTT)
     this._tiledCausticNode = null;
 
@@ -74,17 +80,22 @@ export class CausticPass {
     this._causticScene = null;
     this._causticCamera = null;
     this._causticMesh = null;
-    this._causticTextureNode = null;
+
+    // Stable texture node — created once so TSL closures always reference
+    // the same node object. Its .value is updated on tier rebuild.
+    this._causticTextureNode = texture(new THREE.Texture());
 
     if (this._method === "refraction") {
       this._initRefractionPass(settings);
     }
 
-    window.addEventListener("qualitychange", (e) => {
+    // Store handler reference so it can be removed in dispose()
+    this._onQualityChange = (e) => {
       const newSettings =
         CAUSTIC_TIER_SETTINGS[e.detail.tier] || CAUSTIC_TIER_SETTINGS.medium;
       this._rebuildForTier(newSettings);
-    });
+    };
+    window.addEventListener("qualitychange", this._onQualityChange);
   }
 
   /** Current method — "tiled" or "refraction" */
@@ -133,8 +144,8 @@ export class CausticPass {
     this._causticMesh = new THREE.Mesh(geo, mat);
     this._causticScene.add(this._causticMesh);
 
-    // Texture node for sampling in TSL
-    this._causticTextureNode = texture(this._renderTarget.texture);
+    // Update the stable texture node to reference the new render target
+    this._causticTextureNode.value = this._renderTarget.texture;
   }
 
   /**
@@ -232,7 +243,8 @@ export class CausticPass {
     }
     this._causticScene = null;
     this._causticCamera = null;
-    this._causticTextureNode = null;
+    // Do not null _causticTextureNode — it is a stable node reference.
+    // Its .value will be updated if/when a new render target is created.
   }
 
   /**
@@ -277,11 +289,18 @@ export class CausticPass {
    *
    * @param {number} dt - Delta time
    * @param {THREE.Vector3} playerPos - Player world position
+   * @param {THREE.Camera} camera - Scene camera for depth reconstruction
    */
-  update(dt, playerPos) {
+  update(dt, playerPos, camera) {
     this._time += dt;
     this._timeUniform.value = this._time;
     this._playerXZ.value.set(playerPos.x, playerPos.z);
+
+    // Update inverse projection-view matrix for world-position reconstruction
+    if (camera) {
+      _invProjView.copy(camera.projectionMatrixInverse).premultiply(camera.matrixWorld);
+      this._invProjViewMatrix.value.copy(_invProjView);
+    }
 
     if (this._method !== "refraction" || !this._renderTarget) {
       return;
@@ -316,52 +335,50 @@ export class CausticPass {
 
   /**
    * Build a TSL node that samples the caustic intensity for the current fragment.
-   * This node is meant to be composed into UnderwaterEffect's TSL chain.
+   * Reconstructs world position from screen UV + scene depth, then projects
+   * into the caustic RTT's orthographic space.
    *
-   * @param {Object} sceneDepthNode - The depth node from the scene pass
-   * @param {Object} cameraNearNode - Camera near uniform node
-   * @param {Object} cameraFarNode - Camera far uniform node
-   * @param {Object} cameraNode - Camera reference for inverse projection
+   * @param {Object} screenUVNode - Screen UV coordinate node
+   * @param {Object} sceneDepthNode - Scene-pass depth texture node from PassNode
    * @returns {Object} TSL node outputting caustic intensity (float)
    */
-  createCausticSampleNode(screenUVNode, depthUniformNode) {
+  createCausticSampleNode(screenUVNode, sceneDepthNode) {
     const timeNode = this._timeUniform;
     const projArea = this._projectionArea;
     const snappedOrigin = this._texelSnappedOrigin;
-    const playerXZ = this._playerXZ;
 
     if (this._method === "tiled") {
-      // Low-tier animated procedural caustic — same as old inline but cleaner
-      return this._createTiledCausticNode(screenUVNode, depthUniformNode, timeNode);
+      return this._createTiledCausticNode(screenUVNode, timeNode);
     }
 
-    // Medium+ tier: sample from RTT caustic texture
+    // Medium+ tier: sample from RTT caustic texture.
+    // The texture node is stable — its .value is updated on tier rebuild.
     const causticTex = this._causticTextureNode;
+    const invProjViewMat = this._invProjViewMatrix;
 
     return Fn(() => {
-      // Reconstruct approximate world XZ from screen UV + player position.
-      // The caustic projection is player-relative orthographic, so we map
-      // screen UV to the projection area centered on the snapped origin.
-      //
-      // For fragments close to the camera, we blend with a simpler screen-space
-      // mapping; for distant fragments, the orthographic projection dominates.
-      const halfArea = projArea.mul(0.5);
+      // Reconstruct world position from screen UV + scene depth using the
+      // inverse projection-view matrix updated each frame.
+      const rawDepth = sceneDepthNode.sample(screenUVNode).x;
 
-      // Map screen UV to world XZ in the caustic projection space
-      const worldX = snappedOrigin.x.add(
-        screenUVNode.x.sub(0.5).mul(projArea),
-      );
-      const worldZ = snappedOrigin.y.add(
-        screenUVNode.y.sub(0.5).mul(projArea),
-      );
+      // Screen UV -> NDC (clip space xy in [-1, 1])
+      const ndcX = screenUVNode.x.mul(2.0).sub(1.0);
+      const ndcY = screenUVNode.y.mul(2.0).sub(1.0);
 
-      // Convert world XZ to caustic texture UV
+      // Clip-space position (WebGPU depth range is [0, 1])
+      const clipPos = vec4(ndcX, ndcY, rawDepth, 1.0);
+
+      // Transform to world space
+      const worldPos4 = invProjViewMat.mul(clipPos);
+      const worldX = worldPos4.x.div(worldPos4.w);
+      const worldZ = worldPos4.z.div(worldPos4.w);
+
+      // Map world XZ into caustic texture UV via the orthographic projection
       const causticU = worldX.sub(snappedOrigin.x).div(projArea).add(0.5);
       const causticV = worldZ.sub(snappedOrigin.y).div(projArea).add(0.5);
 
       const causticUV = clamp(vec2(causticU, causticV), 0.0, 1.0);
       const sample = causticTex.sample(causticUV);
-      // Return the intensity from the red channel (additive white -> R=G=B)
       return sample.r;
     })();
   }
@@ -370,7 +387,7 @@ export class CausticPass {
    * Low-tier tiled caustic node — animated procedural pattern.
    * No RTT, just math in the fragment shader.
    */
-  _createTiledCausticNode(screenUVNode, depthUniformNode, timeNode) {
+  _createTiledCausticNode(screenUVNode, timeNode) {
     return Fn(() => {
       const causticUv = screenUVNode.mul(12.0);
       const causticTime = timeNode.mul(0.35);
@@ -398,6 +415,7 @@ export class CausticPass {
    * Dispose all resources.
    */
   dispose() {
+    window.removeEventListener("qualitychange", this._onQualityChange);
     this._disposeRefractionPass();
   }
 }
