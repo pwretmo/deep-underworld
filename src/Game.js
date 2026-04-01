@@ -213,6 +213,8 @@ export class Game {
     this.descentProgressBar = document.getElementById("descent-progress-bar");
     this._descentItems = document.getElementById("descent-items");
     this._descentTease = document.getElementById("descent-tease");
+    this._descentItemEls = this._createDescentItemElements();
+    this._descentItemState = new Array(10).fill(null).map(() => ({ cls: "", check: "", label: "" }));
     this._descentActive = false;
     this._descentPhase = "idle";
     this._descentLastCreatureCount = 0;
@@ -579,7 +581,7 @@ export class Game {
       this._descentPhase = "physics";
       this._descentLastCreatureCount = 0;
       this._descentLastTeaseTime = 0;
-      this._descentItems.innerHTML = "";
+      this._resetDescentItems();
       this._descentTease.innerHTML = "";
       this._updateDescentProgress();
       this.underwaterEffect.beginStartupGuard();
@@ -675,7 +677,7 @@ export class Game {
 
       this.descentOverlay.classList.remove("visible", "fade-out");
       this.descentProgressBar.style.width = "0%";
-      this._descentItems.innerHTML = "";
+      this._resetDescentItems();
       this._descentTease.innerHTML = "";
       this.menuOverlay.classList.remove("hidden");
       this.pauseOverlay.classList.remove("visible");
@@ -720,6 +722,37 @@ export class Game {
           guardRemainingMs: startupGuard.remainingMs,
         },
       });
+    }
+  }
+
+  _createDescentItemElements() {
+    const els = [];
+    for (let i = 0; i < 10; i++) {
+      const root = document.createElement("div");
+      root.className = "descent-item";
+      const check = document.createElement("span");
+      check.className = "descent-item-check";
+      check.textContent = " ";
+      const text = document.createElement("span");
+      text.className = "descent-item-text";
+      root.appendChild(check);
+      root.appendChild(text);
+      this._descentItems.appendChild(root);
+      els.push({ root, check, text });
+    }
+    return els;
+  }
+
+  _resetDescentItems() {
+    for (let i = 0; i < this._descentItemEls.length; i++) {
+      const el = this._descentItemEls[i];
+      el.root.className = "descent-item";
+      el.check.textContent = " ";
+      el.text.textContent = "";
+      const prev = this._descentItemState[i];
+      prev.cls = "descent-item";
+      prev.check = " ";
+      prev.label = "";
     }
   }
 
@@ -934,17 +967,29 @@ export class Game {
       },
     ];
 
-    let html = "";
-    for (const item of items) {
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
       const cls = item.done
         ? "descent-item done"
         : item.active
           ? "descent-item active"
           : "descent-item";
       const check = item.done ? "✓" : item.active ? "◦" : " ";
-      html += `<div class="${cls}"><span class="descent-item-check">${check}</span><span class="descent-item-text">${item.label}</span></div>`;
+      const prev = this._descentItemState[i];
+      const el = this._descentItemEls[i];
+      if (prev.cls !== cls) {
+        el.root.className = cls;
+        prev.cls = cls;
+      }
+      if (prev.check !== check) {
+        el.check.textContent = check;
+        prev.check = check;
+      }
+      if (prev.label !== item.label) {
+        el.text.textContent = item.label;
+        prev.label = item.label;
+      }
     }
-    this._descentItems.innerHTML = html;
 
     // Creature tease
     if (
