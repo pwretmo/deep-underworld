@@ -194,6 +194,56 @@ export class Terrain {
     this._rockGeos = this._createRockGeometries();
     this._rockMat = this._createRockMaterial();
     this._terrainMat = this._createTerrainMaterial();
+
+    // BatchedMesh for terrain chunks — all visible chunks share one draw call.
+    // Capacity is sized for the largest possible view distance (ultra tier,
+    // viewDistance=4 → 81 chunks) plus a streaming buffer.
+    const MAX_TERRAIN_CHUNKS = 100;
+    const TERRAIN_VERTS = (this.resolution + 1) * (this.resolution + 1); // 1681
+    const TERRAIN_INDICES = this.resolution * this.resolution * 6; // 9600
+    this._terrainBatchedMesh = new THREE.BatchedMesh(
+      MAX_TERRAIN_CHUNKS,
+      MAX_TERRAIN_CHUNKS * TERRAIN_VERTS,
+      MAX_TERRAIN_CHUNKS * TERRAIN_INDICES,
+      this._terrainMat,
+    );
+    this._terrainBatchedMesh.receiveShadow = true;
+    this.scene.add(this._terrainBatchedMesh);
+
+    // Global InstancedMesh pools for rocks — one per rock type.
+    // Instead of creating a new InstancedMesh per chunk per type (~49×4=196
+    // draw calls at medium quality), we maintain four persistent meshes = 4
+    // draw calls regardless of chunk count.
+    const MAX_ROCKS_PER_TYPE = 400; // 100 chunks × ~4 rocks per type per chunk
+    this._rockPoolMeshes = this._rockGeos.map((geo) => {
+      const im = new THREE.InstancedMesh(geo, this._rockMat, MAX_ROCKS_PER_TYPE);
+      im.castShadow = true;
+      im.receiveShadow = true;
+      // Pre-allocate instanceColor — rock material tints per-instance.
+      im.instanceColor = new THREE.InstancedBufferAttribute(
+        new Float32Array(MAX_ROCKS_PER_TYPE * 3),
+        3,
+      );
+      // Hide all slots initially (zero scale = invisible).
+      const zeroM = new THREE.Matrix4().makeScale(0, 0, 0);
+      const neutralColor = new THREE.Color(0.3, 0.28, 0.25);
+      for (let i = 0; i < MAX_ROCKS_PER_TYPE; i++) {
+        im.setMatrixAt(i, zeroM);
+        im.setColorAt(i, neutralColor);
+      }
+      im.instanceMatrix.needsUpdate = true;
+      im.instanceColor.needsUpdate = true;
+      this.scene.add(im);
+      return im;
+    });
+    for (const rm of this._rockPoolMeshes) rm.frustumCulled = false;
+    // Free-slot stacks — pop to allocate, push to free.
+    this._rockFreeLists = this._rockGeos.map(() =>
+      Array.from({ length: MAX_ROCKS_PER_TYPE }, (_, i) => i).reverse(),
+    );
+    // Reusable scratch objects to avoid per-frame allocations.
+    this._rockScratchMatrix = new THREE.Matrix4();
+    this._rockScratchColor = new THREE.Color();
   }
 
   /**
@@ -363,33 +413,59 @@ export class Terrain {
     return handle;
   }
 
-  _addRockVisualsFromPayload(parent, payload) {
+  _addRockVisualsFromPayload(parent, payload, cx, cz) {
+    // Allocate rock instances from the global per-type pools instead of
+    // creating a new InstancedMesh per chunk per rock type.  This reduces rock
+    // draw calls from ~(chunks × 4) to exactly 4, one per rock geometry type.
     const batches = payload.rockBatches || [];
+    const rockSlots = {};
+    const chunkOffsetX = cx * this.chunkSize;
+    const chunkOffsetZ = cz * this.chunkSize;
+
     for (const batch of batches) {
-      const geometry = this._rockGeos[batch.type % this._rockGeos.length];
+      const typeIdx = batch.type % this._rockGeos.length;
+      const rm = this._rockPoolMeshes[typeIdx];
+      const freeList = this._rockFreeLists[typeIdx];
       const count = batch.matrices.length / 16;
-      if (!geometry || count <= 0) continue;
+      if (count <= 0) continue;
 
-      const inst = new THREE.InstancedMesh(geometry, this._rockMat, count);
-      inst.castShadow = true;
-      inst.receiveShadow = true;
+      const slotsForType = [];
+      for (let i = 0; i < count; i++) {
+        const slot = freeList.pop();
+        if (slot == null) break; // pool exhausted — skip gracefully
 
-      inst.instanceMatrix = new THREE.InstancedBufferAttribute(
-        batch.matrices,
-        16,
-      );
-      inst.instanceMatrix.needsUpdate = true;
+        this._rockScratchMatrix.fromArray(batch.matrices, i * 16);
+        // Payload matrices are in chunk-local space; translate to world space
+        // by adding the chunk's world origin offset.
+        this._rockScratchMatrix.elements[12] += chunkOffsetX;
+        this._rockScratchMatrix.elements[14] += chunkOffsetZ;
+        rm.setMatrixAt(slot, this._rockScratchMatrix);
 
-      if (batch.colors && batch.colors.length > 0) {
-        inst.instanceColor = new THREE.InstancedBufferAttribute(
-          batch.colors,
-          3,
-        );
-        inst.instanceColor.needsUpdate = true;
+        if (batch.colors && batch.colors.length >= (i + 1) * 3) {
+          this._rockScratchColor.setRGB(
+            batch.colors[i * 3],
+            batch.colors[i * 3 + 1],
+            batch.colors[i * 3 + 2],
+          );
+          rm.setColorAt(slot, this._rockScratchColor);
+        }
+
+        slotsForType.push(slot);
       }
 
-      parent.add(inst);
+      if (slotsForType.length > 0) {
+        rm.instanceMatrix.needsUpdate = true;
+        if (rm.instanceColor) rm.instanceColor.needsUpdate = true;
+        if (rockSlots[typeIdx]) {
+          rockSlots[typeIdx].push(...slotsForType);
+        } else {
+          rockSlots[typeIdx] = slotsForType;
+        }
+      }
     }
+
+    // Store slot IDs on the tracking mesh so _freeChunkRockSlots can find them.
+    parent.userData.rockSlots = rockSlots;
   }
 
   _createRockCollidersFromPayload(parent, payload) {
@@ -435,6 +511,26 @@ export class Terrain {
       job.mesh.userData.physicsColliderHandles = [];
     }
 
+    // If the geometry stage completed it was added to the BatchedMesh;
+    // remove both the instance and the geometry slot now.
+    if (job.mesh?.userData?.batchedInstanceId != null) {
+      this._terrainBatchedMesh.deleteInstance(
+        job.mesh.userData.batchedInstanceId,
+      );
+      this._terrainBatchedMesh.deleteGeometry(
+        job.mesh.userData.batchedGeomId,
+      );
+      job.mesh.userData.batchedInstanceId = null;
+      job.mesh.userData.batchedGeomId = null;
+    }
+
+    // Free any rock pool slots that were already allocated during the rocks stage.
+    if (job.mesh?.userData?.rockSlots) {
+      this._freeChunkRockSlots(job.mesh.userData.rockSlots);
+      job.mesh.userData.rockSlots = null;
+    }
+
+    // geometry is null after BatchedMesh upload (disposed in _createChunkMeshFromPayload).
     if (job.geometry) {
       job.geometry.dispose();
     }
@@ -445,6 +541,23 @@ export class Terrain {
 
     this._pendingFinalizationKeys.delete(job.key);
     job.payload = null;
+  }
+
+  // Free rock pool slots back to their free-lists and hide those instances.
+  _freeChunkRockSlots(rockSlots) {
+    if (!rockSlots) return;
+    const zeroM = new THREE.Matrix4().makeScale(0, 0, 0);
+    for (const [typeIdxStr, slots] of Object.entries(rockSlots)) {
+      const typeIdx = parseInt(typeIdxStr, 10);
+      const rm = this._rockPoolMeshes[typeIdx];
+      const freeList = this._rockFreeLists[typeIdx];
+      if (!rm || !slots.length) continue;
+      for (const slot of slots) {
+        rm.setMatrixAt(slot, zeroM);
+        freeList.push(slot);
+      }
+      rm.instanceMatrix.needsUpdate = true;
+    }
   }
 
   _createChunkMeshFromPayload(cx, cz, payload) {
@@ -463,11 +576,26 @@ export class Terrain {
     );
     geometry.setIndex(new THREE.BufferAttribute(payload.indices, 1));
 
-    const mesh = new THREE.Mesh(geometry, this._terrainMat);
-    mesh.position.set(cx * this.chunkSize, 0, cz * this.chunkSize);
-    mesh.receiveShadow = true;
+    // Upload the geometry into the shared BatchedMesh.  addGeometry() copies
+    // the data into the BatchedMesh’s internal buffers, so we can (and must)
+    // dispose the local geometry afterwards to free CPU-side memory.
+    const geomId = this._terrainBatchedMesh.addGeometry(geometry);
+    const instanceId = this._terrainBatchedMesh.addInstance(geomId);
+    const posMatrix = new THREE.Matrix4().setPosition(
+      cx * this.chunkSize,
+      0,
+      cz * this.chunkSize,
+    );
+    this._terrainBatchedMesh.setMatrixAt(instanceId, posMatrix);
+    geometry.dispose();
 
-    return { geometry, mesh };
+    // Use a plain Object3D as a non-rendered tracking container for physics
+    // collider handles and BatchedMesh IDs.  It is never added to the scene.
+    const mesh = new THREE.Object3D();
+    mesh.userData.batchedGeomId = geomId;
+    mesh.userData.batchedInstanceId = instanceId;
+
+    return { geometry: null, mesh };
   }
 
   _recordChunkApplyStage(stageName, elapsedMs) {
@@ -582,7 +710,7 @@ export class Terrain {
       job.geometry = geometry;
       job.mesh = mesh;
     } else if (stageName === "rocks") {
-      this._addRockVisualsFromPayload(job.mesh, job.payload);
+      this._addRockVisualsFromPayload(job.mesh, job.payload, job.cx, job.cz);
     } else if (stageName === "terrainColliderPrepare") {
       // Cache collider data references so terrainColliderBuild can run in a later frame
       if (
@@ -595,12 +723,15 @@ export class Terrain {
       }
     } else if (stageName === "terrainColliderBuild") {
       if (this._physicsWorld && job._colliderVertices && job._colliderIndices) {
-        // Skip detailed collider for chunks beyond 2x view distance
+        // Skip detailed collider for chunks beyond 2x view distance.
+        // Use the chunk's world position from cx/cz since job.mesh is now a
+        // non-positioned tracking Object3D.
         let skip = false;
-        if (this._lastPlayerPos && job.mesh) {
-          const chunkPos = job.mesh.position;
-          const dx = chunkPos.x - this._lastPlayerPos.x;
-          const dz = chunkPos.z - this._lastPlayerPos.z;
+        if (this._lastPlayerPos) {
+          const chunkWorldX = job.cx * this.chunkSize;
+          const chunkWorldZ = job.cz * this.chunkSize;
+          const dx = chunkWorldX - this._lastPlayerPos.x;
+          const dz = chunkWorldZ - this._lastPlayerPos.z;
           const distSq = dx * dx + dz * dz;
           const viewDist = this.chunkSize * (this.viewDistance || 3);
           if (distSq > viewDist * viewDist * 4) {
@@ -623,7 +754,8 @@ export class Terrain {
         this._createRockCollidersFromPayload(job.mesh, job.payload);
       }
     } else if (stageName === "attach") {
-      this.scene.add(job.mesh);
+      // The BatchedMesh is already in the scene; just register the chunk.
+      // job.mesh is a non-rendered tracking Object3D and must NOT be scene.add().
       this.chunks.set(job.key, job.mesh);
       // Temporarily disable frustum culling on the chunk and all its children
       // (rock InstancedMeshes) so they are included in the next render pass
@@ -788,8 +920,14 @@ export class Terrain {
             this._physicsWorld.removeCollider(handle);
           }
         }
-        this.scene.remove(mesh);
-        mesh.geometry.dispose();
+        // Remove terrain geometry from BatchedMesh.
+        this._terrainBatchedMesh.deleteInstance(
+          mesh.userData.batchedInstanceId,
+        );
+        this._terrainBatchedMesh.deleteGeometry(mesh.userData.batchedGeomId);
+        // Return rock instances to their global pools.
+        this._freeChunkRockSlots(mesh.userData.rockSlots);
+        // The tracking mesh was never added to the scene — no scene.remove needed.
         this.chunks.delete(key);
       }
     }
