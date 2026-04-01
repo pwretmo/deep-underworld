@@ -74,6 +74,11 @@ export class Flora {
 
     // Shared geometry/materials for instanced bio-orbs
     this._orbGeo = new THREE.SphereGeometry(1, 8, 8);
+    // Freshly attached flora chunks: temporarily disable frustum culling so
+    // the WebGPU backend compiles their GPU pipeline on the next render frame
+    // regardless of camera direction.
+    this._freshAttachments = [];
+
     this._orbMat = new THREE.MeshStandardMaterial({
       emissive: 0xffffff,
       emissiveIntensity: 0.8,
@@ -352,6 +357,19 @@ export class Flora {
       this.scene.add(chunk);
       this._pointLightBudget?.registerObjectLights(chunk);
       this.groups.set(key, chunk);
+      // Temporarily disable frustum culling on new flora meshes so the WebGPU
+      // backend compiles their GPU pipelines on the next render regardless of
+      // camera direction.
+      const affectedMeshes = [];
+      chunk.traverse((obj) => {
+        if ((obj.isMesh || obj.isInstancedMesh) && obj.frustumCulled) {
+          obj.frustumCulled = false;
+          affectedMeshes.push(obj);
+        }
+      });
+      if (affectedMeshes.length > 0) {
+        this._freshAttachments.push({ meshes: affectedMeshes, framesLeft: 3 });
+      }
       applied++;
     }
     return applied;
@@ -474,6 +492,19 @@ export class Flora {
 
   update(dt, playerPos, allowChunkWork = true) {
     this.time += dt;
+
+    // Restore frustum culling on recently attached flora once they've been
+    // through enough render frames to compile their GPU pipelines.
+    for (let i = this._freshAttachments.length - 1; i >= 0; i--) {
+      const entry = this._freshAttachments[i];
+      entry.framesLeft--;
+      if (entry.framesLeft <= 0) {
+        for (const mesh of entry.meshes) {
+          mesh.frustumCulled = true;
+        }
+        this._freshAttachments.splice(i, 1);
+      }
+    }
 
     if (allowChunkWork) {
       // Build/apply at most 1 payload per streaming frame and request at most 1 new chunk

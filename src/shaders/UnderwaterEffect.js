@@ -1,4 +1,4 @@
-import * as THREE from 'three/webgpu';
+import * as THREE from "three/webgpu";
 import {
   Fn,
   If,
@@ -23,22 +23,22 @@ import {
   vec2,
   vec3,
   vec4,
-} from 'three/tsl';
-import { bloom as createBloomNode } from 'three/addons/tsl/display/BloomNode.js';
-import { godrays } from 'three/addons/tsl/display/GodraysNode.js';
-import { qualityManager } from '../QualityManager.js';
-import { DEPTH_THRESHOLDS } from '../lighting/LightingPolicy.js';
+} from "three/tsl";
+import { bloom as createBloomNode } from "three/addons/tsl/display/BloomNode.js";
+import { godrays } from "three/addons/tsl/display/GodraysNode.js";
+import { qualityManager } from "../QualityManager.js";
+import { DEPTH_THRESHOLDS } from "../lighting/LightingPolicy.js";
 
 function deepFreeze(obj) {
   Object.freeze(obj);
-  Object.values(obj).forEach(v => {
-    if (v && typeof v === 'object' && !Object.isFrozen(v)) deepFreeze(v);
+  Object.values(obj).forEach((v) => {
+    if (v && typeof v === "object" && !Object.isFrozen(v)) deepFreeze(v);
   });
   return obj;
 }
 
 function cloneUniformValue(value) {
-  return value && typeof value.clone === 'function' ? value.clone() : value;
+  return value && typeof value.clone === "function" ? value.clone() : value;
 }
 
 function cloneUniforms(uniforms) {
@@ -65,14 +65,14 @@ const RENDER_PIPELINE_TUNING = deepFreeze({
   grading: {
     contrast: 1.08,
     vignette: 0.22,
-    grain: 0.010,
+    grain: 0.01,
     scanline: 0.0,
     eyeAdapt: 0.12,
   },
   highlightRoll: {
     start: 0.78,
     range: 0.34,
-    strength: 0.40,
+    strength: 0.4,
   },
   bloom: {
     surfaceStrength: 0.28,
@@ -123,7 +123,7 @@ const UNDERWATER_UNIFORM_TEMPLATE = {
   scatterColor: { value: new THREE.Vector3(0.012, 0.048, 0.075) },
   scatterDensity: { value: 0.003 },
   eyeAdapt: { value: 0.12 },
-  highlightRoll: { value: new THREE.Vector3(0.78, 0.34, 0.40) },
+  highlightRoll: { value: new THREE.Vector3(0.78, 0.34, 0.4) },
   bloomParams: { value: new THREE.Vector3(0.28, 0.78, 1.6) },
   reducedMode: { value: 0.0 },
 };
@@ -152,7 +152,7 @@ function disposeRttNode(node) {
     return;
   }
 
-  if (typeof node.dispose === 'function') {
+  if (typeof node.dispose === "function") {
     node.dispose();
     return;
   }
@@ -173,36 +173,54 @@ function createUnderwaterPostColorNode(sourceNode, uniformNodes) {
   const sourceTextureNode = convertToTexture(sourceNode);
   const sourceUVNode = sourceTextureNode.uvNode || screenUV;
   const peakOf = (colorNode) => max(max(colorNode.r, colorNode.g), colorNode.b);
-  const samplePeak = (sampleUvNode) => peakOf(sourceTextureNode.sample(sampleUvNode).rgb);
-  const samplePeakCross = (sampleUvNode, probeNode) => samplePeak(sampleUvNode.add(vec2(probeNode.x, 0.0)))
-    .add(samplePeak(sampleUvNode.sub(vec2(probeNode.x, 0.0))))
-    .add(samplePeak(sampleUvNode.add(vec2(0.0, probeNode.y))))
-    .add(samplePeak(sampleUvNode.sub(vec2(0.0, probeNode.y))))
-    .mul(0.25);
+  const samplePeak = (sampleUvNode) =>
+    peakOf(sourceTextureNode.sample(sampleUvNode).rgb);
+  const samplePeakCross = (sampleUvNode, probeNode) =>
+    samplePeak(sampleUvNode.add(vec2(probeNode.x, 0.0)))
+      .add(samplePeak(sampleUvNode.sub(vec2(probeNode.x, 0.0))))
+      .add(samplePeak(sampleUvNode.add(vec2(0.0, probeNode.y))))
+      .add(samplePeak(sampleUvNode.sub(vec2(0.0, probeNode.y))))
+      .mul(0.25);
 
   return Fn(() => {
     const distortedUv = vec2(sourceUVNode).toVar();
     const lumaWeights = vec3(0.2126, 0.7152, 0.0722);
-    const distortionStrength = uniformNodes.depth.mul(0.0000040).add(0.0009);
+    const distortionStrength = uniformNodes.depth.mul(0.000004).add(0.0009);
 
-    distortedUv.assign(vec2(
-      distortedUv.x.add(sin(distortedUv.y.mul(15.0).add(uniformNodes.time)).mul(distortionStrength)),
-      distortedUv.y,
-    ));
-    distortedUv.assign(vec2(
-      distortedUv.x,
-      distortedUv.y.add(
-        cos(distortedUv.x.mul(12.0).add(uniformNodes.time.mul(0.8)))
-          .mul(distortionStrength)
-          .mul(0.6)
+    distortedUv.assign(
+      vec2(
+        distortedUv.x.add(
+          sin(distortedUv.y.mul(15.0).add(uniformNodes.time)).mul(
+            distortionStrength,
+          ),
+        ),
+        distortedUv.y,
       ),
-    ));
+    );
+    distortedUv.assign(
+      vec2(
+        distortedUv.x,
+        distortedUv.y.add(
+          cos(distortedUv.x.mul(12.0).add(uniformNodes.time.mul(0.8)))
+            .mul(distortionStrength)
+            .mul(0.6),
+        ),
+      ),
+    );
 
     const baseSample = sourceTextureNode.sample(distortedUv);
     const color = vec3(baseSample.rgb).toVar();
     const fragCoord = distortedUv.mul(uniformNodes.resolution);
-    const midBlend = smoothstep(uniformNodes.depthThresholds.x, uniformNodes.depthThresholds.y, uniformNodes.depth);
-    const deepBlend = smoothstep(uniformNodes.depthThresholds.y, uniformNodes.depthThresholds.z, uniformNodes.depth);
+    const midBlend = smoothstep(
+      uniformNodes.depthThresholds.x,
+      uniformNodes.depthThresholds.y,
+      uniformNodes.depth,
+    );
+    const deepBlend = smoothstep(
+      uniformNodes.depthThresholds.y,
+      uniformNodes.depthThresholds.z,
+      uniformNodes.depth,
+    );
     const abyssBlend = smoothstep(
       uniformNodes.depthThresholds.z,
       uniformNodes.depthThresholds.z.add(280.0),
@@ -218,22 +236,35 @@ function createUnderwaterPostColorNode(sourceNode, uniformNodes) {
       const edgeDist = distance(distortedUv, vec2(0.5));
       const edgeMask = smoothstep(0.2, 0.74, edgeDist);
       const aberrationStrength = min(
-        depthBlend.mul(0.00010).add(abyssBlend.mul(0.00003)).mul(edgeMask),
+        depthBlend.mul(0.0001).add(abyssBlend.mul(0.00003)).mul(edgeMask),
         0.00015,
       );
-      const red = sourceTextureNode.sample(distortedUv.add(vec2(aberrationStrength, aberrationStrength.mul(0.3)))).r;
-      const blue = sourceTextureNode.sample(distortedUv.sub(vec2(aberrationStrength, aberrationStrength.mul(0.2)))).b;
+      const red = sourceTextureNode.sample(
+        distortedUv.add(vec2(aberrationStrength, aberrationStrength.mul(0.3))),
+      ).r;
+      const blue = sourceTextureNode.sample(
+        distortedUv.sub(vec2(aberrationStrength, aberrationStrength.mul(0.2))),
+      ).b;
 
       color.assign(vec3(red, color.g, blue));
     });
 
-    const vignetteStrength = min(depthBlend.mul(uniformNodes.grading.y).add(0.12), 0.65);
+    const vignetteStrength = min(
+      depthBlend.mul(uniformNodes.grading.y).add(0.12),
+      0.65,
+    );
     const vignetteDistance = dot(distortedUv.sub(0.5), distortedUv.sub(0.5));
-    const vignetteMask = float(1.0).sub(smoothstep(0.12, 0.42, vignetteDistance).mul(vignetteStrength));
+    const vignetteMask = float(1.0).sub(
+      smoothstep(0.12, 0.42, vignetteDistance).mul(vignetteStrength),
+    );
     color.assign(color.mul(max(vignetteMask, 0.42)));
 
-    const transmittance = exp(uniformNodes.extinction.mul(uniformNodes.depth).mul(-1.0));
-    const scatterMix = float(1.0).sub(exp(uniformNodes.scatterDensity.mul(uniformNodes.depth).mul(-1.0)));
+    const transmittance = exp(
+      uniformNodes.extinction.mul(uniformNodes.depth).mul(-1.0),
+    );
+    const scatterMix = float(1.0).sub(
+      exp(uniformNodes.scatterDensity.mul(uniformNodes.depth).mul(-1.0)),
+    );
     const scatter = uniformNodes.scatterColor.mul(scatterMix);
     const preTintLuma = peakOf(color);
     const litAmount = float(0.0).toVar();
@@ -242,16 +273,23 @@ function createUnderwaterPostColorNode(sourceNode, uniformNodes) {
       If(uniformNodes.reducedMode.greaterThan(0.5), () => {
         litAmount.assign(smoothstep(0.08, 0.22, preTintLuma).mul(0.65));
       }).Else(() => {
-        const lightProbe = max(vec2(1.0).div(uniformNodes.resolution), vec2(0.0005));
+        const lightProbe = max(
+          vec2(1.0).div(uniformNodes.resolution),
+          vec2(0.0005),
+        );
         const nearbyLuma = samplePeak(distortedUv.add(vec2(lightProbe.x, 0.0)))
           .add(samplePeak(distortedUv.sub(vec2(lightProbe.x, 0.0))))
           .add(samplePeak(distortedUv.add(vec2(0.0, lightProbe.y))))
           .add(samplePeak(distortedUv.sub(vec2(0.0, lightProbe.y))))
           .mul(0.25);
-        const localSpread = float(1.0).sub(smoothstep(0.08, 0.38, abs(preTintLuma.sub(nearbyLuma))));
+        const localSpread = float(1.0).sub(
+          smoothstep(0.08, 0.38, abs(preTintLuma.sub(nearbyLuma))),
+        );
         const nearbyLight = smoothstep(0.03, 0.16, nearbyLuma);
 
-        litAmount.assign(smoothstep(0.05, 0.18, preTintLuma).mul(nearbyLight).mul(localSpread));
+        litAmount.assign(
+          smoothstep(0.05, 0.18, preTintLuma).mul(nearbyLight).mul(localSpread),
+        );
       });
     });
 
@@ -259,88 +297,143 @@ function createUnderwaterPostColorNode(sourceNode, uniformNodes) {
     color.assign(
       color
         .mul(mix(transmittance, vec3(1.0), clampedLit))
-        .add(scatter.mul(float(1.0).sub(litAmount.mul(0.7))))
+        .add(scatter.mul(float(1.0).sub(litAmount.mul(0.7)))),
     );
 
-    const shallowCaustic = float(1.0).sub(smoothstep(0.0, 80.0, uniformNodes.depth));
+    const shallowCaustic = float(1.0).sub(
+      smoothstep(0.0, 80.0, uniformNodes.depth),
+    );
     If(shallowCaustic.greaterThan(0.001), () => {
       const causticUv = distortedUv.mul(12.0);
       const causticTime = uniformNodes.time.mul(0.35);
       const causticOne = sin(causticUv.x.mul(3.7).add(causticTime)).mul(
-        sin(causticUv.y.mul(4.1).sub(causticTime.mul(0.8)))
+        sin(causticUv.y.mul(4.1).sub(causticTime.mul(0.8))),
       );
-      const causticTwo = sin(causticUv.x.mul(2.3).sub(causticTime.mul(1.2)).add(1.7)).mul(
-        sin(causticUv.y.mul(3.3).add(causticTime.mul(0.9)))
+      const causticTwo = sin(
+        causticUv.x.mul(2.3).sub(causticTime.mul(1.2)).add(1.7),
+      ).mul(sin(causticUv.y.mul(3.3).add(causticTime.mul(0.9))));
+      const causticThree = sin(
+        causticUv.x.add(causticUv.y).mul(2.8).add(causticTime.mul(0.6)),
       );
-      const causticThree = sin(causticUv.x.add(causticUv.y).mul(2.8).add(causticTime.mul(0.6)));
-      const causticValue = pow(max(0.0, causticOne.add(causticTwo.mul(0.7)).add(causticThree.mul(0.5))).mul(0.33), 2.2);
-      const nearSurface = float(1.0).sub(smoothstep(5.0, 60.0, uniformNodes.depth)).mul(0.14);
-      const midCaustic = float(1.0).sub(smoothstep(25.0, 80.0, uniformNodes.depth)).mul(0.05);
+      const causticValue = pow(
+        max(
+          0.0,
+          causticOne.add(causticTwo.mul(0.7)).add(causticThree.mul(0.5)),
+        ).mul(0.33),
+        2.2,
+      );
+      const nearSurface = float(1.0)
+        .sub(smoothstep(5.0, 60.0, uniformNodes.depth))
+        .mul(0.14);
+      const midCaustic = float(1.0)
+        .sub(smoothstep(25.0, 80.0, uniformNodes.depth))
+        .mul(0.05);
 
-      color.addAssign(color.mul(causticValue).mul(nearSurface.add(midCaustic)).mul(shallowCaustic));
+      color.addAssign(
+        color
+          .mul(causticValue)
+          .mul(nearSurface.add(midCaustic))
+          .mul(shallowCaustic),
+      );
     });
 
     const contrast = mix(1.0, uniformNodes.grading.x, depthBlend);
     color.assign(color.sub(0.18).mul(contrast).add(0.18));
 
     const adaptLuma = dot(color, lumaWeights);
-    const midtoneMask = smoothstep(0.005, 0.08, adaptLuma)
-      .mul(float(1.0).sub(smoothstep(0.25, 0.6, adaptLuma)));
-    const adaptAmount = midBlend.mul(uniformNodes.eyeAdapt).mul(float(1.0).sub(deepBlend.mul(0.5)));
+    const midtoneMask = smoothstep(0.005, 0.08, adaptLuma).mul(
+      float(1.0).sub(smoothstep(0.25, 0.6, adaptLuma)),
+    );
+    const adaptAmount = midBlend
+      .mul(uniformNodes.eyeAdapt)
+      .mul(float(1.0).sub(deepBlend.mul(0.5)));
     color.addAssign(color.mul(midtoneMask).mul(adaptAmount));
 
-    const silhouetteLift = smoothstep(0.02, 0.25, dot(color, lumaWeights)).mul(0.028).mul(abyssBlend);
+    const silhouetteLift = smoothstep(0.02, 0.25, dot(color, lumaWeights))
+      .mul(0.028)
+      .mul(abyssBlend);
     color.addAssign(vec3(silhouetteLift));
 
-    const grainStrength = uniformNodes.grading.z.add(depthBlend.mul(0.012))
+    const grainStrength = uniformNodes.grading.z
+      .add(depthBlend.mul(0.012))
       .mul(float(1.0).sub(uniformNodes.reducedMode.mul(0.7)));
     const grain = fract(
-      sin(dot(distortedUv.mul(uniformNodes.time).mul(0.01), vec2(12.9898, 78.233))).mul(43758.5453)
+      sin(
+        dot(
+          distortedUv.mul(uniformNodes.time).mul(0.01),
+          vec2(12.9898, 78.233),
+        ),
+      ).mul(43758.5453),
     );
     color.addAssign(vec3(grain.sub(0.5).mul(grainStrength)));
 
     const dither = fract(
-      fract(dot(fragCoord, vec2(0.06711056, 0.00583715)).add(uniformNodes.time.mul(0.003))).mul(52.9829189)
+      fract(
+        dot(fragCoord, vec2(0.06711056, 0.00583715)).add(
+          uniformNodes.time.mul(0.003),
+        ),
+      ).mul(52.9829189),
     );
-    const ditherStrength = mix(0.0016, 0.0040, abyssBlend)
-      .mul(float(1.0).sub(uniformNodes.reducedMode.mul(0.75)));
+    const ditherStrength = mix(0.0016, 0.004, abyssBlend).mul(
+      float(1.0).sub(uniformNodes.reducedMode.mul(0.75)),
+    );
     color.addAssign(vec3(dither.sub(0.5).mul(ditherStrength)));
 
     const highlight = peakOf(color);
     const neighborPeak = highlight.toVar();
     const coveragePeak = highlight.toVar();
     If(uniformNodes.reducedMode.lessThan(0.5), () => {
-      const bloomProbe = max(vec2(1.0).div(uniformNodes.resolution), vec2(0.0006));
+      const bloomProbe = max(
+        vec2(1.0).div(uniformNodes.resolution),
+        vec2(0.0006),
+      );
       neighborPeak.assign(samplePeakCross(distortedUv, bloomProbe));
       coveragePeak.assign(neighborPeak);
 
-      If(max(highlight, neighborPeak).greaterThan(uniformNodes.bloomParams.y.sub(0.06)), () => {
-        // Probe farther only for likely bloom candidates so the common path does not pay a second 4-tap cross sample.
-        const coverageProbe = bloomProbe.mul(
-          max(float(2.2), uniformNodes.bloomParams.z.mul(0.75).add(1.4))
-        );
+      If(
+        max(highlight, neighborPeak).greaterThan(
+          uniformNodes.bloomParams.y.sub(0.06),
+        ),
+        () => {
+          // Probe farther only for likely bloom candidates so the common path does not pay a second 4-tap cross sample.
+          const coverageProbe = bloomProbe.mul(
+            max(float(2.2), uniformNodes.bloomParams.z.mul(0.75).add(1.4)),
+          );
 
-        coveragePeak.assign(samplePeakCross(distortedUv, coverageProbe));
-      });
+          coveragePeak.assign(samplePeakCross(distortedUv, coverageProbe));
+        },
+      );
     });
 
     const highlightCoverage = smoothstep(0.04, 0.18, coveragePeak);
-    const sparkleIsolated = smoothstep(0.03, 0.14, highlight.sub(neighborPeak))
-      .mul(float(1.0).sub(smoothstep(0.1, 0.3, coveragePeak)));
-    const compactHighlight = smoothstep(0.05, 0.2, highlight.sub(coveragePeak))
-      .mul(float(1.0).sub(smoothstep(0.12, 0.34, coveragePeak)));
-    const preservedCore = smoothstep(uniformNodes.bloomParams.y.add(0.14), 1.25, highlight)
-      .mul(0.22);
+    const sparkleIsolated = smoothstep(
+      0.03,
+      0.14,
+      highlight.sub(neighborPeak),
+    ).mul(float(1.0).sub(smoothstep(0.1, 0.3, coveragePeak)));
+    const compactHighlight = smoothstep(
+      0.05,
+      0.2,
+      highlight.sub(coveragePeak),
+    ).mul(float(1.0).sub(smoothstep(0.12, 0.34, coveragePeak)));
+    const preservedCore = smoothstep(
+      uniformNodes.bloomParams.y.add(0.14),
+      1.25,
+      highlight,
+    ).mul(0.22);
     const particulateSuppression = max(sparkleIsolated, compactHighlight);
     const bloomMask = smoothstep(uniformNodes.bloomParams.y, 1.0, highlight)
       .mul(clamp(highlightCoverage.add(preservedCore), 0.0, 1.0))
       .mul(float(1.0).sub(particulateSuppression.mul(0.92)));
-    const bloomLift = uniformNodes.bloomParams.x.mul(depthBlend.mul(0.22).add(0.18))
+    const bloomLift = uniformNodes.bloomParams.x
+      .mul(depthBlend.mul(0.22).add(0.18))
       .mul(mix(0.3, 1.0, highlightCoverage))
       .mul(float(1.0).sub(particulateSuppression.mul(0.82)));
     color.addAssign(color.mul(bloomMask).mul(bloomLift));
 
-    const scanline = sin(distortedUv.y.mul(uniformNodes.resolution.y).mul(1.5)).mul(0.03).add(0.97);
+    const scanline = sin(distortedUv.y.mul(uniformNodes.resolution.y).mul(1.5))
+      .mul(0.03)
+      .add(0.97);
     const scanlineStrength = clamp(depthBlend, 0.0, 1.0)
       .mul(uniformNodes.grading.w)
       .mul(float(1.0).sub(uniformNodes.reducedMode.mul(0.9)));
@@ -349,16 +442,28 @@ function createUnderwaterPostColorNode(sourceNode, uniformNodes) {
     const peak = peakOf(color).toVar();
     If(uniformNodes.flashlightActive.greaterThan(0.5), () => {
       const beamCenterDistance = distance(distortedUv, vec2(0.5));
-      const beamInfluence = float(1.0).sub(smoothstep(0.0, 0.38, beamCenterDistance));
-      const localCompress = beamInfluence.mul(smoothstep(0.3, 0.75, peak)).mul(0.45);
+      const beamInfluence = float(1.0).sub(
+        smoothstep(0.0, 0.38, beamCenterDistance),
+      );
+      const localCompress = beamInfluence
+        .mul(smoothstep(0.3, 0.75, peak))
+        .mul(0.45);
 
-      color.assign(mix(color, color.div(color.mul(0.7).add(1.0)), localCompress));
+      color.assign(
+        mix(color, color.div(color.mul(0.7).add(1.0)), localCompress),
+      );
       peak.assign(peakOf(color));
     });
 
-    const rollStart = max(0.45, uniformNodes.highlightRoll.x.sub(uniformNodes.exposure.mul(0.08)));
-    const rollBlend = smoothstep(rollStart, rollStart.add(uniformNodes.highlightRoll.y), peak)
-      .mul(uniformNodes.highlightRoll.z);
+    const rollStart = max(
+      0.45,
+      uniformNodes.highlightRoll.x.sub(uniformNodes.exposure.mul(0.08)),
+    );
+    const rollBlend = smoothstep(
+      rollStart,
+      rollStart.add(uniformNodes.highlightRoll.y),
+      peak,
+    ).mul(uniformNodes.highlightRoll.z);
     const rolled = color.div(color.add(1.0));
 
     color.assign(mix(color, rolled, rollBlend));
@@ -379,7 +484,7 @@ export class UnderwaterEffect {
     // underwater post-processing chain to TSL nodes on the RenderPipeline.
     this._renderPipeline = new THREE.RenderPipeline(renderer);
     this._scenePass = pass(scene, camera);
-    this._sceneColorNode = this._scenePass.getTextureNode('output');
+    this._sceneColorNode = this._scenePass.getTextureNode("output");
     this._activeOutputNode = null;
     this._bloomRenderNode = null;
     this._bloomRenderTextureNode = null;
@@ -400,8 +505,11 @@ export class UnderwaterEffect {
     this._scaleIndex = 0;
     // Warm-up cooldown: ignore adaptive signals for the first 2 s to avoid reacting to
     // one-time shader-compilation / render-target-allocation spikes on the first frame.
-    const _warmupNow = (typeof performance !== 'undefined' && typeof performance.now === 'function')
-      ? performance.now() : 0;
+    const _warmupNow =
+      typeof performance !== "undefined" &&
+      typeof performance.now === "function"
+        ? performance.now()
+        : 0;
     const _warmupMs = 2000;
     this._nextScaleChangeAt = _warmupNow + _warmupMs;
     this._recoveryAllowedAt = _warmupNow + _warmupMs;
@@ -410,44 +518,60 @@ export class UnderwaterEffect {
     this._bloomSuspendedUntil = 0;
     this._lastRenderMs = 0;
     this._consecutiveEmergencyFrames = 0;
+    // Pipeline-compilation cooldown: when a frame clearly stalls from WebGPU pipeline
+    // compilation (> 500 ms), suppress adaptive reactions (bloom suspension, scale
+    // degradation) that would set needsUpdate = true and trigger a SECOND compilation on
+    // the next frame.  Without this guard, a single look-down compilation stall cascades
+    // into 2-4 back-to-back recompilations, multiplying the freeze duration 2-4×.
+    this._compilationCooldownUntil = 0;
 
-    this.underwaterPass = { uniforms: cloneUniforms(UNDERWATER_UNIFORM_TEMPLATE) };
-    this.underwaterPass.uniforms.resolution.value.set(window.innerWidth, window.innerHeight);
+    this.underwaterPass = {
+      uniforms: cloneUniforms(UNDERWATER_UNIFORM_TEMPLATE),
+    };
+    this.underwaterPass.uniforms.resolution.value.set(
+      window.innerWidth,
+      window.innerHeight,
+    );
     this.underwaterPass.uniforms.depthThresholds.value.set(
       this.tuning.depthThresholds.mid,
       this.tuning.depthThresholds.deep,
-      this.tuning.depthThresholds.abyss
+      this.tuning.depthThresholds.abyss,
     );
     this.underwaterPass.uniforms.grading.value.set(
       this.tuning.grading.contrast,
       this.tuning.grading.vignette,
       this.tuning.grading.grain,
-      this.tuning.grading.scanline
+      this.tuning.grading.scanline,
     );
     this.underwaterPass.uniforms.extinction.value.set(
       this.tuning.extinction.r,
       this.tuning.extinction.g,
-      this.tuning.extinction.b
+      this.tuning.extinction.b,
     );
     this.underwaterPass.uniforms.scatterColor.value.set(
       this.tuning.scatter.r,
       this.tuning.scatter.g,
-      this.tuning.scatter.b
+      this.tuning.scatter.b,
     );
-    this.underwaterPass.uniforms.scatterDensity.value = this.tuning.scatter.density;
+    this.underwaterPass.uniforms.scatterDensity.value =
+      this.tuning.scatter.density;
     this.underwaterPass.uniforms.eyeAdapt.value = this.tuning.grading.eyeAdapt;
     this.underwaterPass.uniforms.highlightRoll.value.set(
       this.tuning.highlightRoll.start,
       this.tuning.highlightRoll.range,
-      this.tuning.highlightRoll.strength
+      this.tuning.highlightRoll.strength,
     );
     this.underwaterPass.uniforms.bloomParams.value.set(
       this.tuning.bloom.surfaceStrength,
       this.tuning.bloom.surfaceThreshold,
-      this.tuning.bloom.radius * 2.4
+      this.tuning.bloom.radius * 2.4,
     );
-    this._underwaterUniformNodes = createUnderwaterUniformNodes(this.underwaterPass.uniforms);
-    this._underwaterSceneOutputNode = this._createUnderwaterOutputNode(this._sceneColorNode);
+    this._underwaterUniformNodes = createUnderwaterUniformNodes(
+      this.underwaterPass.uniforms,
+    );
+    this._underwaterSceneOutputNode = this._createUnderwaterOutputNode(
+      this._sceneColorNode,
+    );
 
     // Bloom node for ultra tier
     this._bloomPass = null;
@@ -474,7 +598,7 @@ export class UnderwaterEffect {
     this._postProcessMaxScale = Math.min(
       this._qualityMaxScale,
       this._depthScaleCap,
-      this._startupScaleCap
+      this._startupScaleCap,
     );
     this._reducedShaderMode = false;
     this._isSoftwareRenderer = false;
@@ -498,7 +622,7 @@ export class UnderwaterEffect {
     this._rebuildScaleLadder();
     this._applyComposerScale(true);
 
-    window.addEventListener('qualitychange', (e) => {
+    window.addEventListener("qualitychange", (e) => {
       this._qualityMaxScale = e.detail.settings.postProcessScale;
       this._setupBloom(e.detail.tier);
       this._setupGodrays(e.detail.tier);
@@ -527,22 +651,67 @@ export class UnderwaterEffect {
   }
 
   _createUnderwaterOutputNode(sourceNode) {
-    return convertToTexture(createUnderwaterPostColorNode(sourceNode, this._underwaterUniformNodes));
+    return convertToTexture(
+      createUnderwaterPostColorNode(sourceNode, this._underwaterUniformNodes),
+    );
   }
 
   _updateUnderwaterNodeSizes(
     width = this._appliedComposerWidth || this._getRendererSize().width,
     height = this._appliedComposerHeight || this._getRendererSize().height,
-    pixelRatio = this._appliedComposerPixelRatio || this._nativeComposerPixelRatio,
+    pixelRatio = this._appliedComposerPixelRatio ||
+      this._nativeComposerPixelRatio,
     scale = this._appliedComposerScale || this._composerScale || 1,
   ) {
-    updateRttNodeScale(this._bloomRenderTextureNode, width, height, pixelRatio, scale);
-    updateRttNodeScale(this._underwaterSceneOutputNode, width, height, pixelRatio, scale);
-    updateRttNodeScale(this._underwaterBloomOutputNode, width, height, pixelRatio, scale);
-    updateRttNodeScale(this._godraysBloomRenderTextureNode, width, height, pixelRatio, scale);
-    updateRttNodeScale(this._underwaterBloomGodraysOutputNode, width, height, pixelRatio, scale);
-    updateRttNodeScale(this._godraysSceneRenderTextureNode, width, height, pixelRatio, scale);
-    updateRttNodeScale(this._underwaterGodraysOutputNode, width, height, pixelRatio, scale);
+    updateRttNodeScale(
+      this._bloomRenderTextureNode,
+      width,
+      height,
+      pixelRatio,
+      scale,
+    );
+    updateRttNodeScale(
+      this._underwaterSceneOutputNode,
+      width,
+      height,
+      pixelRatio,
+      scale,
+    );
+    updateRttNodeScale(
+      this._underwaterBloomOutputNode,
+      width,
+      height,
+      pixelRatio,
+      scale,
+    );
+    updateRttNodeScale(
+      this._godraysBloomRenderTextureNode,
+      width,
+      height,
+      pixelRatio,
+      scale,
+    );
+    updateRttNodeScale(
+      this._underwaterBloomGodraysOutputNode,
+      width,
+      height,
+      pixelRatio,
+      scale,
+    );
+    updateRttNodeScale(
+      this._godraysSceneRenderTextureNode,
+      width,
+      height,
+      pixelRatio,
+      scale,
+    );
+    updateRttNodeScale(
+      this._underwaterGodraysOutputNode,
+      width,
+      height,
+      pixelRatio,
+      scale,
+    );
   }
 
   _setReducedMode(enabled) {
@@ -570,12 +739,12 @@ export class UnderwaterEffect {
     const scale = THREE.MathUtils.clamp(
       this._appliedComposerScale || this._composerScale || 1,
       this.tuning.performance.minScale,
-      1
+      1,
     );
 
     this._effectiveBloomSize.set(
       Math.max(1, Math.round(width * scale)),
-      Math.max(1, Math.round(height * scale))
+      Math.max(1, Math.round(height * scale)),
     );
 
     return this._effectiveBloomSize;
@@ -604,8 +773,8 @@ export class UnderwaterEffect {
    * Ultra tier only — 60 raymarch steps is expensive.
    */
   _setupGodrays(tier) {
-    if (tier === 'ultra' && this._sunLight && !this._godraysPass) {
-      const depthNode = this._scenePass.getTextureNode('depth');
+    if (tier === "ultra" && this._sunLight && !this._godraysPass) {
+      const depthNode = this._scenePass.getTextureNode("depth");
       this._godraysPass = godrays(depthNode, this.camera, this._sunLight);
       this._godraysPass.maxDensity.value = 0.5;
       this._godraysPass.density.value = 0.7;
@@ -620,15 +789,15 @@ export class UnderwaterEffect {
         const scale = THREE.MathUtils.clamp(
           this._appliedComposerScale || this._composerScale || 1,
           this.tuning.performance.minScale,
-          1
+          1,
         );
         baseSetSize(
           Math.max(1, Math.round(width * scale)),
-          Math.max(1, Math.round(height * scale))
+          Math.max(1, Math.round(height * scale)),
         );
       };
       this._updateGodraysNodeSize();
-    } else if (tier !== 'ultra' && this._godraysPass) {
+    } else if (tier !== "ultra" && this._godraysPass) {
       this._godraysPass.dispose();
       this._godraysPass = null;
     }
@@ -657,15 +826,26 @@ export class UnderwaterEffect {
     if (this._godraysPass) {
       if (this._bloomPass) {
         // bloom + godrays chain
-        this._godraysBloomRenderNode = this._sceneColorNode.add(this._bloomPass).add(this._godraysPass);
-        this._godraysBloomRenderTextureNode = convertToTexture(this._godraysBloomRenderNode);
-        this._underwaterBloomGodraysOutputNode = this._createUnderwaterOutputNode(this._godraysBloomRenderTextureNode);
+        this._godraysBloomRenderNode = this._sceneColorNode
+          .add(this._bloomPass)
+          .add(this._godraysPass);
+        this._godraysBloomRenderTextureNode = convertToTexture(
+          this._godraysBloomRenderNode,
+        );
+        this._underwaterBloomGodraysOutputNode =
+          this._createUnderwaterOutputNode(this._godraysBloomRenderTextureNode);
       }
 
       // godrays-only chain (used when bloom is suspended or absent)
-      this._godraysSceneRenderNode = this._sceneColorNode.add(this._godraysPass);
-      this._godraysSceneRenderTextureNode = convertToTexture(this._godraysSceneRenderNode);
-      this._underwaterGodraysOutputNode = this._createUnderwaterOutputNode(this._godraysSceneRenderTextureNode);
+      this._godraysSceneRenderNode = this._sceneColorNode.add(
+        this._godraysPass,
+      );
+      this._godraysSceneRenderTextureNode = convertToTexture(
+        this._godraysSceneRenderNode,
+      );
+      this._underwaterGodraysOutputNode = this._createUnderwaterOutputNode(
+        this._godraysSceneRenderTextureNode,
+      );
     }
 
     this._updateUnderwaterNodeSizes();
@@ -677,12 +857,12 @@ export class UnderwaterEffect {
    * Ultra tier keeps the multi-pass bloom path upstream of the underwater TSL stage.
    */
   _setupBloom(tier) {
-    if (tier === 'ultra' && !this._bloomPass) {
+    if (tier === "ultra" && !this._bloomPass) {
       this._bloomPass = createBloomNode(
         this._sceneColorNode,
         this.tuning.bloom.surfaceStrength,
         this.tuning.bloom.radius,
-        this.tuning.bloom.surfaceThreshold
+        this.tuning.bloom.surfaceThreshold,
       );
 
       // BloomNode sizes itself from the renderer drawing buffer every frame.
@@ -695,8 +875,10 @@ export class UnderwaterEffect {
 
       this._bloomRenderNode = this._sceneColorNode.add(this._bloomPass);
       this._bloomRenderTextureNode = convertToTexture(this._bloomRenderNode);
-      this._underwaterBloomOutputNode = this._createUnderwaterOutputNode(this._bloomRenderTextureNode);
-    } else if (tier !== 'ultra' && this._bloomPass) {
+      this._underwaterBloomOutputNode = this._createUnderwaterOutputNode(
+        this._bloomRenderTextureNode,
+      );
+    } else if (tier !== "ultra" && this._bloomPass) {
       this._bloomPass.dispose();
       this._bloomPass = null;
       disposeRttNode(this._underwaterBloomOutputNode);
@@ -722,7 +904,11 @@ export class UnderwaterEffect {
     this._applyComposerScale(true);
   }
 
-  warmPerformanceFallbacks({ depth = 0, flashlightOn = false, exposure = 0.76 } = {}) {
+  warmPerformanceFallbacks({
+    depth = 0,
+    flashlightOn = false,
+    exposure = 0.76,
+  } = {}) {
     if (this._scaleLadder.length <= 1) {
       return;
     }
@@ -761,10 +947,12 @@ export class UnderwaterEffect {
       const clampedScale = THREE.MathUtils.clamp(
         scale,
         this.tuning.performance.minScale,
-        this._postProcessMaxScale
+        this._postProcessMaxScale,
       );
 
-      if (!nextScaleLadder.some((entry) => Math.abs(entry - clampedScale) < 0.01)) {
+      if (
+        !nextScaleLadder.some((entry) => Math.abs(entry - clampedScale) < 0.01)
+      ) {
         nextScaleLadder.push(clampedScale);
       }
     }
@@ -772,7 +960,8 @@ export class UnderwaterEffect {
     nextScaleLadder.sort((a, b) => b - a);
     this._scaleLadder = nextScaleLadder;
     this._scaleIndex = this._findScaleIndex(this._composerScale);
-    this._composerScale = this._scaleLadder[this._scaleIndex] ?? this.tuning.performance.minScale;
+    this._composerScale =
+      this._scaleLadder[this._scaleIndex] ?? this.tuning.performance.minScale;
   }
 
   _findScaleIndex(scale) {
@@ -792,9 +981,22 @@ export class UnderwaterEffect {
     return bestIndex;
   }
 
-  _setScaleIndex(index, { force = false, skipCooldown = false, holdRecovery = false, now = performance.now() } = {}) {
-    const nextIndex = THREE.MathUtils.clamp(index, 0, Math.max(this._scaleLadder.length - 1, 0));
-    const nextScale = this._scaleLadder[nextIndex] ?? this.tuning.performance.minScale;
+  _setScaleIndex(
+    index,
+    {
+      force = false,
+      skipCooldown = false,
+      holdRecovery = false,
+      now = performance.now(),
+    } = {},
+  ) {
+    const nextIndex = THREE.MathUtils.clamp(
+      index,
+      0,
+      Math.max(this._scaleLadder.length - 1, 0),
+    );
+    const nextScale =
+      this._scaleLadder[nextIndex] ?? this.tuning.performance.minScale;
 
     if (!force && Math.abs(nextScale - this._composerScale) < 0.01) {
       return false;
@@ -802,16 +1004,18 @@ export class UnderwaterEffect {
 
     this._scaleIndex = nextIndex;
     this._composerScale = nextScale;
-    this._nextScaleChangeAt = skipCooldown ? now : now + this.tuning.performance.scaleChangeCooldownMs;
+    this._nextScaleChangeAt = skipCooldown
+      ? now
+      : now + this.tuning.performance.scaleChangeCooldownMs;
     if (holdRecovery) {
       this._recoveryAllowedAt = Math.max(
         this._recoveryAllowedAt,
-        now + this.tuning.performance.emergencyHoldMs
+        now + this.tuning.performance.emergencyHoldMs,
       );
     } else {
       this._recoveryAllowedAt = Math.max(
         this._recoveryAllowedAt,
-        now + this.tuning.performance.recoveryDelayMs
+        now + this.tuning.performance.recoveryDelayMs,
       );
     }
     this._applyComposerScale(force);
@@ -831,7 +1035,7 @@ export class UnderwaterEffect {
     const newMax = Math.min(
       this._qualityMaxScale,
       this._depthScaleCap,
-      this._startupScaleCap
+      this._startupScaleCap,
     );
     if (!force && Math.abs(newMax - this._postProcessMaxScale) < 0.005) {
       return;
@@ -839,19 +1043,26 @@ export class UnderwaterEffect {
 
     this._postProcessMaxScale = newMax;
     this._rebuildScaleLadder();
-    const clampedIndex = this._findScaleIndex(Math.min(this._composerScale, newMax));
+    const clampedIndex = this._findScaleIndex(
+      Math.min(this._composerScale, newMax),
+    );
     this._setScaleIndex(clampedIndex, { force: true, skipCooldown });
   }
 
   beginStartupGuard() {
     const now = performance.now();
-    const targetScale = qualityManager.tier === 'ultra' ? 0.6 : 0.72;
+    const targetScale = qualityManager.tier === "ultra" ? 0.6 : 0.72;
     this._startupGuard.active = true;
     this._startupGuard.stableFrames = 0;
     this._startupGuard.endsAt = now + this.tuning.performance.startupMaxHoldMs;
     this._startupScaleCap = Math.min(this._startupScaleCap, targetScale);
     this._refreshScaleCap({ force: true, skipCooldown: true });
-    this._setScaleIndex(this._findScaleIndex(targetScale), { force: true, skipCooldown: true, holdRecovery: true, now });
+    this._setScaleIndex(this._findScaleIndex(targetScale), {
+      force: true,
+      skipCooldown: true,
+      holdRecovery: true,
+      now,
+    });
     this._stableRecoveryFrames = 0;
     this._moderatePressureFrames = 0;
     this._setReducedMode(true);
@@ -861,8 +1072,11 @@ export class UnderwaterEffect {
   }
 
   isStartupResponsive() {
-    return !this._startupGuard.active ||
-      this._startupGuard.stableFrames >= this.tuning.performance.startupStableFrames;
+    return (
+      !this._startupGuard.active ||
+      this._startupGuard.stableFrames >=
+        this.tuning.performance.startupStableFrames
+    );
   }
 
   getStartupGuardStatus() {
@@ -886,7 +1100,8 @@ export class UnderwaterEffect {
     }
 
     if (
-      this._startupGuard.stableFrames < this.tuning.performance.startupStableFrames &&
+      this._startupGuard.stableFrames <
+        this.tuning.performance.startupStableFrames &&
       now < this._startupGuard.endsAt
     ) {
       return;
@@ -903,18 +1118,20 @@ export class UnderwaterEffect {
     const nextScale = THREE.MathUtils.clamp(
       this._composerScale,
       this.tuning.performance.minScale,
-      this._postProcessMaxScale
+      this._postProcessMaxScale,
     );
     const size = this._getRendererSize();
     const width = size.width;
     const height = size.height;
     const pixelRatio = this._nativeComposerPixelRatio;
 
-    if (!force &&
+    if (
+      !force &&
       Math.abs(nextScale - this._appliedComposerScale) < 0.01 &&
       Math.abs(pixelRatio - this._appliedComposerPixelRatio) < 0.01 &&
       width === this._appliedComposerWidth &&
-      height === this._appliedComposerHeight) {
+      height === this._appliedComposerHeight
+    ) {
       return;
     }
 
@@ -929,7 +1146,7 @@ export class UnderwaterEffect {
     this._updateGodraysNodeSize();
     this.underwaterPass.uniforms.resolution.value.set(
       width * pixelRatio * nextScale,
-      height * pixelRatio * nextScale
+      height * pixelRatio * nextScale,
     );
     this._updateUnderwaterNodeSizes(width, height, pixelRatio, nextScale);
   }
@@ -952,7 +1169,8 @@ export class UnderwaterEffect {
     if (this._godraysPass) {
       const depthFade = 1.0 - THREE.MathUtils.smoothstep(depth, 40, 80);
       this._godraysPass.density.value = this._godraysBaseDensity * depthFade;
-      this._godraysPass.maxDensity.value = this._godraysBaseMaxDensity * depthFade;
+      this._godraysPass.maxDensity.value =
+        this._godraysBaseMaxDensity * depthFade;
     }
 
     // Item 4: quantize inputs — skip expensive bloom target recomputation when nothing meaningful
@@ -972,52 +1190,67 @@ export class UnderwaterEffect {
       const depthNorm = THREE.MathUtils.smoothstep(
         depth,
         this.tuning.depthThresholds.mid,
-        this.tuning.depthThresholds.abyss
+        this.tuning.depthThresholds.abyss,
       );
 
-      this._bloomTargetStrength = THREE.MathUtils.lerp(
-        this.tuning.bloom.surfaceStrength,
-        this.tuning.bloom.deepStrength,
-        depthNorm
-      ) * (flashlightOn ? 0.35 : 1.0);
+      this._bloomTargetStrength =
+        THREE.MathUtils.lerp(
+          this.tuning.bloom.surfaceStrength,
+          this.tuning.bloom.deepStrength,
+          depthNorm,
+        ) * (flashlightOn ? 0.35 : 1.0);
 
-      this._bloomTargetThreshold = THREE.MathUtils.lerp(
-        this.tuning.bloom.surfaceThreshold,
-        this.tuning.bloom.deepThreshold,
-        depthNorm
-      ) + (flashlightOn ? 0.30 : 0.0);
+      this._bloomTargetThreshold =
+        THREE.MathUtils.lerp(
+          this.tuning.bloom.surfaceThreshold,
+          this.tuning.bloom.deepThreshold,
+          depthNorm,
+        ) + (flashlightOn ? 0.3 : 0.0);
 
       this._bloomTargetRadius = THREE.MathUtils.lerp(
         this.tuning.bloom.radius * 2.0,
         this.tuning.bloom.radius * 2.8,
-        depthNorm
+        depthNorm,
       );
     }
 
     // Lerp convergence runs every frame regardless of cache state so bloom params
     // converge smoothly rather than freezing at stale values on cache hits.
-    const shaderBloomScale = this._bloomPass && !this._bloomSuspended ? 0.3 : 1.0;
+    const shaderBloomScale =
+      this._bloomPass && !this._bloomSuspended ? 0.3 : 1.0;
     const flashlightBloomRadiusScale = flashlightOn ? 0.82 : 1.0;
     const bloomParams = this.underwaterPass.uniforms.bloomParams.value;
-    bloomParams.x = THREE.MathUtils.lerp(bloomParams.x, this._bloomTargetStrength * shaderBloomScale, 0.09);
-    bloomParams.y = THREE.MathUtils.lerp(bloomParams.y, this._bloomTargetThreshold, 0.09);
-    bloomParams.z = THREE.MathUtils.lerp(bloomParams.z, this._bloomTargetRadius, 0.09);
+    bloomParams.x = THREE.MathUtils.lerp(
+      bloomParams.x,
+      this._bloomTargetStrength * shaderBloomScale,
+      0.09,
+    );
+    bloomParams.y = THREE.MathUtils.lerp(
+      bloomParams.y,
+      this._bloomTargetThreshold,
+      0.09,
+    );
+    bloomParams.z = THREE.MathUtils.lerp(
+      bloomParams.z,
+      this._bloomTargetRadius,
+      0.09,
+    );
 
     if (this._bloomPass && !this._bloomSuspended) {
       this._bloomPass.strength.value = THREE.MathUtils.lerp(
         this._bloomPass.strength.value,
         this._bloomTargetStrength,
-        0.09
+        0.09,
       );
       this._bloomPass.threshold.value = THREE.MathUtils.lerp(
         this._bloomPass.threshold.value,
         this._bloomTargetThreshold,
-        0.09
+        0.09,
       );
       this._bloomPass.radius.value = THREE.MathUtils.lerp(
         this._bloomPass.radius.value,
         this.tuning.bloom.radius * flashlightBloomRadiusScale,
-        0.09
+        0.09,
       );
     }
   }
@@ -1032,60 +1265,100 @@ export class UnderwaterEffect {
     this._lastRenderMs = renderMs;
     this._renderEmaMs = this._renderEmaMs * 0.92 + renderMs * 0.08;
 
+    // --- Pipeline-compilation stall detection ---
+    // Frames > 500 ms are almost certainly one-time WebGPU pipeline compilations
+    // (new materials entering the frustum).  Reacting with bloom suspension or
+    // scale degradation would set needsUpdate = true on the RenderPipeline,
+    // triggering a SECOND full shader recompilation on the very next frame and
+    // cascading into 2-4× the total freeze duration.  Instead, mark a cooldown
+    // window during which the adaptive scaler is suppressed.
+    const COMPILATION_STALL_MS = 500;
+    const COMPILATION_COOLDOWN_MS = 2000;
+    if (renderMs > COMPILATION_STALL_MS) {
+      this._compilationCooldownUntil = Math.max(
+        this._compilationCooldownUntil,
+        now + COMPILATION_COOLDOWN_MS,
+      );
+      // Don't let a compilation spike pollute the EMA — the spike won't repeat
+      // once pipelines are cached, and an inflated EMA would trigger sustained-
+      // pressure degradation on subsequent normal frames.
+      this._renderEmaMs = Math.min(
+        this._renderEmaMs,
+        this.tuning.performance.recoveryThresholdMs,
+      );
+      this._consecutiveEmergencyFrames = 0;
+    }
+    const inCompilationCooldown = now < this._compilationCooldownUntil;
+
     // Software-renderer sessions hold their reduced profile permanently — never recover.
-    if (!this._isSoftwareRenderer &&
+    if (
+      !this._isSoftwareRenderer &&
       !this._startupGuard.active &&
       this._bloomSuspended &&
       this._bloomPass &&
       now >= this._bloomSuspendedUntil &&
       this._scaleIndex === 0 &&
-      this._renderEmaMs < this.tuning.performance.recoveryThresholdMs) {
+      this._renderEmaMs < this.tuning.performance.recoveryThresholdMs
+    ) {
       this._setBloomSuspended(false, now);
     }
 
     const underPressure =
       renderMs > this.tuning.performance.severeThresholdMs ||
       this._renderEmaMs > this.tuning.performance.degradeThresholdMs;
-    const emergencyFrame = renderMs > this.tuning.performance.emergencyThresholdMs;
+    const emergencyFrame =
+      renderMs > this.tuning.performance.emergencyThresholdMs;
 
     // Require ≥2 consecutive emergency frames before snapping to minimum scale / suspending
     // bloom, to avoid overreacting to isolated one-off spikes (shader compilation, tab focus, etc.).
     if (emergencyFrame) {
-      this._consecutiveEmergencyFrames = Math.min(this._consecutiveEmergencyFrames + 1, 2);
+      this._consecutiveEmergencyFrames = Math.min(
+        this._consecutiveEmergencyFrames + 1,
+        2,
+      );
     } else {
       this._consecutiveEmergencyFrames = 0;
     }
     const sustainedEmergency = this._consecutiveEmergencyFrames >= 2;
 
     // Items 1/8: track sustained moderate-EMA pressure for early degradation
-    const moderatePressure = this._renderEmaMs > this.tuning.performance.moderatePressureThresholdMs;
+    const moderatePressure =
+      this._renderEmaMs > this.tuning.performance.moderatePressureThresholdMs;
     if (moderatePressure) {
       this._moderatePressureFrames = Math.min(
         this._moderatePressureFrames + 1,
-        this.tuning.performance.sustainedModeratePressureFrames + 1
+        this.tuning.performance.sustainedModeratePressureFrames + 1,
       );
     } else {
       this._moderatePressureFrames = 0;
     }
     const sustainedModeratePressure =
-      this._moderatePressureFrames >= this.tuning.performance.sustainedModeratePressureFrames;
+      this._moderatePressureFrames >=
+      this.tuning.performance.sustainedModeratePressureFrames;
 
     // Items 6/7: activate reduced shader mode under any tier of pressure
+    // (reduced mode only changes a uniform — no pipeline recompilation)
     const shouldReduceShader =
-      this._startupGuard.active ||
-      underPressure ||
-      sustainedModeratePressure;
+      this._startupGuard.active || underPressure || sustainedModeratePressure;
     if (shouldReduceShader !== this._reducedShaderMode) {
       this._setReducedMode(shouldReduceShader);
     }
 
-    if (underPressure) {
+    // During the compilation cooldown window, skip bloom suspension and scale
+    // degradation to avoid setting needsUpdate = true and triggering another
+    // multi-second pipeline recompilation.  Recovery paths remain active because
+    // they never trigger recompilation.
+    if (underPressure && !inCompilationCooldown) {
       this._stableRecoveryFrames = 0;
 
       // Item 3: suspend bloom at pressured state, not only at emergency.
       // For the emergency path, require sustained emergency to avoid overreacting to single-frame spikes.
-      if (this._bloomPass && !this._bloomSuspended &&
-          (sustainedEmergency || renderMs > this.tuning.performance.bloomSuspendThresholdMs)) {
+      if (
+        this._bloomPass &&
+        !this._bloomSuspended &&
+        (sustainedEmergency ||
+          renderMs > this.tuning.performance.bloomSuspendThresholdMs)
+      ) {
         this._setBloomSuspended(true, now);
       }
 
@@ -1093,13 +1366,23 @@ export class UnderwaterEffect {
         const nextIndex = sustainedEmergency
           ? this._scaleLadder.length - 1
           : this._scaleIndex + 1;
-        this._setScaleIndex(nextIndex, { now, holdRecovery: sustainedEmergency });
+        this._setScaleIndex(nextIndex, {
+          now,
+          holdRecovery: sustainedEmergency,
+        });
       }
-    } else if (sustainedModeratePressure && now >= this._nextScaleChangeAt) {
+    } else if (
+      sustainedModeratePressure &&
+      !inCompilationCooldown &&
+      now >= this._nextScaleChangeAt
+    ) {
       // Item 1: degrade one rung earlier under sustained moderate-EMA pressure
       this._stableRecoveryFrames = 0;
       this._setScaleIndex(this._scaleIndex + 1, { now });
-    } else if (!this._isSoftwareRenderer && this._renderEmaMs < this.tuning.performance.recoveryThresholdMs) {
+    } else if (
+      !this._isSoftwareRenderer &&
+      this._renderEmaMs < this.tuning.performance.recoveryThresholdMs
+    ) {
       // Software-renderer sessions stay in reduced profile and never scale back up.
       this._stableRecoveryFrames++;
       if (
@@ -1107,7 +1390,8 @@ export class UnderwaterEffect {
         !this._startupGuard.active &&
         now >= this._nextScaleChangeAt &&
         now >= this._recoveryAllowedAt &&
-        this._stableRecoveryFrames >= this.tuning.performance.stableFramesForRecovery
+        this._stableRecoveryFrames >=
+          this.tuning.performance.stableFramesForRecovery
       ) {
         this._stableRecoveryFrames = 0;
         this._setScaleIndex(this._scaleIndex - 1, { now });
@@ -1128,17 +1412,23 @@ export class UnderwaterEffect {
       g: Math.exp(-extinction.y * this._lastDepth),
       b: Math.exp(-extinction.z * this._lastDepth),
     };
-    const scatterMix = 1 - Math.exp(-this.underwaterPass.uniforms.scatterDensity.value * this._lastDepth);
-    const emaPressure = this._renderEmaMs > this.tuning.performance.emergencyThresholdMs
-      ? 'emergency'
-      : this._renderEmaMs > this.tuning.performance.degradeThresholdMs
-        ? 'pressured'
-        : 'normal';
-    const lastRenderPressure = this._lastRenderMs > this.tuning.performance.emergencyThresholdMs
-      ? 'emergency'
-      : this._lastRenderMs > this.tuning.performance.severeThresholdMs
-        ? 'pressured'
-        : 'normal';
+    const scatterMix =
+      1 -
+      Math.exp(
+        -this.underwaterPass.uniforms.scatterDensity.value * this._lastDepth,
+      );
+    const emaPressure =
+      this._renderEmaMs > this.tuning.performance.emergencyThresholdMs
+        ? "emergency"
+        : this._renderEmaMs > this.tuning.performance.degradeThresholdMs
+          ? "pressured"
+          : "normal";
+    const lastRenderPressure =
+      this._lastRenderMs > this.tuning.performance.emergencyThresholdMs
+        ? "emergency"
+        : this._lastRenderMs > this.tuning.performance.severeThresholdMs
+          ? "pressured"
+          : "normal";
     const emergency =
       this._bloomSuspended ||
       this._lastRenderMs > this.tuning.performance.emergencyThresholdMs;
@@ -1174,7 +1464,7 @@ export class UnderwaterEffect {
         mix: scatterMix,
       },
       bloom: {
-        mode: this._bloomPass ? 'pipeline' : 'none',
+        mode: this._bloomPass ? "pipeline" : "none",
         passEnabled: !!this._bloomPass && !this._bloomSuspended,
         shaderStrength: bloomParams.x,
         shaderThreshold: bloomParams.y,
@@ -1185,9 +1475,17 @@ export class UnderwaterEffect {
       },
       emaPressure,
       lastRenderPressure,
-      renderPressure: emergency ? 'emergency' : pressured ? 'pressured' : 'normal',
-      stallRisk: emergency ? 'emergency' : pressured ? 'pressured' : 'normal',
-      stallRiskLabel: emergency ? 'Emergency' : pressured ? 'Pressured' : 'Normal',
+      renderPressure: emergency
+        ? "emergency"
+        : pressured
+          ? "pressured"
+          : "normal",
+      stallRisk: emergency ? "emergency" : pressured ? "pressured" : "normal",
+      stallRiskLabel: emergency
+        ? "Emergency"
+        : pressured
+          ? "Pressured"
+          : "Normal",
     };
   }
 
@@ -1222,7 +1520,10 @@ export class UnderwaterEffect {
   applySoftwareRendererPolicy() {
     this._isSoftwareRenderer = true;
     this._setReducedMode(true);
-    this._setScaleIndex(this._scaleLadder.length - 1, { force: true, skipCooldown: true });
+    this._setScaleIndex(this._scaleLadder.length - 1, {
+      force: true,
+      skipCooldown: true,
+    });
     if (this._bloomPass && !this._bloomSuspended) {
       this._setBloomSuspended(true);
     }
@@ -1232,7 +1533,11 @@ export class UnderwaterEffect {
    * Item 5: Warm all scale-ladder variants with bloom explicitly suspended.
    * Allows PreloadCoordinator to pre-compile the bloom-off post-FX permutation.
    */
-  warmBloomSuspendedVariant({ depth = 0, flashlightOn = false, exposure = 0.76 } = {}) {
+  warmBloomSuspendedVariant({
+    depth = 0,
+    flashlightOn = false,
+    exposure = 0.76,
+  } = {}) {
     if (!this._bloomPass) return;
     const wasSuspended = this._bloomSuspended;
     if (!wasSuspended) {
@@ -1256,5 +1561,3 @@ export class UnderwaterEffect {
     this._renderPipeline.render();
   }
 }
-
-

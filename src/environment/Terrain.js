@@ -149,6 +149,12 @@ export class Terrain {
     this._chunkApplyLoggingEnabled = isChunkApplyDiagnosticsEnabled();
     this._lastChunkApplyLogMs = Number.NEGATIVE_INFINITY;
     this._lastPlayerPos = null;
+    // Freshly attached meshes: temporarily disable frustum culling so the
+    // WebGPU backend compiles their GPU render pipelines on the next few render
+    // frames regardless of camera direction.  Without this, looking at a new
+    // angle triggers synchronous pipeline compilation stalls for all newly
+    // visible chunks at once.
+    this._freshAttachments = [];
     this._chunkWorker = new Worker(
       new URL("./chunkPayloadWorker.js", import.meta.url),
       { type: "module" },
@@ -619,6 +625,20 @@ export class Terrain {
     } else if (stageName === "attach") {
       this.scene.add(job.mesh);
       this.chunks.set(job.key, job.mesh);
+      // Temporarily disable frustum culling on the chunk and all its children
+      // (rock InstancedMeshes) so they are included in the next render pass
+      // regardless of camera angle — this compiles their material's GPU
+      // pipeline ahead of the player ever looking at them.
+      const affectedMeshes = [];
+      job.mesh.traverse((obj) => {
+        if ((obj.isMesh || obj.isInstancedMesh) && obj.frustumCulled) {
+          obj.frustumCulled = false;
+          affectedMeshes.push(obj);
+        }
+      });
+      if (affectedMeshes.length > 0) {
+        this._freshAttachments.push({ meshes: affectedMeshes, framesLeft: 3 });
+      }
     }
 
     const elapsedMs = performance.now() - stageStart;
@@ -835,6 +855,20 @@ export class Terrain {
 
   update(playerPos, allowChunkWork = true) {
     this._lastPlayerPos = playerPos;
+
+    // Restore frustum culling on recently attached chunks once they've been
+    // through enough render frames to compile their GPU pipelines.
+    for (let i = this._freshAttachments.length - 1; i >= 0; i--) {
+      const entry = this._freshAttachments[i];
+      entry.framesLeft--;
+      if (entry.framesLeft <= 0) {
+        for (const mesh of entry.meshes) {
+          mesh.frustumCulled = true;
+        }
+        this._freshAttachments.splice(i, 1);
+      }
+    }
+
     const cx = Math.round(playerPos.x / this.chunkSize);
     const cz = Math.round(playerPos.z / this.chunkSize);
 
