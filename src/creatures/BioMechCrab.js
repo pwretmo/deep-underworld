@@ -13,6 +13,22 @@ let _spineGeo = null;
 const TWO_PI = Math.PI * 2;
 const HALF_PI = Math.PI * 0.5;
 
+// ── Fast acos lookup table (64-entry, linear interpolation over [-1, 1] → [0, π]) ──
+const ACOS_TABLE_SIZE = 64;
+const ACOS_TABLE = new Float32Array(ACOS_TABLE_SIZE + 1);
+for (let i = 0; i <= ACOS_TABLE_SIZE; i++) {
+  ACOS_TABLE[i] = Math.acos(2 * i / ACOS_TABLE_SIZE - 1);
+}
+
+function fastAcos(x) {
+  // Clamp to [-1, 1] and map to [0, ACOS_TABLE_SIZE]
+  const t = (Math.min(1, Math.max(-1, x)) + 1) * 0.5 * ACOS_TABLE_SIZE;
+  const i = t | 0; // floor
+  if (i >= ACOS_TABLE_SIZE) return ACOS_TABLE[ACOS_TABLE_SIZE];
+  const f = t - i;
+  return ACOS_TABLE[i] * (1 - f) + ACOS_TABLE[i + 1] * f;
+}
+
 function _hash(x, y, seed) {
   let h = seed | 0;
   h = ((h ^ ((x | 0) * 374761393)) >>> 0) * 1103515245;
@@ -592,11 +608,11 @@ export class BioMechCrab {
 
       // Law of cosines for knee angle
       const cosKnee = (upperLen * upperLen + lowerLen * lowerLen - clampedDist * clampedDist) / (2 * upperLen * lowerLen);
-      const kneeAngle = Math.acos(THREE.MathUtils.clamp(cosKnee, -1, 1));
+      const kneeAngle = fastAcos(cosKnee);
 
       // Hip angle
       const cosHip = (upperLen * upperLen + clampedDist * clampedDist - lowerLen * lowerLen) / (2 * upperLen * clampedDist);
-      const hipOffset = Math.acos(THREE.MathUtils.clamp(cosHip, -1, 1));
+      const hipOffset = fastAcos(cosHip);
       const targetAngle = Math.atan2(dx, -dy);
       const hipAngle = targetAngle + hipOffset * side;
 
