@@ -1,0 +1,10 @@
+{
+  "subject": "DeepOne runtime animation method",
+  "fact": "DeepOne uses TSL GPU animation (_applyDeepOneTentacleShader) for all tentacle deformation in production. There is NO per-frame computeVertexNormals() in DeepOne.js — all such calls are at construction time (lines ~21, 385, 400, 422, 469). The deformDeepOneAppendage() CPU-side function exists only in scripts/profile-creature-deformation.mjs as a legacy benchmarking path. Any repo memory claiming DeepOne appendages do CPU-side vertex mutation in gameplay is stale.",
+  "citations": [
+    "src/creatures/DeepOne.js:219-293",
+    "scripts/profile-creature-deformation.mjs:971-985"
+  ],
+  "reason": "A stale repo memory incorrectly listed 'DeepOne appendages' as a runtime CPU deformation hotspot alongside VoidJelly, MechOctopus, and SirenSkull. This caused issue #301 to incorrectly describe a non-existent per-frame deformation path. Future review and coding tasks must know DeepOne is already GPU-side and does not need a computeVertexNormals removal fix.",
+  "category": "creature-rendering"
+}
