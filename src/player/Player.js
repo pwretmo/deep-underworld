@@ -70,7 +70,14 @@ export class Player {
 
     // Submarine ambient glow — visible cockpit illumination
     this.subLight = new THREE.PointLight(0x445577, 8, 65);
+    this.subLight.userData.baseIntensity = 8;
     camera.add(this.subLight);
+
+    this.powerState = {
+      batteryLevel: 1,
+      critical: false,
+      offline: false,
+    };
 
     this.camera.quaternion.setFromEuler(this.euler);
 
@@ -192,6 +199,13 @@ export class Player {
     this.autoplayInput.vertical = 0;
   }
 
+  setPowerState(powerState = {}) {
+    this.powerState = {
+      ...this.powerState,
+      ...powerState,
+    };
+  }
+
   update(dt) {
     if (!this.locked) return;
 
@@ -292,7 +306,23 @@ export class Player {
 
     // Shared time for beam shader animation
     const time = performance.now() * 0.001;
-    this.externalLighting.update(dt, this.depth, time);
+    this.externalLighting.update(dt, this.depth, time, this.powerState);
+
+    const batteryLevel = THREE.MathUtils.clamp(
+      this.powerState.batteryLevel ?? 1,
+      0,
+      1,
+    );
+    const baseSubLight = this.subLight.userData.baseIntensity ?? 8;
+    if (this.powerState.offline) {
+      this.subLight.intensity = 0;
+    } else {
+      const flicker = this.powerState.critical
+        ? 0.72 + Math.sin(time * 6.4) * 0.16 + Math.sin(time * 17.5) * 0.08
+        : 1;
+      const powerScale = THREE.MathUtils.lerp(0.22, 1, batteryLevel);
+      this.subLight.intensity = baseSubLight * powerScale * flicker;
+    }
   }
 
   /**

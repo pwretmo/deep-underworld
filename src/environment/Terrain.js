@@ -76,6 +76,9 @@ const CHUNK_FINALIZATION_STAGES = [
 const STREAM_FINALIZATION_BUDGET_MS = 4;
 const PRELOAD_FINALIZATION_BUDGET_MS = 8;
 const MAX_FINALIZATION_STAGES_PER_SLICE = 8;
+const MAX_SUPPORTED_TERRAIN_VIEW_DISTANCE = 4;
+const TERRAIN_BATCH_STREAMING_BUFFER = 48;
+const TERRAIN_BATCH_GROWTH_CHUNKS = 16;
 const PROFILE_EMA_ALPHA = 0.2;
 const SLOW_FINALIZATION_STAGE_MS = 2.5;
 const SLOW_FINALIZATION_TOTAL_MS = 6;
@@ -132,6 +135,17 @@ export class Terrain {
     this.chunks = new Map();
     this.chunkSize = 80;
     this.resolution = 40;
+    this._terrainChunkVertexCount =
+      (this.resolution + 1) * (this.resolution + 1);
+    this._terrainChunkIndexCount = this.resolution * this.resolution * 6;
+    this._terrainBatchChunkCapacity =
+      (MAX_SUPPORTED_TERRAIN_VIEW_DISTANCE * 2 + 1) ** 2 +
+      TERRAIN_BATCH_STREAMING_BUFFER;
+    this._terrainBatchMaxVertexCount =
+      this._terrainBatchChunkCapacity * this._terrainChunkVertexCount;
+    this._terrainBatchMaxIndexCount =
+      this._terrainBatchChunkCapacity * this._terrainChunkIndexCount;
+    this._terrainBatchNeedsOptimize = false;
     this.lastChunkX = null;
     this.lastChunkZ = null;
     this.viewDistance = qualityManager.getSettings().terrainViewDistance;
@@ -196,15 +210,12 @@ export class Terrain {
     this._terrainMat = this._createTerrainMaterial();
 
     // BatchedMesh for terrain chunks — all visible chunks share one draw call.
-    // Capacity is sized for the largest possible view distance (ultra tier,
-    // viewDistance=4 → 81 chunks) plus a streaming buffer.
-    const MAX_TERRAIN_CHUNKS = 100;
-    const TERRAIN_VERTS = (this.resolution + 1) * (this.resolution + 1); // 1681
-    const TERRAIN_INDICES = this.resolution * this.resolution * 6; // 9600
+    // three.js BatchedMesh does not reclaim deleted geometry ranges until
+    // optimize() is called, so keep extra streaming headroom and grow on demand.
     this._terrainBatchedMesh = new THREE.BatchedMesh(
-      MAX_TERRAIN_CHUNKS,
-      MAX_TERRAIN_CHUNKS * TERRAIN_VERTS,
-      MAX_TERRAIN_CHUNKS * TERRAIN_INDICES,
+      this._terrainBatchChunkCapacity,
+      this._terrainBatchMaxVertexCount,
+      this._terrainBatchMaxIndexCount,
       this._terrainMat,
     );
     this._terrainBatchedMesh.receiveShadow = true;
@@ -244,6 +255,43 @@ export class Terrain {
     // Reusable scratch objects to avoid per-frame allocations.
     this._rockScratchMatrix = new THREE.Matrix4();
     this._rockScratchColor = new THREE.Color();
+  }
+
+  _growTerrainBatchCapacity(
+    chunkCountIncrease = TERRAIN_BATCH_GROWTH_CHUNKS,
+  ) {
+    this._terrainBatchChunkCapacity += chunkCountIncrease;
+    this._terrainBatchMaxVertexCount =
+      this._terrainBatchChunkCapacity * this._terrainChunkVertexCount;
+    this._terrainBatchMaxIndexCount =
+      this._terrainBatchChunkCapacity * this._terrainChunkIndexCount;
+
+    this._terrainBatchedMesh.setGeometrySize(
+      this._terrainBatchMaxVertexCount,
+      this._terrainBatchMaxIndexCount,
+    );
+    this._terrainBatchedMesh.setInstanceCount(this._terrainBatchChunkCapacity);
+  }
+
+  _ensureTerrainBatchCapacity(vertexCount, indexCount) {
+    if (
+      vertexCount <= this._terrainBatchedMesh.unusedVertexCount &&
+      indexCount <= this._terrainBatchedMesh.unusedIndexCount
+    ) {
+      return;
+    }
+
+    if (this._terrainBatchNeedsOptimize) {
+      this._terrainBatchedMesh.optimize();
+      this._terrainBatchNeedsOptimize = false;
+    }
+
+    while (
+      vertexCount > this._terrainBatchedMesh.unusedVertexCount ||
+      indexCount > this._terrainBatchedMesh.unusedIndexCount
+    ) {
+      this._growTerrainBatchCapacity();
+    }
   }
 
   /**
@@ -520,6 +568,7 @@ export class Terrain {
       this._terrainBatchedMesh.deleteGeometry(
         job.mesh.userData.batchedGeomId,
       );
+      this._terrainBatchNeedsOptimize = true;
       job.mesh.userData.batchedInstanceId = null;
       job.mesh.userData.batchedGeomId = null;
     }
@@ -575,6 +624,11 @@ export class Terrain {
       new THREE.BufferAttribute(payload.colors, 3),
     );
     geometry.setIndex(new THREE.BufferAttribute(payload.indices, 1));
+
+    this._ensureTerrainBatchCapacity(
+      geometry.getAttribute("position").count,
+      geometry.getIndex().count,
+    );
 
     // Upload the geometry into the shared BatchedMesh.  addGeometry() copies
     // the data into the BatchedMesh’s internal buffers, so we can (and must)
@@ -925,6 +979,7 @@ export class Terrain {
           mesh.userData.batchedInstanceId,
         );
         this._terrainBatchedMesh.deleteGeometry(mesh.userData.batchedGeomId);
+        this._terrainBatchNeedsOptimize = true;
         // Return rock instances to their global pools.
         this._freeChunkRockSlots(mesh.userData.rockSlots);
         // The tracking mesh was never added to the scene — no scene.remove needed.

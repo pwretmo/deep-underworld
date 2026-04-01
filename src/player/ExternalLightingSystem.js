@@ -5,17 +5,17 @@ import {
 } from "../shaders/VolumetricBeamMaterial.js";
 
 const DEFAULTS = {
-  headlightIntensity: 200,
-  headlightRange: 170,
+  headlightIntensity: 30,
+  headlightRange: 125,
   coneAngle: Math.PI / 10,
   penumbra: 0.35,
   decay: 1.8,
   headlightSpacing: 2.2,
-  beamLength: 80,
-  beamBaseOpacity: 0.028,
-  hullIntensity: 6,
-  hullRange: 38,
-  hullDecay: 2,
+  beamLength: 68,
+  beamBaseOpacity: 0.024,
+  hullIntensity: 2.4,
+  hullRange: 24,
+  hullDecay: 1.8,
 };
 
 const HULL_LIGHT_LAYOUT = [
@@ -151,19 +151,34 @@ export class ExternalLightingSystem {
     this._beamMaterials = nextMaterials;
   }
 
-  update(_dt, depth, time) {
+  update(_dt, depth, time, powerState = {}) {
     // Keep lamp output stable across depth; scene fog/scattering handles perceived attenuation.
     const intensityAttenuation = 1.0;
     const rangeAttenuation = 1.0;
-    const beamOpacityScale = 1.0;
+    const batteryLevel = THREE.MathUtils.clamp(
+      powerState.batteryLevel ?? 1,
+      0,
+      1,
+    );
+    const powerOffline = !!powerState.offline;
+    const powerCritical = !!powerState.critical;
+    const beamOpacityScale = powerOffline
+      ? 0
+      : THREE.MathUtils.lerp(0.18, 1, batteryLevel);
 
     for (let i = 0; i < this.headlights.length; i++) {
       const light = this.headlights[i];
       const baseIntensity =
         light.userData.baseIntensity ?? this.config.headlightIntensity;
       const baseRange = light.userData.baseRange ?? this.config.headlightRange;
-      light.intensity = baseIntensity * intensityAttenuation;
-      light.distance = baseRange * rangeAttenuation;
+      const flicker = powerCritical
+        ? 0.78 + Math.sin(time * 7.2 + i * 1.7) * 0.14
+        : 1;
+      const powerScale = powerOffline
+        ? 0
+        : THREE.MathUtils.lerp(0.24, 1, batteryLevel);
+      light.intensity = baseIntensity * intensityAttenuation * powerScale * flicker;
+      light.distance = baseRange * rangeAttenuation * THREE.MathUtils.lerp(0.6, 1, batteryLevel);
     }
 
     for (let i = 0; i < this.hullLights.length; i++) {
@@ -171,8 +186,14 @@ export class ExternalLightingSystem {
       const baseIntensity =
         light.userData.baseIntensity ?? this.config.hullIntensity;
       const baseRange = light.userData.baseRange ?? this.config.hullRange;
-      light.intensity = baseIntensity;
-      light.distance = baseRange;
+      const flicker = powerCritical
+        ? 0.55 + Math.sin(time * 9.8 + i * 2.1) * 0.22 + Math.sin(time * 24.7 + i) * 0.1
+        : 1;
+      const powerScale = powerOffline
+        ? 0
+        : THREE.MathUtils.lerp(0.12, 1, batteryLevel * batteryLevel);
+      light.intensity = baseIntensity * powerScale * flicker;
+      light.distance = baseRange * THREE.MathUtils.lerp(0.45, 1, batteryLevel);
     }
 
     for (let i = 0; i < this._beamMaterials.length; i++) {
