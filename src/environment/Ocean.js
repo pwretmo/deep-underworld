@@ -321,12 +321,7 @@ export class Ocean {
         this.sunLight.shadow.map = null;
       }
       this._rebuildParticles(e.detail.settings);
-
-      const wasTransmission = this._waterSurfaceUsesTransmission;
-      const nowTransmission = newTier === "high" || newTier === "ultra";
-      if (wasTransmission !== nowTransmission) {
-        this._rebuildWaterSurface();
-      }
+      this._rebuildWaterSurface();
     });
   }
 
