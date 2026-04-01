@@ -478,7 +478,7 @@ export class CreatureManager {
       if (k < maxVisible) this._visCount++;
 
       // Shift entries right to make space (at most maxVisible entries)
-      const limit = Math.min(k, maxVisible - 1);
+      const limit = Math.min(k, maxVisible);
       for (let i = limit; i > insertAt; i--) {
         this._visRoots[i]  = this._visRoots[i - 1];
         this._visScores[i] = this._visScores[i - 1];
