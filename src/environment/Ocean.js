@@ -380,7 +380,9 @@ export class Ocean {
     const tier = qualityManager.tier;
     const useTransmission = tier === "high" || tier === "ultra";
 
-    const geo = new THREE.PlaneGeometry(2000, 2000, 100, 100);
+    const waterSegments = { low: 16, medium: 24, high: 40, ultra: 60 };
+    const segments = waterSegments[tier] || 24;
+    const geo = new THREE.PlaneGeometry(2000, 2000, segments, segments);
 
     let mat;
     if (useTransmission) {
