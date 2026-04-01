@@ -83,6 +83,8 @@ export class CreatureManager {
     this._spawnCostEmaMs = 0;
     this._lastSpawnCostMs = 0;
     this._visibilityScratch = [];
+    this._typeCount = new Map();
+    this._queuedTypeCount = new Map();
     // Diagnostic counters (read by profiling; negligible overhead)
     this._diagCandidateCount = 0;
     this._diagBroadPhaseCount = 0;
@@ -107,6 +109,7 @@ export class CreatureManager {
         : 0;
       if (entryIndex === -1) break;
       const [entry] = this._spawnQueue.splice(entryIndex, 1);
+      this._queuedTypeCount.set(entry.type, (this._queuedTypeCount.get(entry.type) ?? 0) - 1);
       const _t0 = performance.now();
       const instance = entry.createFn();
       const _spawnMs = performance.now() - _t0;
@@ -173,14 +176,17 @@ export class CreatureManager {
   _add(type, instance, depthMin, depthMax) {
     this._registerCreatureLights(instance);
     this.creatures.push({ type, instance, depthMin, depthMax });
+    this._typeCount.set(type, (this._typeCount.get(type) ?? 0) + 1);
   }
 
   _queueAdd(type, createFn, depthMin, depthMax) {
     this._spawnQueue.push({ type, createFn, depthMin, depthMax, countsTowardLoad: true });
+    this._queuedTypeCount.set(type, (this._queuedTypeCount.get(type) ?? 0) + 1);
   }
 
   _queueDynamicAdd(type, createFn, depthMin, depthMax) {
     this._spawnQueue.push({ type, createFn, depthMin, depthMax, countsTowardLoad: false });
+    this._queuedTypeCount.set(type, (this._queuedTypeCount.get(type) ?? 0) + 1);
   }
 
   _spawnInitialCreatures(playerPos) {
@@ -536,6 +542,7 @@ export class CreatureManager {
         this._unregisterCreatureLights(c.instance);
         c.instance.dispose();
         this.creatures.splice(i, 1);
+        this._typeCount.set(c.type, (this._typeCount.get(c.type) ?? 0) - 1);
       }
     }
 
@@ -556,11 +563,11 @@ export class CreatureManager {
   }
 
   _count(type) {
-    return this.creatures.filter(c => c.type === type).length;
+    return this._typeCount.get(type) ?? 0;
   }
 
   _countQueued(type) {
-    return this._spawnQueue.filter(entry => entry.type === type).length;
+    return this._queuedTypeCount.get(type) ?? 0;
   }
 
   _countWithQueued(type) {
@@ -590,6 +597,7 @@ export class CreatureManager {
       depthMax: entry.depthMax,
       countsTowardLoad: false,
     });
+    this._queuedTypeCount.set(entry.type, (this._queuedTypeCount.get(entry.type) ?? 0) + 1);
     return true;
   }
 
@@ -762,5 +770,7 @@ export class CreatureManager {
     this._spawnQueue = [];
     this._spawnTotal = 0;
     this._spawnedCount = 0;
+    this._typeCount.clear();
+    this._queuedTypeCount.clear();
   }
 }
