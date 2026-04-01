@@ -37,6 +37,12 @@ import {
 } from "three/tsl";
 import { qualityManager } from "../QualityManager.js";
 import { expandGeometryBounds } from "../utils/geometryBounds.js";
+import { WaveHeightfield } from "./WaveHeightfield.js";
+
+/**
+ * Tiers that use compute-driven wave heightfield instead of inline TSL vertex waves.
+ */
+const COMPUTE_WAVE_TIERS = new Set(["medium", "high", "ultra"]);
 
 const WATER_SURFACE_X_WAVE_SCALE = 0.05;
 const WATER_SURFACE_X_WAVE_SPEED = 0.5;
@@ -252,6 +258,12 @@ export class Ocean {
     this._particleComputeStorageAttributes = [];
     this._particleRenderer = null;
 
+    // Wave heightfield (compute-driven, medium+ tiers)
+    this._waveHeightfield = null;
+    if (COMPUTE_WAVE_TIERS.has(qualityManager.tier)) {
+      this._waveHeightfield = new WaveHeightfield(qualityManager.tier);
+    }
+
     // Ambient light — richer blue fill for underwater atmosphere
     this.ambientLight = new THREE.AmbientLight(0x2a4466, 0.50);
     scene.add(this.ambientLight);
@@ -317,6 +329,7 @@ export class Ocean {
         this.sunLight.shadow.map.dispose();
         this.sunLight.shadow.map = null;
       }
+      this._rebuildHeightfield(newTier);
       this._rebuildParticles(e.detail.settings);
       this._rebuildWaterSurface();
     });
@@ -324,6 +337,29 @@ export class Ocean {
 
   _getMarineSnowParticleCount(settings = qualityManager.getSettings()) {
     return Math.max(1, Math.round(settings.particleCount ?? 1));
+  }
+
+  /**
+   * Rebuild the wave heightfield for a new quality tier.
+   * Disposes the old heightfield and creates a new one (or null for low tier).
+   */
+  _rebuildHeightfield(tier) {
+    if (this._waveHeightfield) {
+      this._waveHeightfield.dispose();
+      this._waveHeightfield = null;
+    }
+    if (COMPUTE_WAVE_TIERS.has(tier)) {
+      this._waveHeightfield = new WaveHeightfield(tier);
+    }
+  }
+
+  /**
+   * Expose the wave heightfield for external consumers (e.g. CausticPass).
+   * Returns null on low tier.
+   * @returns {WaveHeightfield|null}
+   */
+  getWaveHeightfield() {
+    return this._waveHeightfield;
   }
 
   _disposeParticleComputeResources() {
@@ -415,7 +451,8 @@ export class Ocean {
       time: 0,
       surfacePhaseOffset: new THREE.Vector2(0, 0),
     });
-    const waveSamplePoint = positionLocal.xy.add(uniforms.surfacePhaseOffset);
+
+    // Wave displacement — either from compute heightfield (medium+) or inline TSL (low)
     const waveFade = smoothstep(
       WATER_SURFACE_WAVE_FALLOFF_START,
       WATER_SURFACE_WAVE_FALLOFF_END,
@@ -426,20 +463,35 @@ export class Ocean {
       float(WATER_SURFACE_HORIZON_WAVE_FACTOR),
       waveFade,
     );
-    const wave = sin(
-      waveSamplePoint.x
-        .mul(WATER_SURFACE_X_WAVE_SCALE)
-        .add(uniforms.time.mul(WATER_SURFACE_X_WAVE_SPEED)),
-    )
-      .mul(WATER_SURFACE_X_WAVE_AMPLITUDE)
-      .add(
-        cos(
-          waveSamplePoint.y
-            .mul(WATER_SURFACE_Z_WAVE_SCALE)
-            .add(uniforms.time.mul(WATER_SURFACE_Z_WAVE_SPEED)),
-        ).mul(WATER_SURFACE_Z_WAVE_AMPLITUDE),
+
+    let wave;
+    if (this._waveHeightfield) {
+      // Compute-driven path: sample the storage buffer heightfield.
+      // positionLocal.xy = local mesh coords; surfacePhaseOffset re-centers
+      // the heightfield grid around the player (set each frame in update()).
+      const localXY = positionLocal.xy;
+      wave = this._waveHeightfield
+        .createHeightSampleNode(localXY)
+        .mul(waveStrength);
+    } else {
+      // Inline TSL fallback (low tier) — same sinusoidal logic as before
+      const waveSamplePoint = positionLocal.xy.add(uniforms.surfacePhaseOffset);
+      wave = sin(
+        waveSamplePoint.x
+          .mul(WATER_SURFACE_X_WAVE_SCALE)
+          .add(uniforms.time.mul(WATER_SURFACE_X_WAVE_SPEED)),
       )
-      .mul(waveStrength);
+        .mul(WATER_SURFACE_X_WAVE_AMPLITUDE)
+        .add(
+          cos(
+            waveSamplePoint.y
+              .mul(WATER_SURFACE_Z_WAVE_SCALE)
+              .add(uniforms.time.mul(WATER_SURFACE_Z_WAVE_SPEED)),
+          ).mul(WATER_SURFACE_Z_WAVE_AMPLITUDE),
+        )
+        .mul(waveStrength);
+    }
+
     mat.positionNode = vec3(
       positionLocal.x,
       positionLocal.y,
@@ -743,6 +795,11 @@ export class Ocean {
     this._particleSpawnAnchor.copy(playerPos);
     this._hasParticleSpawnAnchor = true;
     this._particleRenderer = renderer;
+
+    // Dispatch wave heightfield compute (medium+ tiers)
+    if (this._waveHeightfield) {
+      this._waveHeightfield.update(this.time, playerPos, renderer);
+    }
 
     this.waterSurface.material.uniforms.time.value = this.time;
     this.waterSurface.material.uniforms.surfacePhaseOffset.value.set(

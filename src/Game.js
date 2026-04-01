@@ -187,6 +187,12 @@ export class Game {
         this.renderer.shadowMap.type = THREE.PCFShadowMap;
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       }
+      // Re-wire CausticPass to the (possibly new) wave heightfield after
+      // Ocean's own qualitychange handler has rebuilt it.
+      if (this.underwaterEffect) {
+        const hf = this.ocean.getWaveHeightfield();
+        this.underwaterEffect.causticPass.setWaveHeightfield(hf);
+      }
     });
 
     // FPS tracking for automated testing
@@ -265,6 +271,14 @@ export class Game {
       this.camera,
       this.ocean.sunLight,
     );
+
+    // Wire the compute-driven wave heightfield (if present) to CausticPass
+    // so #196 follow-up work can sample it for richer caustics.
+    const waveHF = this.ocean.getWaveHeightfield();
+    if (waveHF) {
+      this.underwaterEffect.causticPass.setWaveHeightfield(waveHF);
+    }
+
     this.preload = this._createPreloadCoordinator();
 
     this.graphicsDiagnostics = this._detectGraphicsDiagnostics();
