@@ -505,7 +505,7 @@ export class AbyssalMaw {
     return 'far';
   }
 
-  update(dt, playerPos) {
+  update(dt, playerPos, distSq) {
     this.time += dt;
     this.turnTimer += dt;
 

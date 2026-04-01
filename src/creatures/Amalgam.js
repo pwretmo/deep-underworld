@@ -860,7 +860,7 @@ export class Amalgam {
     return points;
   }
 
-  update(dt, playerPos) {
+  update(dt, playerPos, distSq) {
     this.time += dt;
     this._frameCount++;
     const tier = this._getVisibleTierName();
@@ -878,7 +878,7 @@ export class Amalgam {
     this._breathPhase += dt * 1.2;
 
     // Player proximity factor
-    const distToPlayer = this.group.position.distanceTo(playerPos);
+    const distToPlayer = Math.sqrt(distSq);
     const targetProx = THREE.MathUtils.clamp(1 - distToPlayer / 40, 0, 1);
     this._proximityFactor +=
       (targetProx - this._proximityFactor) * Math.min(1, dt * 2);

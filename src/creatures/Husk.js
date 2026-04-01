@@ -96,7 +96,7 @@ export class Husk {
     this.group.scale.setScalar(s);
   }
 
-  update(dt, playerPos) {
+  update(dt, playerPos, distSq) {
     this.time += dt;
     this.twitchTimer += dt;
 
@@ -120,7 +120,7 @@ export class Husk {
       if (Math.random() < dt * 2) this.twitching = false;
     }
 
-    if (this.group.position.distanceTo(playerPos) > 200) {
+    if (distSq > 40000) {
       const a = Math.random() * Math.PI * 2;
       this.group.position.set(playerPos.x + Math.cos(a) * 80, playerPos.y - Math.random() * 10, playerPos.z + Math.sin(a) * 80);
     }

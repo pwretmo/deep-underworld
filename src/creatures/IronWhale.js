@@ -143,7 +143,7 @@ export class IronWhale {
     return tierGroup;
   }
 
-  update(dt, playerPos) {
+  update(dt, playerPos, distSq) {
     this.time += dt;
     this.turnTimer += dt;
 
@@ -163,7 +163,7 @@ export class IronWhale {
     // Gentle roll
     this.group.rotation.z = Math.sin(this.time * 0.15) * 0.02;
 
-    if (this.group.position.distanceTo(playerPos) > 250) {
+    if (distSq > 62500) {
       const a = Math.random() * Math.PI * 2;
       this.group.position.set(playerPos.x + Math.cos(a) * 100, playerPos.y - Math.random() * 20, playerPos.z + Math.sin(a) * 100);
     }

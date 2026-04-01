@@ -770,15 +770,13 @@ export class TubeCluster {
 
   // ── Main update ───────────────────────────────────────────────────────────
 
-  update(dt, playerPos) {
+  update(dt, playerPos, distSq) {
     this.time += dt;
     this._frameCount++;
     this._refreshFarTierIfNeeded();
 
-    const dist = this.group.position.distanceTo(playerPos);
-
     // Respawn when too far away
-    if (dist > 200) {
+    if (distSq > 40000) {
       const a = Math.random() * TWO_PI;
       this.group.position.set(
         playerPos.x + Math.cos(a) * 80,
@@ -797,7 +795,7 @@ export class TubeCluster {
     const t = this.time;
 
     // Player proximity — trigger worm retraction; re-emergence uses staged delays
-    const nearPlayer = dist < 9;
+    const nearPlayer = distSq < 81;
     if (nearPlayer && !this._playerNear) {
       this._playerNear = true;
       for (const wd of this._wormData) wd.state = 'retracting';

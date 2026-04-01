@@ -395,7 +395,7 @@ export class Lamprey {
   }
 
   // ── update ──────────────────────────────────────────────────────────────────
-  update(dt, playerPos) {
+  update(dt, playerPos, distSq) {
     this.time        += dt;
     this._wavePhase  += dt * this._waveFreq;
     this._mouthPhase += dt * 1.2;
@@ -422,7 +422,7 @@ export class Lamprey {
     this.group.rotation.y = THREE.MathUtils.lerp(this.group.rotation.y, angle + Math.PI / 2, dt * 4);
 
     // Body corkscrew roll (occasional, more aggressive near player)
-    const scaledDist   = this.group.position.distanceTo(playerPos) / Math.max(this.group.scale.x, MIN_SCALE_DIVISOR);
+    const scaledDist   = Math.sqrt(distSq) / Math.max(this.group.scale.x, MIN_SCALE_DIVISOR);
     const pursuitFactor = scaledDist < PURSUIT_ACTIVE_DIST ? (1.0 - scaledDist / PURSUIT_ACTIVE_DIST) : 0;
     this.group.rotation.x = Math.sin(this.time * (0.5 + pursuitFactor)) * (0.06 + pursuitFactor * 0.08);
 
@@ -475,7 +475,7 @@ export class Lamprey {
     }
 
     // Respawn when too far from player
-    if (this.group.position.distanceTo(playerPos) > LAMPREY_RESPAWN_DIST) {
+    if (distSq > LAMPREY_RESPAWN_DIST * LAMPREY_RESPAWN_DIST) {
       const a = Math.random() * Math.PI * 2;
       this.group.position.set(
         playerPos.x + Math.cos(a) * 60,

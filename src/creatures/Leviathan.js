@@ -213,7 +213,7 @@ export class Leviathan {
     return { group: tierGroup, segments, jaw };
   }
 
-  update(dt, playerPos) {
+  update(dt, playerPos, distSq) {
     this.time += dt;
 
     // Orbit in the deep
@@ -250,8 +250,7 @@ export class Leviathan {
     }
 
     // Occasional close pass near player
-    const distToPlayer = this.group.position.distanceTo(playerPos);
-    if (!this.passing && distToPlayer > 100 && Math.random() < 0.001) {
+    if (!this.passing && distSq > 10000 && Math.random() < 0.001) {
       this.passing = true;
       this.passTimer = 0;
       this.orbitCenter.copy(playerPos).add(new THREE.Vector3(0, -20, 0));

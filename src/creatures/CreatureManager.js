@@ -566,7 +566,7 @@ export class CreatureManager {
     // Update only visible creatures (visibility already set by budget pass)
     for (const creature of this.creatures) {
       if (creature.instance?.group?.visible === false) continue;
-      creature.instance.update(dt, playerPos);
+      creature.instance.update(dt, playerPos, creature._fDistSq);
     }
 
     // Sync invisible creature positions to prevent pop-in when they become visible

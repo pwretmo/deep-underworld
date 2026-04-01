@@ -115,7 +115,7 @@ export class Sentinel {
     this.group.scale.setScalar(s);
   }
 
-  update(dt, playerPos) {
+  update(dt, playerPos, distSq) {
     this.time += dt;
     this.turnTimer += dt;
 
@@ -141,7 +141,7 @@ export class Sentinel {
     }
 
     // Eye intensity varies with distance to player
-    const dist = this.group.position.distanceTo(playerPos);
+    const dist = Math.sqrt(distSq);
     this.eyeLight.intensity = Math.max(0.5, 4 - dist * 0.05);
 
     if (dist > 200) {

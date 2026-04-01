@@ -518,7 +518,7 @@ export class BoneWorm {
   }
 
   // ── Update ──────────────────────────────────────────────────────────────────
-  update(dt, playerPos) {
+  update(dt, playerPos, distSq) {
     this.time += dt;
     this._frameCounter += 1;
     this.turnTimer += dt;
