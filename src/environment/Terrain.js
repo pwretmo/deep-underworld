@@ -18,6 +18,7 @@ import {
   smoothstep,
   varying,
   vec3,
+  vec4,
 } from "three/tsl";
 import { qualityManager } from "../QualityManager.js";
 
@@ -29,6 +30,16 @@ const hash3D = Fn(([inputPosition]) => {
   p.addAssign(vec3(offset));
 
   return fract(p.x.add(p.y).mul(p.z));
+});
+
+const hash3D_grad = Fn(([inputPosition]) => {
+  const p = fract(
+    vec3(inputPosition).mul(vec3(443.897, 441.423, 437.195)),
+  ).toVar();
+  p.addAssign(dot(p, p.yzx.add(19.19)));
+  return fract(
+    vec3(p.x.mul(p.z), p.y.mul(p.x), p.z.mul(p.y)),
+  ).mul(2.0).sub(1.0);
 });
 
 const noise3D = Fn(([inputPosition]) => {
@@ -57,12 +68,86 @@ const noise3D = Fn(([inputPosition]) => {
   return mix(nxy0, nxy1, fraction.z);
 });
 
+const noised3D = Fn(([inputPosition]) => {
+  const i = floor(vec3(inputPosition)).toVar();
+  const f = fract(vec3(inputPosition)).toVar();
+  const u = f.mul(f).mul(f).mul(f.mul(f.mul(6.0).sub(15.0)).add(10.0)).toVar();
+  const du = f.mul(f).mul(30.0).mul(f.mul(f.sub(2.0)).add(1.0)).toVar();
+
+  const ga = hash3D_grad(i).toVar();
+  const gb = hash3D_grad(i.add(vec3(1, 0, 0))).toVar();
+  const gc = hash3D_grad(i.add(vec3(0, 1, 0))).toVar();
+  const gd = hash3D_grad(i.add(vec3(1, 1, 0))).toVar();
+  const ge = hash3D_grad(i.add(vec3(0, 0, 1))).toVar();
+  const gf = hash3D_grad(i.add(vec3(1, 0, 1))).toVar();
+  const gg = hash3D_grad(i.add(vec3(0, 1, 1))).toVar();
+  const ghv = hash3D_grad(i.add(vec3(1, 1, 1))).toVar();
+
+  const va = dot(ga, f).toVar();
+  const vb = dot(gb, f.sub(vec3(1, 0, 0))).toVar();
+  const vc = dot(gc, f.sub(vec3(0, 1, 0))).toVar();
+  const vd = dot(gd, f.sub(vec3(1, 1, 0))).toVar();
+  const ve = dot(ge, f.sub(vec3(0, 0, 1))).toVar();
+  const vfv = dot(gf, f.sub(vec3(1, 0, 1))).toVar();
+  const vg = dot(gg, f.sub(vec3(0, 1, 1))).toVar();
+  const vh = dot(ghv, f.sub(vec3(1, 1, 1))).toVar();
+
+  const k0 = va.sub(vb).sub(vc).add(vd).toVar();
+  const k1 = va.sub(vc).sub(ve).add(vg).toVar();
+  const k2 = va.sub(vb).sub(ve).add(vfv).toVar();
+  const k3 = va.negate().add(vb).add(vc).sub(vd).add(ve).sub(vfv).sub(vg).add(vh).toVar();
+
+  const v = va
+    .add(u.x.mul(vb.sub(va)))
+    .add(u.y.mul(vc.sub(va)))
+    .add(u.z.mul(ve.sub(va)))
+    .add(u.x.mul(u.y).mul(k0))
+    .add(u.y.mul(u.z).mul(k1))
+    .add(u.z.mul(u.x).mul(k2))
+    .add(u.x.mul(u.y).mul(u.z).mul(k3));
+
+  const d = ga
+    .add(gb.sub(ga).mul(u.x))
+    .add(gc.sub(ga).mul(u.y))
+    .add(ge.sub(ga).mul(u.z))
+    .add(ga.sub(gb).sub(gc).add(gd).mul(u.x.mul(u.y)))
+    .add(ga.sub(gc).sub(ge).add(gg).mul(u.y.mul(u.z)))
+    .add(ga.sub(gb).sub(ge).add(gf).mul(u.z.mul(u.x)))
+    .add(
+      ga.negate().add(gb).add(gc).sub(gd).add(ge).sub(gf).sub(gg).add(ghv)
+        .mul(u.x.mul(u.y).mul(u.z)),
+    )
+    .add(
+      du.mul(
+        vec3(vb.sub(va), vc.sub(va), ve.sub(va))
+          .add(u.yzx.mul(vec3(k0, k1, k2)))
+          .add(u.zxy.mul(vec3(k2, k0, k1)))
+          .add(u.yzx.mul(u.zxy).mul(k3)),
+      ),
+    );
+
+  return vec4(v, d.x, d.y, d.z);
+});
+
 function fbm3D(inputPosition) {
   return noise3D(inputPosition)
     .add(noise3D(inputPosition.mul(2.0)).mul(0.5))
     .add(noise3D(inputPosition.mul(4.0)).mul(0.25))
     .add(noise3D(inputPosition.mul(8.0)).mul(0.125))
     .div(1.875);
+}
+
+function fbm3D_deriv(inputPosition) {
+  const n0 = noised3D(inputPosition);
+  const n1 = noised3D(vec3(inputPosition).mul(2.0));
+  const n2 = noised3D(vec3(inputPosition).mul(4.0));
+  const n3 = noised3D(vec3(inputPosition).mul(8.0));
+  return vec4(
+    n0.x.add(n1.x.mul(0.5)).add(n2.x.mul(0.25)).add(n3.x.mul(0.125)).div(1.875),
+    n0.y.add(n1.y).add(n2.y).add(n3.y).div(1.875),
+    n0.z.add(n1.z).add(n2.z).add(n3.z).div(1.875),
+    n0.w.add(n1.w).add(n2.w).add(n3.w).div(1.875),
+  );
 }
 
 const CHUNK_FINALIZATION_STAGES = [
@@ -389,13 +474,13 @@ export class Terrain {
       .mul(rockMask)
       .add(siltColor.mul(siltMask))
       .add(algaeColor.mul(algaeMask));
-    const detail = float(0.9).add(fbm3D(worldPos.mul(4.0)).mul(0.2));
-    const eps = 0.1;
     const scale = 1.5;
-    const h0 = fbm3D(worldPos.mul(scale));
-    const hx = fbm3D(worldPos.add(vec3(eps, 0.0, 0.0)).mul(scale));
-    const hz = fbm3D(worldPos.add(vec3(0.0, 0.0, eps)).mul(scale));
-    const gradWorld = vec3(hx.sub(h0).div(eps), 0.0, hz.sub(h0).div(eps));
+    const fbmResult = fbm3D_deriv(worldPos.mul(scale));
+    const height = fbmResult.x;
+    const detail = float(0.9).add(height.mul(0.2));
+    const gradWorld = vec3(
+      fbmResult.y.mul(scale), float(0.0), fbmResult.w.mul(scale),
+    );
     const gradView = cameraViewMatrix.transformDirection(gradWorld);
     const wetness = float(1.0).sub(smoothstep(60.0, 500.0, depth));
 
