@@ -82,7 +82,10 @@ export class CreatureManager {
     this._spawnCooldown = 0;
     this._spawnCostEmaMs = 0;
     this._lastSpawnCostMs = 0;
-    this._visibilityScratch = [];
+    const MAX_VIS_K = 16;
+    this._visRoots  = new Array(MAX_VIS_K).fill(null);
+    this._visScores = new Float64Array(MAX_VIS_K);
+    this._visCount  = 0;
     this._typeCount = new Map();
     this._queuedTypeCount = new Map();
     // Diagnostic counters (read by profiling; negligible overhead)
@@ -433,8 +436,7 @@ export class CreatureManager {
 
   _applyVisibilityBudget(depth) {
     const maxVisible = this._resolveVisibleCreatureBudget(depth);
-    const topK = this._visibilityScratch;
-    topK.length = 0;
+    this._visCount = 0;
 
     const t0 = performance.now();
     let candidateCount = 0;
@@ -461,27 +463,40 @@ export class CreatureManager {
       const dist = Math.sqrt(creature._fDistSq);
       const score = dist - visibilityBias;
 
-      // Top-K insertion: maintain a bounded sorted list of size maxVisible.
-      // K is small (3-6), so linear insertion is faster than a full sort.
-      let insertAt = topK.length;
-      for (let i = topK.length - 1; i >= 0; i--) {
-        if (topK[i].score <= score) break;
-        insertAt = i;
+      // Top-K insertion sort over pre-allocated struct-of-arrays.
+      // Ascending order (closest first); evict farthest from tail.
+      // K is small (3-6), so linear scan is faster than a full sort.
+      const k = this._visCount;
+      let insertAt = k;
+      while (insertAt > 0 && this._visScores[insertAt - 1] > score) insertAt--;
+
+      if (insertAt >= maxVisible) {
+        root.visible = false;
+        continue;
       }
 
-      if (insertAt < maxVisible) {
-        topK.splice(insertAt, 0, { root, score });
-        if (topK.length > maxVisible) {
-          topK.pop().root.visible = false;
-        }
-      } else {
-        root.visible = false;
+      if (k < maxVisible) this._visCount++;
+
+      // Shift entries right to make space (at most maxVisible entries)
+      const limit = Math.min(k, maxVisible);
+      for (let i = limit; i > insertAt; i--) {
+        this._visRoots[i]  = this._visRoots[i - 1];
+        this._visScores[i] = this._visScores[i - 1];
+      }
+      this._visRoots[insertAt]  = root;
+      this._visScores[insertAt] = score;
+
+      // Hide creature evicted from the tail when pool was already full
+      if (k >= maxVisible) {
+        const evicted = this._visRoots[maxVisible];
+        if (evicted) evicted.visible = false;
+        this._visRoots[maxVisible] = null;
       }
     }
 
     // Mark top-K survivors visible
-    for (let i = 0; i < topK.length; i++) {
-      topK[i].root.visible = true;
+    for (let i = 0; i < this._visCount; i++) {
+      this._visRoots[i].visible = true;
     }
 
     // Diagnostics (read-only counters, no runtime cost beyond assignments)
