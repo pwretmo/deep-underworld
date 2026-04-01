@@ -719,33 +719,36 @@ export class CreatureManager {
     return positions;
   }
 
-  getCreaturesByType(playerPos) {
+  getFrameStats() {
+    let minDistSq = Infinity;
     const groups = {};
-    for (const creature of this.creatures) {
-      if (!groups[creature.type]) {
-        groups[creature.type] = { count: 0, nearest: Infinity, nearestPos: null };
-      }
-      groups[creature.type].count++;
-      if (creature.instance.getPosition) {
-        const d = creature.instance.getPosition().distanceTo(playerPos);
-        if (d < groups[creature.type].nearest) {
-          groups[creature.type].nearest = d;
-          groups[creature.type].nearestPos = creature.instance.getPosition().clone();
-        }
-      }
-    }
-    return groups;
-  }
 
-  getNearestCreatureDistance(playerPos) {
-    let minDist = Infinity;
     for (const creature of this.creatures) {
-      if (creature.instance.getPosition) {
-        const d = creature.instance.getPosition().distanceTo(playerPos);
-        if (d < minDist) minDist = d;
+      const distSq = creature._fDistSq;
+      const type = creature.type;
+
+      if (distSq < minDistSq) minDistSq = distSq;
+
+      if (!groups[type]) {
+        groups[type] = { count: 0, nearestSq: Infinity, nearestPos: null };
+      }
+      const g = groups[type];
+      g.count++;
+      if (distSq < g.nearestSq) {
+        g.nearestSq = distSq;
+        g.nearestPos = creature._fPos;
       }
     }
-    return minDist;
+
+    const result = { nearestDist: Math.sqrt(minDistSq), groups: {} };
+    for (const [type, g] of Object.entries(groups)) {
+      result.groups[type] = {
+        count: g.count,
+        nearest: Math.sqrt(g.nearestSq),
+        nearestPos: g.nearestPos?.clone() ?? null,
+      };
+    }
+    return result;
   }
 
   reset() {
