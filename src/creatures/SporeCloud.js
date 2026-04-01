@@ -86,6 +86,7 @@ export class SporeCloud {
     // Tendril local offsets (relative to each spore centre) and fixed Euler rotations
     this._tendrilRelPos = new Float32Array(NEAR_COUNT * TENDRILS_PER_SPORE * 3);
     this._tendrilRot    = new Float32Array(NEAR_COUNT * TENDRILS_PER_SPORE * 3);
+    this._sepForces     = new Float32Array(NEAR_COUNT * 3); // half-pair separation accumulator
 
     this._cascadeTimer = 0;
     this._breathAmp = 0.08 + Math.random() * 0.08;
@@ -398,18 +399,25 @@ export class SporeCloud {
       this._cascade[Math.floor(Math.random() * NEAR_COUNT)] = 1.0;
     }
 
-    // Propagate to neighbours
+    // Propagate to neighbours — half-pair: each (i,j) evaluated once
     for (let i = 0; i < NEAR_COUNT; i++) {
-      if (this._cascade[i] < 0.05) continue;
-      for (let j = 0; j < NEAR_COUNT; j++) {
-        if (i === j) continue;
+      for (let j = i + 1; j < NEAR_COUNT; j++) {
+        // Skip only when BOTH participants are dim
+        if (this._cascade[i] < 0.05 && this._cascade[j] < 0.05) continue;
         const dx = this._offsets[i * 3]     - this._offsets[j * 3];
         const dy = this._offsets[i * 3 + 1] - this._offsets[j * 3 + 1];
         const dz = this._offsets[i * 3 + 2] - this._offsets[j * 3 + 2];
         const d2 = dx * dx + dy * dy + dz * dz;
         if (d2 < CASCADE_RADIUS_SQ) {
-          const t = this._cascade[i] * dt * CASCADE_SPEED * (1 - d2 / CASCADE_RADIUS_SQ);
-          this._cascade[j] = Math.min(1, this._cascade[j] + t);
+          const falloff = 1 - d2 / CASCADE_RADIUS_SQ;
+          // i → j
+          if (this._cascade[i] >= 0.05) {
+            this._cascade[j] = Math.min(1, this._cascade[j] + this._cascade[i] * dt * CASCADE_SPEED * falloff);
+          }
+          // j → i
+          if (this._cascade[j] >= 0.05) {
+            this._cascade[i] = Math.min(1, this._cascade[i] + this._cascade[j] * dt * CASCADE_SPEED * falloff);
+          }
         }
       }
     }
@@ -425,32 +433,43 @@ export class SporeCloud {
   }
 
   _updateBoids(dt) {
+    const BOID_SEP_RADIUS_SQ = BOID_SEP_RADIUS * BOID_SEP_RADIUS;
+    const sep = this._sepForces;
+    sep.fill(0);
+
+    // Half-pair separation: each (i,j) evaluated once, equal/opposite force
     for (let i = 0; i < NEAR_COUNT; i++) {
       const ix = this._offsets[i * 3];
       const iy = this._offsets[i * 3 + 1];
       const iz = this._offsets[i * 3 + 2];
-      let sx = 0, sy = 0, sz = 0;
-
-      for (let j = 0; j < NEAR_COUNT; j++) {
-        if (i === j) continue;
+      for (let j = i + 1; j < NEAR_COUNT; j++) {
         const dx = ix - this._offsets[j * 3];
         const dy = iy - this._offsets[j * 3 + 1];
         const dz = iz - this._offsets[j * 3 + 2];
         const d2 = dx * dx + dy * dy + dz * dz;
-        if (d2 < BOID_SEP_RADIUS * BOID_SEP_RADIUS && d2 > 1e-4) {
+        if (d2 < BOID_SEP_RADIUS_SQ && d2 > 1e-4) {
           const d = Math.sqrt(d2);
           const f = (BOID_SEP_RADIUS - d) / BOID_SEP_RADIUS;
-          sx += (dx / d) * f;
-          sy += (dy / d) * f;
-          sz += (dz / d) * f;
+          const fx = (dx / d) * f;
+          const fy = (dy / d) * f;
+          const fz = (dz / d) * f;
+          sep[i * 3]     += fx; sep[i * 3 + 1] += fy; sep[i * 3 + 2] += fz;
+          sep[j * 3]     -= fx; sep[j * 3 + 1] -= fy; sep[j * 3 + 2] -= fz;
         }
       }
-
-      // Cohesion: pull toward cloud centre (origin of local space)
-      this._velocities[i * 3]     = this._velocities[i * 3]     * BOID_DRAG + (sx * BOID_SEP_FORCE - ix * BOID_COHESION_FORCE) * dt;
-      this._velocities[i * 3 + 1] = this._velocities[i * 3 + 1] * BOID_DRAG + (sy * BOID_SEP_FORCE - iy * BOID_COHESION_FORCE) * dt;
-      this._velocities[i * 3 + 2] = this._velocities[i * 3 + 2] * BOID_DRAG + (sz * BOID_SEP_FORCE - iz * BOID_COHESION_FORCE) * dt;
     }
+
+    // Apply drag, separation, and cohesion
+    for (let i = 0; i < NEAR_COUNT; i++) {
+      const ix = this._offsets[i * 3];
+      const iy = this._offsets[i * 3 + 1];
+      const iz = this._offsets[i * 3 + 2];
+      this._velocities[i * 3]     = this._velocities[i * 3]     * BOID_DRAG + (sep[i * 3]     * BOID_SEP_FORCE - ix * BOID_COHESION_FORCE) * dt;
+      this._velocities[i * 3 + 1] = this._velocities[i * 3 + 1] * BOID_DRAG + (sep[i * 3 + 1] * BOID_SEP_FORCE - iy * BOID_COHESION_FORCE) * dt;
+      this._velocities[i * 3 + 2] = this._velocities[i * 3 + 2] * BOID_DRAG + (sep[i * 3 + 2] * BOID_SEP_FORCE - iz * BOID_COHESION_FORCE) * dt;
+    }
+
+    // Integrate positions
     for (let i = 0; i < NEAR_COUNT; i++) {
       this._offsets[i * 3]     += this._velocities[i * 3]     * dt;
       this._offsets[i * 3 + 1] += this._velocities[i * 3 + 1] * dt;
