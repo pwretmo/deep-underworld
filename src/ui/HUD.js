@@ -58,6 +58,8 @@ export class HUD {
     this.locatorVisible = false;
     this.trackedType = null;
     this.creatureTypes = [];
+    this._lastDepth = -1;
+    this._sonarGradient = null;
     this.selectedCreatureType = null;
     this.selectedCreatureIndex = -1;
     this.diagnosticsPanel = document.getElementById('diagnostics-panel');
@@ -79,8 +81,12 @@ export class HUD {
   }
 
   update(depth, flashlightOn, camera) {
-    // Depth counter
-    this.depthDisplay.textContent = `${Math.floor(depth)}m`;
+    // Depth counter — skip DOM mutation when unchanged
+    const flooredDepth = Math.floor(depth);
+    if (flooredDepth !== this._lastDepth) {
+      this._lastDepth = flooredDepth;
+      this.depthDisplay.textContent = `${flooredDepth}m`;
+    }
 
     // Depth zone name
     let zone;
@@ -171,15 +177,21 @@ export class HUD {
     ctx.lineTo(cx + Math.cos(sweepAngle) * 70, cy + Math.sin(sweepAngle) * 70);
     ctx.stroke();
 
-    // Fade trail
-    const gradient = ctx.createConicGradient(sweepAngle, cx, cy);
-    gradient.addColorStop(0, '#22ff4422');
-    gradient.addColorStop(0.15, '#22ff4400');
-    gradient.addColorStop(1, '#22ff4400');
-    ctx.fillStyle = gradient;
+    // Fade trail — reuse cached gradient at angle 0, rotate canvas instead
+    if (!this._sonarGradient) {
+      this._sonarGradient = ctx.createConicGradient(0, 0, 0);
+      this._sonarGradient.addColorStop(0, '#22ff4422');
+      this._sonarGradient.addColorStop(0.15, '#22ff4400');
+      this._sonarGradient.addColorStop(1, '#22ff4400');
+    }
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(sweepAngle);
+    ctx.fillStyle = this._sonarGradient;
     ctx.beginPath();
-    ctx.arc(cx, cy, 70, 0, Math.PI * 2);
+    ctx.arc(0, 0, 70, 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
 
     // Creature pings
     if (this.sonarPings.length > 0) {
@@ -199,6 +211,7 @@ export class HUD {
 
         const rightX = -this._sonarForward.z;
         const rightZ = this._sonarForward.x;
+        ctx.fillStyle = '#ff3232';
         for (const ping of this.sonarPings) {
           const scale = 70 / 80; // max range
           const localRight = ping.dx * rightX + ping.dz * rightZ;
@@ -206,18 +219,19 @@ export class HUD {
           const px = cx + localRight * scale;
           const pz = cy - localForward * scale;
           if (px > 5 && px < w - 5 && pz > 5 && pz < h - 5) {
-            ctx.fillStyle = `rgba(255, 50, 50, ${pingAlpha})`;
+            ctx.globalAlpha = pingAlpha;
             ctx.beginPath();
             ctx.arc(px, pz, 3, 0, Math.PI * 2);
             ctx.fill();
 
             // Glow
-            ctx.fillStyle = `rgba(255, 50, 50, ${pingAlpha * 0.3})`;
+            ctx.globalAlpha = pingAlpha * 0.3;
             ctx.beginPath();
             ctx.arc(px, pz, 6, 0, Math.PI * 2);
             ctx.fill();
           }
         }
+        ctx.globalAlpha = 1;
       }
     }
 
@@ -269,6 +283,7 @@ export class HUD {
     this.sonarPings = [];
     this.sonarAge = 0;
     this.lastDepthZone = '';
+    this._lastDepth = -1;
     this.depthDisplay.textContent = '0m';
     this.depthZone.textContent = 'SURFACE';
     this.depthZone.style.color = '#4488aa';
