@@ -89,6 +89,12 @@ export class CausticPass {
       this._initRefractionPass(settings);
     }
 
+    // Optional: external wave heightfield from Ocean's compute pass.
+    // When set, CausticPass can derive wave data from the shared heightfield
+    // instead of duplicating sinusoidal functions. Not consumed yet — wired
+    // for #196 follow-up.
+    this._waveHeightfield = null;
+
     // Store handler reference so it can be removed in dispose()
     this._onQualityChange = (e) => {
       const newSettings =
@@ -101,6 +107,16 @@ export class CausticPass {
   /** Current method — "tiled" or "refraction" */
   get method() {
     return this._method;
+  }
+
+  /**
+   * Set the shared wave heightfield from Ocean's compute pass.
+   * When set, future iterations of CausticPass can sample this heightfield
+   * for richer wave-driven caustics instead of inline sinusoidal functions.
+   * @param {import("../environment/WaveHeightfield.js").WaveHeightfield|null} heightfield
+   */
+  setWaveHeightfield(heightfield) {
+    this._waveHeightfield = heightfield;
   }
 
   /**
