@@ -88,6 +88,7 @@ export class CreatureManager {
     this._visCount  = 0;
     this._typeCount = new Map();
     this._queuedTypeCount = new Map();
+    this._dynamicCandidates = [];
     // Diagnostic counters (read by profiling; negligible overhead)
     this._diagCandidateCount = 0;
     this._diagBroadPhaseCount = 0;
@@ -589,18 +590,17 @@ export class CreatureManager {
     return this._count(type) + this._countQueued(type);
   }
 
-  _createDynamicSpawnEntry(type, Cls, depth, depthMin, depthMax, cap, playerPos, hRange, yOff, yRange, extra) {
+  _createDynamicSpawnEntry(candidates, type, Cls, depth, depthMin, depthMax, cap, playerPos, hRange, yOff, yRange, extra) {
     if (this.creatures.length >= MAX_CREATURES) return;
     if (depth > depthMin && this._countWithQueued(type) < cap) {
       const pos = this._rndPos(playerPos, hRange, playerPos.y + yOff, yRange);
-      return {
+      candidates.push({
         type,
         createFn: () => (extra ? new Cls(this.scene, pos, extra) : new Cls(this.scene, pos)),
         depthMin,
         depthMax
-      };
+      });
     }
-    return null;
   }
 
   _queueDynamicEntry(entry) {
@@ -637,11 +637,12 @@ export class CreatureManager {
     // Early-out: skip all candidate evaluation when at capacity
     if (this.creatures.length >= MAX_CREATURES) return;
 
-    const candidates = [];
+    const candidates = this._dynamicCandidates;
+    candidates.length = 0;
 
     // Original creatures
-    candidates.push(this._createDynamicSpawnEntry('anglerfish', Anglerfish, depth, 150, 800, 5, playerPos, 80, -10, 30));
-    candidates.push(this._createDynamicSpawnEntry('ghostshark', GhostShark, depth, 50, 600, 4, playerPos, 100, 0, 30));
+    this._createDynamicSpawnEntry(candidates, 'anglerfish', Anglerfish, depth, 150, 800, 5, playerPos, 80, -10, 30);
+    this._createDynamicSpawnEntry(candidates, 'ghostshark', GhostShark, depth, 50, 600, 4, playerPos, 100, 0, 30);
 
     if (this.creatures.length < MAX_CREATURES && depth > 30 && depth < 400 && this._countWithQueued('jellyfish') < 3) {
       const pos = this._rndPos(playerPos, 60, playerPos.y, 20);
@@ -675,27 +676,27 @@ export class CreatureManager {
     }
 
     // Giger creature dynamic spawns – caps kept low for performance
-    candidates.push(this._createDynamicSpawnEntry('needlefish', NeedleFish, depth, 30, 600, 4, playerPos, 90, -5, 20));
-    candidates.push(this._createDynamicSpawnEntry('parasite', Parasite, depth, 50, 800, 4, playerPos, 70, -5, 20));
-    candidates.push(this._createDynamicSpawnEntry('biomechcrab', BioMechCrab, depth, 60, 500, 3, playerPos, 70, -10, 20));
-    candidates.push(this._createDynamicSpawnEntry('sporecloud', SporeCloud, depth, 40, 500, 3, playerPos, 80, -5, 20));
-    candidates.push(this._createDynamicSpawnEntry('boneworm', BoneWorm, depth, 120, 700, 3, playerPos, 80, -10, 30));
-    candidates.push(this._createDynamicSpawnEntry('spinaleel', SpinalEel, depth, 150, 800, 3, playerPos, 80, -10, 30));
-    candidates.push(this._createDynamicSpawnEntry('sirenSkull', SirenSkull, depth, 120, 700, 3, playerPos, 80, -10, 30));
-    candidates.push(this._createDynamicSpawnEntry('lamprey', Lamprey, depth, 150, 800, 3, playerPos, 80, -10, 30));
-    candidates.push(this._createDynamicSpawnEntry('voidjelly', VoidJelly, depth, 100, 700, 3, playerPos, 80, -10, 30));
-    candidates.push(this._createDynamicSpawnEntry('chaindragger', ChainDragger, depth, 150, 800, 3, playerPos, 80, -10, 30));
-    candidates.push(this._createDynamicSpawnEntry('mechoctopus', MechOctopus, depth, 160, 900, 2, playerPos, 90, -15, 30));
-    candidates.push(this._createDynamicSpawnEntry('tendrilhunter', TendrilHunter, depth, 250, 1200, 3, playerPos, 90, -15, 40));
-    candidates.push(this._createDynamicSpawnEntry('harvester', Harvester, depth, 280, 1200, 2, playerPos, 80, -15, 40));
-    candidates.push(this._createDynamicSpawnEntry('abysswraith', AbyssWraith, depth, 300, 1500, 3, playerPos, 90, -15, 40));
-    candidates.push(this._createDynamicSpawnEntry('birthsac', BirthSac, depth, 250, 1200, 2, playerPos, 70, -10, 30));
-    candidates.push(this._createDynamicSpawnEntry('facelessone', FacelessOne, depth, 400, 2000, 2, playerPos, 90, -20, 50));
-    candidates.push(this._createDynamicSpawnEntry('amalgam', Amalgam, depth, 450, 2000, 2, playerPos, 80, -20, 50));
-    candidates.push(this._createDynamicSpawnEntry('sentinel', Sentinel, depth, 400, 2000, 3, playerPos, 90, -20, 50));
-    candidates.push(this._createDynamicSpawnEntry('abyssalmaw', AbyssalMaw, depth, 450, 2000, 2, playerPos, 90, -20, 50));
-    candidates.push(this._createDynamicSpawnEntry('husk', Husk, depth, 350, 2000, 4, playerPos, 80, -15, 50));
-    candidates.push(this._createDynamicSpawnEntry('ironwhale', IronWhale, depth, 500, 2000, 1, playerPos, 150, -30, 60));
+    this._createDynamicSpawnEntry(candidates, 'needlefish', NeedleFish, depth, 30, 600, 4, playerPos, 90, -5, 20);
+    this._createDynamicSpawnEntry(candidates, 'parasite', Parasite, depth, 50, 800, 4, playerPos, 70, -5, 20);
+    this._createDynamicSpawnEntry(candidates, 'biomechcrab', BioMechCrab, depth, 60, 500, 3, playerPos, 70, -10, 20);
+    this._createDynamicSpawnEntry(candidates, 'sporecloud', SporeCloud, depth, 40, 500, 3, playerPos, 80, -5, 20);
+    this._createDynamicSpawnEntry(candidates, 'boneworm', BoneWorm, depth, 120, 700, 3, playerPos, 80, -10, 30);
+    this._createDynamicSpawnEntry(candidates, 'spinaleel', SpinalEel, depth, 150, 800, 3, playerPos, 80, -10, 30);
+    this._createDynamicSpawnEntry(candidates, 'sirenSkull', SirenSkull, depth, 120, 700, 3, playerPos, 80, -10, 30);
+    this._createDynamicSpawnEntry(candidates, 'lamprey', Lamprey, depth, 150, 800, 3, playerPos, 80, -10, 30);
+    this._createDynamicSpawnEntry(candidates, 'voidjelly', VoidJelly, depth, 100, 700, 3, playerPos, 80, -10, 30);
+    this._createDynamicSpawnEntry(candidates, 'chaindragger', ChainDragger, depth, 150, 800, 3, playerPos, 80, -10, 30);
+    this._createDynamicSpawnEntry(candidates, 'mechoctopus', MechOctopus, depth, 160, 900, 2, playerPos, 90, -15, 30);
+    this._createDynamicSpawnEntry(candidates, 'tendrilhunter', TendrilHunter, depth, 250, 1200, 3, playerPos, 90, -15, 40);
+    this._createDynamicSpawnEntry(candidates, 'harvester', Harvester, depth, 280, 1200, 2, playerPos, 80, -15, 40);
+    this._createDynamicSpawnEntry(candidates, 'abysswraith', AbyssWraith, depth, 300, 1500, 3, playerPos, 90, -15, 40);
+    this._createDynamicSpawnEntry(candidates, 'birthsac', BirthSac, depth, 250, 1200, 2, playerPos, 70, -10, 30);
+    this._createDynamicSpawnEntry(candidates, 'facelessone', FacelessOne, depth, 400, 2000, 2, playerPos, 90, -20, 50);
+    this._createDynamicSpawnEntry(candidates, 'amalgam', Amalgam, depth, 450, 2000, 2, playerPos, 80, -20, 50);
+    this._createDynamicSpawnEntry(candidates, 'sentinel', Sentinel, depth, 400, 2000, 3, playerPos, 90, -20, 50);
+    this._createDynamicSpawnEntry(candidates, 'abyssalmaw', AbyssalMaw, depth, 450, 2000, 2, playerPos, 90, -20, 50);
+    this._createDynamicSpawnEntry(candidates, 'husk', Husk, depth, 350, 2000, 4, playerPos, 80, -15, 50);
+    this._createDynamicSpawnEntry(candidates, 'ironwhale', IronWhale, depth, 500, 2000, 1, playerPos, 150, -30, 60);
 
     // Stationary creatures spawn more rarely
     if (this.creatures.length < MAX_CREATURES && depth > 200 && this._countWithQueued('pipeorgan') < 4 && Math.random() < 0.3) {
@@ -726,7 +727,7 @@ export class CreatureManager {
       });
     }
 
-    this._flushDynamicCandidates(candidates.filter(Boolean), DYNAMIC_SPAWNS_PER_CYCLE);
+    this._flushDynamicCandidates(candidates, DYNAMIC_SPAWNS_PER_CYCLE);
   }
 
   getCreaturePositions() {
