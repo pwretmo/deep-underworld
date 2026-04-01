@@ -1,22 +1,18 @@
 import * as THREE from "three/webgpu";
 import {
   Fn,
-  abs,
   clamp,
-  compute,
   cos,
   float,
   floor,
   fract,
   instanceIndex,
   int,
-  max,
   min,
   mix,
   sin,
   storage,
   uniform,
-  vec2,
   vec3,
 } from "three/tsl";
 
@@ -137,17 +133,21 @@ export class WaveHeightfield {
       const worldX = u.centerX.add(cellU.sub(0.5).mul(u.worldSize));
       const worldZ = u.centerZ.add(cellV.sub(0.5).mul(u.worldSize));
 
-      // Multi-octave sinusoidal waves (matches Ocean.js inline path)
+      // Multi-octave sinusoidal waves — two primary octaves match Ocean.js
+      // inline path, third octave adds detail for compute tiers.
+      // The inline path operates on positionLocal.y which equals -worldZ
+      // due to the plane's -PI/2 X-rotation, so we negate worldZ here.
+      const negWorldZ = worldZ.negate();
       const wave1 = sin(
         worldX.mul(WAVE_X_SCALE).add(u.time.mul(WAVE_X_SPEED)),
       ).mul(WAVE_X_AMP);
       const wave2 = cos(
-        worldZ.mul(WAVE_Z_SCALE).add(u.time.mul(WAVE_Z_SPEED)),
+        negWorldZ.mul(WAVE_Z_SCALE).add(u.time.mul(WAVE_Z_SPEED)),
       ).mul(WAVE_Z_AMP);
       const wave3 = sin(
         worldX
           .mul(WAVE3_X_SCALE)
-          .add(worldZ.mul(WAVE3_Z_SCALE))
+          .add(negWorldZ.mul(WAVE3_Z_SCALE))
           .add(u.time.mul(WAVE3_SPEED)),
       ).mul(WAVE3_AMP);
       const h = wave1.add(wave2).add(wave3);
@@ -169,7 +169,7 @@ export class WaveHeightfield {
         );
 
       const dHdz = sin(
-        worldZ.mul(WAVE_Z_SCALE).add(u.time.mul(WAVE_Z_SPEED)),
+        negWorldZ.mul(WAVE_Z_SCALE).add(u.time.mul(WAVE_Z_SPEED)),
       )
         .negate()
         .mul(WAVE_Z_SCALE * WAVE_Z_AMP)
@@ -177,7 +177,7 @@ export class WaveHeightfield {
           cos(
             worldX
               .mul(WAVE3_X_SCALE)
-              .add(worldZ.mul(WAVE3_Z_SCALE))
+              .add(negWorldZ.mul(WAVE3_Z_SCALE))
               .add(u.time.mul(WAVE3_SPEED)),
           ).mul(WAVE3_Z_SCALE * WAVE3_AMP),
         );
@@ -202,6 +202,7 @@ export class WaveHeightfield {
     this._uniforms.time.value = time;
     this._uniforms.centerX.value = playerPos.x;
     this._uniforms.centerZ.value = playerPos.z;
+    this._renderer = renderer;
     renderer.computeAsync(this._computeNode);
   }
 
@@ -306,11 +307,21 @@ export class WaveHeightfield {
     if (this._disposed) return;
     this._disposed = true;
     this._computeNode.dispose();
+
+    // Compute-only storage attributes are not owned by render geometry.
+    // Delete them from the renderer's attribute manager to free GPU buffers.
+    const attributeManager = this._renderer?._attributes;
+    if (attributeManager) {
+      if (this._heightAttr) attributeManager.delete(this._heightAttr);
+      if (this._normalAttr) attributeManager.delete(this._normalAttr);
+    }
+
     this._heightAttr = null;
     this._normalAttr = null;
     this._heightStorageWrite = null;
     this._heightStorageRead = null;
     this._normalStorageWrite = null;
     this._normalStorageRead = null;
+    this._renderer = null;
   }
 }
