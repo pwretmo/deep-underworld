@@ -37,9 +37,9 @@ const hash3D_grad = Fn(([inputPosition]) => {
     vec3(inputPosition).mul(vec3(443.897, 441.423, 437.195)),
   ).toVar();
   p.addAssign(dot(p, p.yzx.add(19.19)));
-  return fract(
-    vec3(p.x.mul(p.z), p.y.mul(p.x), p.z.mul(p.y)),
-  ).mul(2.0).sub(1.0);
+  return fract(vec3(p.x.mul(p.z), p.y.mul(p.x), p.z.mul(p.y)))
+    .mul(2.0)
+    .sub(1.0);
 });
 
 const noise3D = Fn(([inputPosition]) => {
@@ -71,8 +71,16 @@ const noise3D = Fn(([inputPosition]) => {
 const noised3D = Fn(([inputPosition]) => {
   const i = floor(vec3(inputPosition)).toVar();
   const f = fract(vec3(inputPosition)).toVar();
-  const u = f.mul(f).mul(f).mul(f.mul(f.mul(6.0).sub(15.0)).add(10.0)).toVar();
-  const du = f.mul(f).mul(30.0).mul(f.mul(f.sub(2.0)).add(1.0)).toVar();
+  const u = f
+    .mul(f)
+    .mul(f)
+    .mul(f.mul(f.mul(6.0).sub(15.0)).add(10.0))
+    .toVar();
+  const du = f
+    .mul(f)
+    .mul(30.0)
+    .mul(f.mul(f.sub(2.0)).add(1.0))
+    .toVar();
 
   const ga = hash3D_grad(i).toVar();
   const gb = hash3D_grad(i.add(vec3(1, 0, 0))).toVar();
@@ -95,7 +103,16 @@ const noised3D = Fn(([inputPosition]) => {
   const k0 = va.sub(vb).sub(vc).add(vd).toVar();
   const k1 = va.sub(vc).sub(ve).add(vg).toVar();
   const k2 = va.sub(vb).sub(ve).add(vfv).toVar();
-  const k3 = va.negate().add(vb).add(vc).sub(vd).add(ve).sub(vfv).sub(vg).add(vh).toVar();
+  const k3 = va
+    .negate()
+    .add(vb)
+    .add(vc)
+    .sub(vd)
+    .add(ve)
+    .sub(vfv)
+    .sub(vg)
+    .add(vh)
+    .toVar();
 
   const v = va
     .add(u.x.mul(vb.sub(va)))
@@ -114,7 +131,15 @@ const noised3D = Fn(([inputPosition]) => {
     .add(ga.sub(gc).sub(ge).add(gg).mul(u.y.mul(u.z)))
     .add(ga.sub(gb).sub(ge).add(gf).mul(u.z.mul(u.x)))
     .add(
-      ga.negate().add(gb).add(gc).sub(gd).add(ge).sub(gf).sub(gg).add(ghv)
+      ga
+        .negate()
+        .add(gb)
+        .add(gc)
+        .sub(gd)
+        .add(ge)
+        .sub(gf)
+        .sub(gg)
+        .add(ghv)
         .mul(u.x.mul(u.y).mul(u.z)),
     )
     .add(
@@ -312,7 +337,11 @@ export class Terrain {
     // draw calls regardless of chunk count.
     const MAX_ROCKS_PER_TYPE = 400; // 100 chunks × ~4 rocks per type per chunk
     this._rockPoolMeshes = this._rockGeos.map((geo) => {
-      const im = new THREE.InstancedMesh(geo, this._rockMat, MAX_ROCKS_PER_TYPE);
+      const im = new THREE.InstancedMesh(
+        geo,
+        this._rockMat,
+        MAX_ROCKS_PER_TYPE,
+      );
       im.castShadow = true;
       im.receiveShadow = true;
       // Pre-allocate instanceColor — rock material tints per-instance.
@@ -342,9 +371,7 @@ export class Terrain {
     this._rockScratchColor = new THREE.Color();
   }
 
-  _growTerrainBatchCapacity(
-    chunkCountIncrease = TERRAIN_BATCH_GROWTH_CHUNKS,
-  ) {
+  _growTerrainBatchCapacity(chunkCountIncrease = TERRAIN_BATCH_GROWTH_CHUNKS) {
     this._terrainBatchChunkCapacity += chunkCountIncrease;
     this._terrainBatchMaxVertexCount =
       this._terrainBatchChunkCapacity * this._terrainChunkVertexCount;
@@ -359,13 +386,10 @@ export class Terrain {
   }
 
   _ensureTerrainBatchCapacity(vertexCount, indexCount) {
-    if (
-      vertexCount <= this._terrainBatchedMesh.unusedVertexCount &&
-      indexCount <= this._terrainBatchedMesh.unusedIndexCount
-    ) {
-      return;
-    }
-
+    // Always defragment first when deletions have occurred, so free space is
+    // contiguous.  unusedVertexCount/unusedIndexCount report *total* free
+    // capacity which may be scattered across multiple gaps after deletions,
+    // but addGeometry() needs a single contiguous range.
     if (this._terrainBatchNeedsOptimize) {
       this._terrainBatchedMesh.optimize();
       this._terrainBatchNeedsOptimize = false;
@@ -479,7 +503,9 @@ export class Terrain {
     const height = fbmResult.x;
     const detail = float(0.9).add(height.mul(0.2));
     const gradWorld = vec3(
-      fbmResult.y.mul(scale), float(0.0), fbmResult.w.mul(scale),
+      fbmResult.y.mul(scale),
+      float(0.0),
+      fbmResult.w.mul(scale),
     );
     const gradView = cameraViewMatrix.transformDirection(gradWorld);
     const wetness = float(1.0).sub(smoothstep(60.0, 500.0, depth));
@@ -650,9 +676,7 @@ export class Terrain {
       this._terrainBatchedMesh.deleteInstance(
         job.mesh.userData.batchedInstanceId,
       );
-      this._terrainBatchedMesh.deleteGeometry(
-        job.mesh.userData.batchedGeomId,
-      );
+      this._terrainBatchedMesh.deleteGeometry(job.mesh.userData.batchedGeomId);
       this._terrainBatchNeedsOptimize = true;
       job.mesh.userData.batchedInstanceId = null;
       job.mesh.userData.batchedGeomId = null;
@@ -710,15 +734,43 @@ export class Terrain {
     );
     geometry.setIndex(new THREE.BufferAttribute(payload.indices, 1));
 
-    this._ensureTerrainBatchCapacity(
-      geometry.getAttribute("position").count,
-      geometry.getIndex().count,
-    );
+    const vertexCount = geometry.getAttribute("position").count;
+    const indexCount = geometry.getIndex().count;
+    if (
+      vertexCount > this._terrainChunkVertexCount ||
+      indexCount > this._terrainChunkIndexCount
+    ) {
+      console.warn(
+        `[Terrain] Chunk geometry (${vertexCount} verts, ${indexCount} indices) ` +
+          `exceeds expected size (${this._terrainChunkVertexCount} verts, ` +
+          `${this._terrainChunkIndexCount} indices)`,
+      );
+    }
+
+    this._ensureTerrainBatchCapacity(vertexCount, indexCount);
 
     // Upload the geometry into the shared BatchedMesh.  addGeometry() copies
     // the data into the BatchedMesh’s internal buffers, so we can (and must)
     // dispose the local geometry afterwards to free CPU-side memory.
-    const geomId = this._terrainBatchedMesh.addGeometry(geometry);
+    let geomId;
+    try {
+      geomId = this._terrainBatchedMesh.addGeometry(geometry);
+    } catch {
+      // Defensive fallback: if addGeometry fails despite the capacity check
+      // (e.g. residual fragmentation), compact the buffer and retry once.
+      console.warn(
+        "[Terrain] BatchedMesh addGeometry failed — compacting and retrying",
+      );
+      this._terrainBatchedMesh.optimize();
+      this._terrainBatchNeedsOptimize = false;
+      try {
+        geomId = this._terrainBatchedMesh.addGeometry(geometry);
+      } catch {
+        // Still failed after compact — grow the buffer and try once more.
+        this._growTerrainBatchCapacity();
+        geomId = this._terrainBatchedMesh.addGeometry(geometry);
+      }
+    }
     const instanceId = this._terrainBatchedMesh.addInstance(geomId);
     const posMatrix = new THREE.Matrix4().setPosition(
       cx * this.chunkSize,
