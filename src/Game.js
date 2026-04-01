@@ -1,4 +1,5 @@
 import * as THREE from "three/webgpu";
+import StatsGl from "stats-gl";
 import { Player } from "./player/Player.js";
 import { Ocean } from "./environment/Ocean.js";
 import { Terrain } from "./environment/Terrain.js";
@@ -161,6 +162,7 @@ export class Game {
     this.physicsWorld = null; // initialized async in _primeAndEnterGameplay
     this.preload = null;
     this.graphicsDiagnostics = null;
+    this._stats = null; // stats-gl panel, initialized in init() when debug flag is active
 
     // GPU detection and graphics diagnostics are deferred to async init()
     // because WebGPURenderer requires await renderer.init() before backend access.
@@ -266,6 +268,22 @@ export class Game {
     this._initEnvironmentColors();
     this._setupEvents();
     this.preload.startMenuIdleWarmup();
+
+    // stats-gl: GPU/CPU frame timing panel — visible in dev or when ?debug is in the URL
+    const _debugStats =
+      new URLSearchParams(window.location.search).has("debug") ||
+      import.meta.env.DEV;
+    if (_debugStats) {
+      this._stats = new StatsGl({ trackGPU: true });
+      this._stats.init(this.renderer);
+      this._stats.dom.style.position = "fixed";
+      this._stats.dom.style.top = "0";
+      this._stats.dom.style.right = "0";
+      this._stats.dom.style.left = "auto";
+      this._stats.dom.style.zIndex = "9999";
+      document.body.appendChild(this._stats.dom);
+    }
+
     this._animate();
   }
 
@@ -1118,6 +1136,7 @@ export class Game {
         flashlightOn: this.flashlightOn,
         exposure: this.renderer.toneMappingExposure,
       });
+      if (this._stats) this._stats.update();
 
       if (this.hud.isDiagnosticsVisible()) {
         this.hud.updateDiagnostics(this._getDiagnosticsSnapshot());

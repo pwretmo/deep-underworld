@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.19.3",
+    "stats-gl": "^4.1.0",
     "three": "^0.183.2"
   },
   "devDependencies": {
