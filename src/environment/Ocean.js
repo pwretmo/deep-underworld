@@ -253,7 +253,7 @@ export class Ocean {
     this._particleRenderer = null;
 
     // Ambient light — richer blue fill for underwater atmosphere
-    this.ambientLight = new THREE.AmbientLight(0x2a4466, 0.28);
+    this.ambientLight = new THREE.AmbientLight(0x2a4466, 0.50);
     scene.add(this.ambientLight);
 
     // Sun light from above (only visible near surface).
@@ -863,7 +863,7 @@ export class Ocean {
     // Sun light follows player but fades with depth.
     this.sunLight.position.set(playerPos.x + 50, 100, playerPos.z + 30);
     this.sunLight.target.position.set(playerPos.x, playerPos.y, playerPos.z);
-    const sunFade = depth < 100 ? 0.6 * (1 - depth / 100) : 0;
+    const sunFade = depth < 100 ? 1.8 * (1 - depth / 100) : 0;
     this.sunLight.intensity = sunFade;
   }
 }

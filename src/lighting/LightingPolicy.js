@@ -19,7 +19,7 @@ export const DEPTH_THRESHOLDS = Object.freeze({
 export const DEPTH_ZONE_PROFILES = Object.freeze({
   fog: Object.freeze({
     colors: Object.freeze({
-      surface: 0x006b8f,
+      surface: 0x0a8cb8,
       twilight: 0x003352,
       darkZone: 0x0c1820,
       abyss: 0x060c12,
@@ -43,13 +43,13 @@ export const DEPTH_ZONE_PROFILES = Object.freeze({
     }),
   }),
   ambient: Object.freeze({
-    surface: 0.24,
+    surface: 0.50,
     twilight: 0.16,
     darkZone: 0.09,
     abyss: 0.055,
   }),
   exposure: Object.freeze({
-    surface: 0.85,
+    surface: 1.0,
     mid: 0.7,
     deep: 0.65,
     abyss: 0.70,
@@ -90,10 +90,10 @@ export class LightingPolicy {
     // Base profile results (before modifiers)
     this._baseFogNear = 5;
     this._baseFogFar = 300;
-    this._baseAmbient = 0.24;
+    this._baseAmbient = 0.50;
     this._effectiveFogNear = 5;
     this._effectiveFogFar = 300;
-    this._effectiveAmbient = 0.24;
+    this._effectiveAmbient = 0.50;
 
     // fogNode uniform references (set via setFogNodeUniforms)
     this._fogDensityNode = null;
