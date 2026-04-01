@@ -28,6 +28,7 @@ import { bloom as createBloomNode } from "three/addons/tsl/display/BloomNode.js"
 import { godrays } from "three/addons/tsl/display/GodraysNode.js";
 import { qualityManager } from "../QualityManager.js";
 import { DEPTH_THRESHOLDS } from "../lighting/LightingPolicy.js";
+import { CausticPass } from "./CausticPass.js";
 
 function deepFreeze(obj) {
   Object.freeze(obj);
@@ -169,7 +170,7 @@ function updateRttNodeScale(node, width, height, pixelRatio, scale) {
   node.setPixelRatio(pixelRatio * scale);
 }
 
-function createUnderwaterPostColorNode(sourceNode, uniformNodes) {
+function createUnderwaterPostColorNode(sourceNode, uniformNodes, causticIntensityNode = null) {
   const sourceTextureNode = convertToTexture(sourceNode);
   const sourceUVNode = sourceTextureNode.uvNode || screenUV;
   const peakOf = (colorNode) => max(max(colorNode.r, colorNode.g), colorNode.b);
@@ -304,24 +305,29 @@ function createUnderwaterPostColorNode(sourceNode, uniformNodes) {
       smoothstep(0.0, 80.0, uniformNodes.depth),
     );
     If(shallowCaustic.greaterThan(0.001), () => {
-      const causticUv = distortedUv.mul(12.0);
-      const causticTime = uniformNodes.time.mul(0.35);
-      const causticOne = sin(causticUv.x.mul(3.7).add(causticTime)).mul(
-        sin(causticUv.y.mul(4.1).sub(causticTime.mul(0.8))),
-      );
-      const causticTwo = sin(
-        causticUv.x.mul(2.3).sub(causticTime.mul(1.2)).add(1.7),
-      ).mul(sin(causticUv.y.mul(3.3).add(causticTime.mul(0.9))));
-      const causticThree = sin(
-        causticUv.x.add(causticUv.y).mul(2.8).add(causticTime.mul(0.6)),
-      );
-      const causticValue = pow(
-        max(
-          0.0,
-          causticOne.add(causticTwo.mul(0.7)).add(causticThree.mul(0.5)),
-        ).mul(0.33),
-        2.2,
-      );
+      const causticValue = causticIntensityNode
+        ? causticIntensityNode
+        : (() => {
+            // Inline procedural fallback (used when no CausticPass is wired)
+            const causticUv = distortedUv.mul(12.0);
+            const causticTime = uniformNodes.time.mul(0.35);
+            const causticOne = sin(causticUv.x.mul(3.7).add(causticTime)).mul(
+              sin(causticUv.y.mul(4.1).sub(causticTime.mul(0.8))),
+            );
+            const causticTwo = sin(
+              causticUv.x.mul(2.3).sub(causticTime.mul(1.2)).add(1.7),
+            ).mul(sin(causticUv.y.mul(3.3).add(causticTime.mul(0.9))));
+            const causticThree = sin(
+              causticUv.x.add(causticUv.y).mul(2.8).add(causticTime.mul(0.6)),
+            );
+            return pow(
+              max(
+                0.0,
+                causticOne.add(causticTwo.mul(0.7)).add(causticThree.mul(0.5)),
+              ).mul(0.33),
+              2.2,
+            );
+          })();
       const nearSurface = float(1.0)
         .sub(smoothstep(5.0, 60.0, uniformNodes.depth))
         .mul(0.14);
@@ -569,6 +575,15 @@ export class UnderwaterEffect {
     this._underwaterUniformNodes = createUnderwaterUniformNodes(
       this.underwaterPass.uniforms,
     );
+
+    // Caustic texture pass — replaces the 10 caustic PointLights with a
+    // player-relative projected caustic texture rendered via RTT.
+    this._causticPass = new CausticPass(renderer);
+    this._causticIntensityNode = this._causticPass.createCausticSampleNode(
+      screenUV,
+      this._underwaterUniformNodes.depth,
+    );
+
     this._underwaterSceneOutputNode = this._createUnderwaterOutputNode(
       this._sceneColorNode,
     );
@@ -652,7 +667,11 @@ export class UnderwaterEffect {
 
   _createUnderwaterOutputNode(sourceNode) {
     return convertToTexture(
-      createUnderwaterPostColorNode(sourceNode, this._underwaterUniformNodes),
+      createUnderwaterPostColorNode(
+        sourceNode,
+        this._underwaterUniformNodes,
+        this._causticIntensityNode,
+      ),
     );
   }
 
@@ -1253,6 +1272,20 @@ export class UnderwaterEffect {
         0.09,
       );
     }
+  }
+
+  /**
+   * Update the caustic texture pass. Call each frame before render().
+   * @param {number} dt - Delta time in seconds
+   * @param {THREE.Vector3} playerPos - Current player position
+   */
+  updateCausticPass(dt, playerPos) {
+    this._causticPass.update(dt, playerPos);
+  }
+
+  /** Expose the caustic pass for diagnostics / disposal. */
+  get causticPass() {
+    return this._causticPass;
   }
 
   render(depth, { flashlightOn = false, exposure = 0.76 } = {}) {

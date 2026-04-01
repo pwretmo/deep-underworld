@@ -1179,6 +1179,9 @@ export class Game {
         this.preload.pumpDescentAssist();
       }
 
+      // Update caustic texture pass before post-processing render
+      this.underwaterEffect.updateCausticPass(dt, this.player.position);
+
       // Render with post-processing
       this.underwaterEffect.render(depth, {
         flashlightOn: this.flashlightOn,
