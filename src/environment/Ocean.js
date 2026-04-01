@@ -724,8 +724,13 @@ export class Ocean {
       // Slight random tilt for variety
       mesh.rotation.z = (Math.random() - 0.5) * 0.15;
 
+      // Pre-compute the fixed billboard angle at construction time.
+      // The group origin always coincides with the camera's horizontal
+      // position, so this angle is constant per ray.
+      const _billboardAngle = Math.atan2(-mesh.position.x, -mesh.position.z);
+
       this.godRayGroup.add(mesh);
-      this.godRays.push({ mesh, mat, height });
+      this.godRays.push({ mesh, mat, height, _billboardAngle });
     }
 
     this.scene.add(this.godRayGroup);
@@ -807,10 +812,8 @@ export class Ocean {
       for (const ray of this.godRays) {
         ray.mat.uniforms.opacity.value = depthFade;
         ray.mat.uniforms.time.value = this.time;
-        // Y-axis billboard: face the camera horizontally
-        const dx = -ray.mesh.position.x; // cam local X is 0
-        const dz = -ray.mesh.position.z; // cam local Z is 0
-        ray.mesh.rotation.y = Math.atan2(dx, dz);
+        // Y-axis billboard: use pre-computed angle (no per-frame trig)
+        ray.mesh.rotation.y = ray._billboardAngle;
       }
     } else {
       this.godRayGroup.visible = false;
