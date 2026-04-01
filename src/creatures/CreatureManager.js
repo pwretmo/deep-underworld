@@ -730,13 +730,13 @@ export class CreatureManager {
       if (distSq < minDistSq) minDistSq = distSq;
 
       if (!groups[type]) {
-        groups[type] = { count: 0, nearestSq: Infinity, nearestInst: null };
+        groups[type] = { count: 0, nearestSq: Infinity, nearestPos: null };
       }
       const g = groups[type];
       g.count++;
       if (distSq < g.nearestSq) {
         g.nearestSq = distSq;
-        g.nearestInst = creature.instance;
+        g.nearestPos = creature._fPos;
       }
     }
 
@@ -745,7 +745,7 @@ export class CreatureManager {
       result.groups[type] = {
         count: g.count,
         nearest: Math.sqrt(g.nearestSq),
-        nearestPos: g.nearestInst?.getPosition?.()?.clone() ?? null,
+        nearestPos: g.nearestPos?.clone() ?? null,
       };
     }
     return result;
