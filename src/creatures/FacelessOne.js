@@ -290,16 +290,18 @@ export class FacelessOne {
     // Gentle sway
     this.group.rotation.z = Math.sin(this.time * 0.3) * 0.03;
 
-    // Head tilt/bob animation (all tiers)
-    for (const tier of Object.values(this.tiers)) {
-      if (tier.head) {
-        tier.head.rotation.x = Math.sin(this.time * 0.4) * 0.04;
-        tier.head.rotation.z = Math.sin(this.time * 0.25 + 1.0) * 0.03;
-      }
-      for (let i = 0; i < tier.arms.length; i++) {
-        tier.arms[i].rotation.z = Math.sin(this.time * 0.5 + i * Math.PI) * 0.22;
-        tier.arms[i].rotation.x = Math.sin(this.time * 0.3 + i) * 0.15;
-      }
+    // Head tilt/bob animation (active LOD tier only)
+    const dist = Math.sqrt(distSq);
+    const activeTierName = dist < LOD_NEAR_DISTANCE ? 'near' : dist < LOD_MEDIUM_DISTANCE ? 'medium' : 'far';
+    const activeTier = this.tiers[activeTierName];
+    if (!activeTier) return;
+    if (activeTier.head) {
+      activeTier.head.rotation.x = Math.sin(this.time * 0.4) * 0.04;
+      activeTier.head.rotation.z = Math.sin(this.time * 0.25 + 1.0) * 0.03;
+    }
+    for (let i = 0; i < activeTier.arms.length; i++) {
+      activeTier.arms[i].rotation.z = Math.sin(this.time * 0.5 + i * Math.PI) * 0.22;
+      activeTier.arms[i].rotation.x = Math.sin(this.time * 0.3 + i) * 0.15;
     }
 
     // Tendril sway with independent phase offsets (absolute displacement from rest positions)

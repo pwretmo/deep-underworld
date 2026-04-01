@@ -230,18 +230,20 @@ export class Leviathan {
     const angle = Math.atan2(nextX - targetX, nextZ - targetZ);
     this.group.rotation.y = angle + Math.PI / 2;
 
-    // Undulate body segments across all tiers
-    for (const tier of Object.values(this.tiers)) {
-      for (let i = 1; i < tier.segments.length; i++) {
-        const seg = tier.segments[i];
-        const phase = this.time * 1.5 - i * 0.3;
-        seg.position.z = Math.sin(phase) * i * 0.15;
-        seg.position.y = Math.cos(phase * 0.7) * i * 0.08;
-      }
-      // Jaw movement
-      if (tier.jaw) {
-        tier.jaw.rotation.z = Math.PI / 2 + 0.3 + Math.sin(this.time * 1.5) * 0.1;
-      }
+    // Undulate body segments (active LOD tier only)
+    const dist = Math.sqrt(distSq);
+    const activeTierName = dist < LOD_NEAR_DISTANCE ? 'near' : dist < LOD_MEDIUM_DISTANCE ? 'medium' : 'far';
+    const activeTier = this.tiers[activeTierName];
+    if (!activeTier) return;
+    for (let i = 1; i < activeTier.segments.length; i++) {
+      const seg = activeTier.segments[i];
+      const phase = this.time * 1.5 - i * 0.3;
+      seg.position.z = Math.sin(phase) * i * 0.15;
+      seg.position.y = Math.cos(phase * 0.7) * i * 0.08;
+    }
+    // Jaw movement
+    if (activeTier.jaw) {
+      activeTier.jaw.rotation.z = Math.PI / 2 + 0.3 + Math.sin(this.time * 1.5) * 0.1;
     }
 
     // Eye glow pulsing
