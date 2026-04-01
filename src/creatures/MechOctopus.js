@@ -280,8 +280,21 @@ export class MechOctopus {
           transparent: true, opacity: 0.55, side: THREE.DoubleSide,
           emissive: 0x103040, emissiveIntensity: 0.25,
         });
+        // GPU web stretch via TSL positionNode.
+        // uv.y is 0 for inner ring and 1 for outer ring (see _buildWebGeo).
+        // Only outer vertices are displaced; inner vertices remain unchanged.
+        const uStretch = uniform(0);
+        const outerMask = uv().y;
+        const stretch = uStretch.mul(outerMask);
+        webMat.positionNode = vec3(
+          positionLocal.x.mul(stretch.mul(0.1).add(1.0)),
+          positionLocal.y.sub(stretch.mul(0.15)),
+          positionLocal.z.mul(stretch.mul(0.1).add(1.0)),
+        );
+        webMat.needsUpdate = true;
         const webMesh = new THREE.Mesh(webGeo, webMat);
         webMesh.position.y = -0.8;
+        webMesh.userData.uStretch = uStretch;
         g.add(webMesh);
         this._webMeshes.push(webMesh);
       }
@@ -605,30 +618,12 @@ export class MechOctopus {
     if (!this._webMeshes) return;
     const tents = this._tentaclesByTier.near;
     for (let i = 0; i < this._webMeshes.length; i++) {
-      const web = this._webMeshes[i];
-      const pos = web.geometry.attributes.position;
-      if (!web.userData.origPos) {
-        web.userData.origPos = new Float32Array(pos.array);
-      }
-      const orig = web.userData.origPos;
-
-      // Drive outer vertices by adjacent tentacle rotations
-      const tA = tents[i] ? tents[i].group.rotation.x : 0;
-      const tB = tents[(i + 1) % 8] ? tents[(i + 1) % 8].group.rotation.x : 0;
-      const stretch = (Math.abs(tA) + Math.abs(tB)) * 0.3;
-
-      for (let v = 0; v < pos.count; v++) {
-        const isOuter = (v % 2 === 1);
-        if (isOuter) {
-          pos.setY(v, orig[v * 3 + 1] - stretch * 0.15);
-          const ox = orig[v * 3], oz = orig[v * 3 + 2];
-          pos.setX(v, ox * (1 + stretch * 0.1));
-          pos.setZ(v, oz * (1 + stretch * 0.1));
-        } else {
-          pos.setXYZ(v, orig[v * 3], orig[v * 3 + 1], orig[v * 3 + 2]);
-        }
-      }
-      pos.needsUpdate = true;
+      const uStretch = this._webMeshes[i].userData.uStretch;
+      if (!uStretch) continue;
+      const tA = tents[i]?.group.rotation.x ?? 0;
+      const tB = tents[(i + 1) % 8]?.group.rotation.x ?? 0;
+      // Compute stretch scalar on CPU (≈2 ops), push to GPU uniform.
+      uStretch.value = (Math.abs(tA) + Math.abs(tB)) * 0.3;
     }
   }
 

@@ -1,4 +1,5 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
+import { clamp, cos, positionLocal, sin, sub, uniform, vec3 } from 'three/tsl';
 import { LOD_NEAR_DISTANCE, LOD_MEDIUM_DISTANCE } from './lodUtils.js';
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
@@ -12,8 +13,6 @@ const PROXIMITY_RANGE = 2.5;
 // Fin undulation parameters
 const FIN_WAVE_SPEED = 0.8;
 const FIN_WAVE_AMP = 0.06;
-const HERO_NORMAL_DISTANCE = 12;
-const HERO_NORMAL_INTERVAL = 3;
 const APPENDAGE_BOUNDS_PADDING = 0.35;
 
 function _inflateGeometryBounds(geometry, padding) {
@@ -175,8 +174,93 @@ const LOD_PROFILE = {
   },
 };
 
+/**
+ * Applies a TSL positionNode graph to a DeepOne tentacle material for GPU-side
+ * deformation. Per-tentacle constants are baked into the graph at construction
+ * time; only per-frame state (time, velocity, proximity) reads from shared
+ * uniforms that are updated once per frame from the DeepOne instance.
+ */
+function _applyDeepOneTentacleShader(mat, app, motionScale, sharedUniforms) {
+  const { uTime, uVelocityX, uVelocityZ, uProxInfluence, uPlayerDirX, uPlayerDirZ } = sharedUniforms;
+  const ms = motionScale;
+  const phOff = app.phaseOffset || 0;
+
+  // Normalised position along tentacle: 0 = root, 1 = tip
+  const along = clamp(
+    positionLocal.y.negate().add(app.maxY).div(Math.max(app.length, 0.001)),
+    0.0, 1.0,
+  );
+  const tip = along.mul(along).mul(sub(3.0, along.mul(2.0)));
+  const tipSq = tip.mul(tip);
+
+  // Primary wave
+  const waveA = sin(
+    uTime.mul(app.swaySpeed || 0.3)
+      .add(phOff)
+      .add(along.mul(app.waveFreq || 2.5)),
+  ).mul((app.swayAmt || 0.28) * ms).mul(tip);
+
+  // Secondary harmonic
+  const waveB = sin(
+    uTime.mul(app.secSpeed || 0.15)
+      .add(phOff * 0.7)
+      .add(along.mul(app.secFreq || 5.0)),
+  ).mul((app.secSwayAmt || 0.14) * ms).mul(tip);
+
+  // Axial twist
+  const axialTwist = cos(
+    uTime.mul(app.twistSpeed || 0.18)
+      .add(phOff)
+      .add(along.mul((app.waveFreq || 2.5) * 0.5)),
+  ).mul(app.twistAmt || 0.07).mul(tip);
+
+  // Curl / gravitational droop
+  const curl = sin(
+    uTime.mul(app.curlSpeed || 0.12).add(phOff),
+  ).mul(app.curlAmt || 0.1).mul(tipSq);
+
+  // Vertical heave
+  const vertical = sin(
+    uTime.mul((app.secSpeed || 0.15) * 0.8).add(phOff),
+  ).mul(app.heaveAmt || 0.04).mul(tipSq)
+    .sub(along.mul((app.dropAmt || 0.03) * 0.4));
+
+  // Trail drift (velocity × trailFactor × 0.45 × tip)
+  const trailK = (app.trailFactor || 0.4) * 0.45;
+  const driftX = uVelocityX.mul(trailK).mul(tip);
+  const driftZ = uVelocityZ.mul(trailK).mul(tip);
+
+  // Proximity reaction
+  const proxK = (app.proximityResponse || 0.7) * 0.1;
+  const reactX = uPlayerDirX.mul(uProxInfluence.mul(proxK)).mul(tip);
+  const reactZ = uPlayerDirZ.mul(uProxInfluence.mul(proxK)).mul(tip);
+
+  const pX = app.perpX || 0;
+  const pZ = app.perpZ || 0;
+  const dX = app.dirX || 0;
+  const dZ = app.dirZ || 0;
+
+  const radX = positionLocal.x.sub(app.rootCenter.x);
+  const radZ = positionLocal.z.sub(app.rootCenter.z);
+
+  mat.positionNode = vec3(
+    positionLocal.x
+      .add(waveA.add(waveB).add(reactX).mul(pX))
+      .add(axialTwist.add(driftX).mul(dX))
+      .add(radX.mul(curl)),
+    positionLocal.y.add(vertical),
+    positionLocal.z
+      .add(waveA.add(waveB).add(reactZ).mul(pZ))
+      .add(axialTwist.add(driftZ).mul(dZ))
+      .add(radZ.mul(curl)),
+  );
+
+  mat.userData.shaderUniforms = { ...(mat.userData.shaderUniforms || {}), ...sharedUniforms };
+  mat.needsUpdate = true;
+}
+
 // ─── DeepOne — massive deep-sea cephalopod horror ─────────────────────────────
-// 3-tier LOD creature with buffer-mutation tentacle animation (zero GC),
+// 3-tier LOD creature with GPU-driven TSL positionNode tentacle animation.
 // MeshPhysicalMaterial subsurface scattering, cranial normal maps, and
 // bioluminescent pulse. Spawns at 250m+ depth.
 
@@ -210,6 +294,17 @@ export class DeepOne {
     this._tmpVec = new THREE.Vector3();
     this._originVec = new THREE.Vector3(0, 0, 0);
     this._upVec = new THREE.Vector3(0, 1, 0);
+
+    // Shared uniforms for GPU tentacle deformation — one set per instance,
+    // updated once per frame; baked per-tentacle constants live in positionNode.
+    this._tentacleUniforms = {
+      uTime:          uniform(0),
+      uVelocityX:     uniform(0),
+      uVelocityZ:     uniform(0),
+      uProxInfluence: uniform(0),
+      uPlayerDirX:    uniform(0),
+      uPlayerDirZ:    uniform(0),
+    };
 
     this._buildModel();
     scene.add(this.group);
@@ -404,7 +499,7 @@ export class DeepOne {
       mesh.position.y = -0.5;
       group.add(mesh);
 
-      tentacles.push(this._createAppendageDescriptor(mesh, {
+      const desc = this._createAppendageDescriptor(mesh, {
         angle,
         dirX: Math.cos(angle), dirZ: Math.sin(angle),
         perpX: Math.cos(angle + HALF_PI), perpZ: Math.sin(angle + HALF_PI),
@@ -425,7 +520,9 @@ export class DeepOne {
         curlAmt: 0.1 + Math.random() * 0.06,
         trailFactor: 0.45 + Math.random() * 0.35,
         proximityResponse: 0.7 + Math.random() * 0.4,
-      }));
+      });
+      _applyDeepOneTentacleShader(tentacleMat, desc, profile.motionScale ?? 1.0, this._tentacleUniforms);
+      tentacles.push(desc);
     }
 
     return tentacles;
@@ -488,18 +585,16 @@ export class DeepOne {
     }
   }
 
-  // ─── Appendage descriptor: stores rest positions as pre-allocated Float32Array
+  // ─── Appendage descriptor: computes geometry bounds for TSL shader baking
 
   _createAppendageDescriptor(mesh, opts) {
     mesh.frustumCulled = true;
     const geom = mesh.geometry;
-    const posAttr = geom.attributes.position;
-    posAttr.setUsage(THREE.DynamicDrawUsage);
+    const arr = geom.attributes.position.array;
 
-    const rest = Float32Array.from(posAttr.array);
     let minY = Infinity, maxY = -Infinity;
-    for (let i = 0; i < rest.length; i += 3) {
-      const y = rest[i + 1];
+    for (let i = 0; i < arr.length; i += 3) {
+      const y = arr[i + 1];
       if (y < minY) minY = y;
       if (y > maxY) maxY = y;
     }
@@ -507,15 +602,15 @@ export class DeepOne {
     // Root center: centroid of the top band of vertices
     const rootBand = maxY - Math.max((maxY - minY) * ROOT_BAND_THRESHOLD, 0.001);
     let rootX = 0, rootZ = 0, rootCount = 0;
-    for (let i = 0; i < rest.length; i += 3) {
-      if (rest[i + 1] < rootBand) continue;
-      rootX += rest[i]; rootZ += rest[i + 2]; rootCount++;
+    for (let i = 0; i < arr.length; i += 3) {
+      if (arr[i + 1] < rootBand) continue;
+      rootX += arr[i]; rootZ += arr[i + 2]; rootCount++;
     }
 
     _inflateGeometryBounds(geom, opts.boundsPadding ?? APPENDAGE_BOUNDS_PADDING);
 
     return {
-      mesh, geometry: geom, restPositions: rest,
+      mesh, geometry: geom,
       rootCenter: {
         x: rootCount > 0 ? rootX / rootCount : 0,
         z: rootCount > 0 ? rootZ / rootCount : 0,
@@ -526,75 +621,18 @@ export class DeepOne {
     };
   }
 
-  // ─── Per-vertex tentacle deformation (buffer mutation — zero GC) ─────────────
-  // Mutates the position buffer directly; no geometry dispose/recreate.
+  // ─── GPU tentacle animation — update shared uniforms once per frame ──────────
+  // positionNode graphs on each tentacle material read these uniforms.
+  // All per-tentacle constants were baked into the graph at construction time.
 
-  _deformAppendage(app, t, motionScale, refreshNormals = false) {
-    const positions = app.geometry.attributes.position;
-    const arr = positions.array;
-    const rest = app.restPositions;
-
-    // Trail physics: velocity-based offset that increases toward tips
-    const driftX = this._velocityX * (app.trailFactor || 0.4) * 0.45;
-    const driftZ = this._velocityZ * (app.trailFactor || 0.4) * 0.45;
-    const proxWeight = this._proximityInfluence * (app.proximityResponse || 0.7);
-    const ms = motionScale;
-
-    for (let i = 0; i < rest.length; i += 3) {
-      const bx = rest[i], by = rest[i + 1], bz = rest[i + 2];
-      // Normalised position from root (0) to tip (1)
-      const along = THREE.MathUtils.clamp((app.maxY - by) / app.length, 0, 1);
-      const tip = along * along * (3 - 2 * along); // smoothstep weight
-      const tipSq = tip * tip;
-
-      // Primary wave propagation along tentacle
-      const waveA = Math.sin(
-        t * (app.swaySpeed || 0.3) + (app.phaseOffset || 0) + along * (app.waveFreq || 2.5)
-      ) * (app.swayAmt || 0.28) * ms * tip;
-
-      // Secondary harmonic (finer ripple)
-      const waveB = Math.sin(
-        t * (app.secSpeed || 0.15) + (app.phaseOffset || 0) * 0.7 + along * (app.secFreq || 5)
-      ) * (app.secSwayAmt || 0.14) * ms * tip;
-
-      // Axial twist
-      const axialTwist = Math.cos(
-        t * (app.twistSpeed || 0.18) + (app.phaseOffset || 0) + along * (app.waveFreq || 2.5) * 0.5
-      ) * (app.twistAmt || 0.07) * tip;
-
-      // Curl / gravitational droop toward tips
-      const curl = Math.sin(
-        t * (app.curlSpeed || 0.12) + (app.phaseOffset || 0)
-      ) * (app.curlAmt || 0.1) * tipSq;
-
-      // Vertical heave (breathing / inertia)
-      const vertical = Math.sin(
-        t * (app.secSpeed || 0.15) * 0.8 + (app.phaseOffset || 0)
-      ) * (app.heaveAmt || 0.04) * tipSq
-        - (app.dropAmt || 0.03) * along * 0.4;
-
-      const radX = bx - app.rootCenter.x;
-      const radZ = bz - app.rootCenter.z;
-      const pX = app.perpX || 0, pZ = app.perpZ || 0;
-      const dX = app.dirX || 0, dZ = app.dirZ || 0;
-
-      // Tentacles drift toward player on proximity
-      arr[i] = app.rootCenter.x + radX
-        + pX * (waveA + waveB + this._playerDirX * proxWeight * 0.1 * tip)
-        + dX * (axialTwist + driftX * tip)
-        + radX * curl;
-      arr[i + 1] = by + vertical;
-      arr[i + 2] = app.rootCenter.z + radZ
-        + pZ * (waveA + waveB + this._playerDirZ * proxWeight * 0.1 * tip)
-        + dZ * (axialTwist + driftZ * tip)
-        + radZ * curl;
-    }
-
-    positions.needsUpdate = true;
-    if (refreshNormals) {
-      app.geometry.computeVertexNormals();
-      app.geometry.attributes.normal.needsUpdate = true;
-    }
+  _updateTentacleUniforms(t) {
+    const u = this._tentacleUniforms;
+    u.uTime.value          = t;
+    u.uVelocityX.value     = this._velocityX;
+    u.uVelocityZ.value     = this._velocityZ;
+    u.uProxInfluence.value = this._proximityInfluence;
+    u.uPlayerDirX.value    = this._playerDirX;
+    u.uPlayerDirZ.value    = this._playerDirZ;
   }
 
   // ─── Near tier: full detail ───────────────────────────────────────────────────
@@ -734,11 +772,10 @@ export class DeepOne {
 
   // ─── Sync newly visible tier to current animation state ──────────────────────
 
-  _syncTier(tier, t, refreshNormals = false) {
-    const ms = tier.profile.motionScale || 1;
-    for (const app of tier.tentacles) {
-      this._deformAppendage(app, t, ms, refreshNormals);
-    }
+  _syncTier(tier, t) {
+    // With GPU positionNode animation the uniforms are what drive deformation;
+    // updating them is sufficient to sync a newly visible tier.
+    this._updateTentacleUniforms(t);
   }
 
   // ─── Main update loop ─────────────────────────────────────────────────────────
@@ -835,25 +872,15 @@ export class DeepOne {
     // ── LOD tier selection ──
     const tierName = this._getLodTierName(distToPlayer);
     const tier = this._tiers[tierName];
-    const heroNormalBudget =
-      tierName === 'near' && distToPlayer < HERO_NORMAL_DISTANCE;
 
     // Sync newly visible tier so transitions don't reveal stale geometry
     if (this._lastTierName !== tierName) {
-      this._syncTier(tier, t, heroNormalBudget);
+      this._syncTier(tier, t);
       this._lastTierName = tierName;
     }
 
-    // ── Tentacle animation: buffer mutation (zero GC — no geometry rebuild) ──
-    const interval = tier.profile.animInterval || 1;
-    if (this._frameCount % interval === 0) {
-      const ms = tier.profile.motionScale || 1;
-      const refreshNormals =
-        heroNormalBudget && (this._frameCount % HERO_NORMAL_INTERVAL === 0);
-      for (const app of tier.tentacles) {
-        this._deformAppendage(app, t, ms, refreshNormals);
-      }
-    }
+    // ── Tentacle animation: GPU positionNode — update shared uniforms once per frame ──
+    this._updateTentacleUniforms(t);
 
     // ── Bioluminescent pulse ──
     this._breathPhase += dt * 0.4;
