@@ -291,9 +291,6 @@ export class Ocean {
     this.particleBaseOpacity = 0.22;
     this._rebuildParticles(qualityManager.getSettings());
 
-    // Caustics light cookies near surface
-    this._createCausticLights();
-
     // God rays
     this._createGodRays();
 
@@ -700,27 +697,6 @@ export class Ocean {
     this.scene.add(this.particleSystem);
   }
 
-  _createCausticLights() {
-    this.causticLights = [];
-    for (let i = 0; i < 10; i++) {
-      const light = new THREE.PointLight(0x88ccff, 0.5, 70);
-      light.userData.duwCategory = "flora_decor";
-      light.position.set(
-        (Math.random() - 0.5) * 50,
-        -3 - Math.random() * 18,
-        (Math.random() - 0.5) * 50,
-      );
-      this.scene.add(light);
-      this._pointLightBudget?.registerLight(light);
-      this.causticLights.push({
-        light,
-        offset: Math.random() * Math.PI * 2,
-        speed: 0.5 + Math.random() * 1.2,
-        baseIntensity: 0.35 + Math.random() * 0.4,
-      });
-    }
-  }
-
   _createGodRays() {
     // God rays: individual billboard planes that always face the camera
     // on Y-axis. Each ray is a single tall PlaneGeometry with a soft
@@ -822,26 +798,6 @@ export class Ocean {
     const abyssSizeClamp = THREE.MathUtils.lerp(1.0, 0.94, abyssBlend);
     this.particleSystem.material.uniforms.baseSize.value =
       deepSize * abyssSizeClamp;
-
-    // Animate caustic lights (only near surface)
-    // Route intensity through the budget system's duwTargetIntensity so the
-    // per-frame lerp and retarget scoring stay in sync with the caustic fade.
-    for (const c of this.causticLights) {
-      const causticFade = 1.0 - THREE.MathUtils.smoothstep(depth, 40, 100);
-      const desired =
-        causticFade > 0
-          ? c.baseIntensity *
-            (1 + Math.sin(this.time * c.speed + c.offset) * 0.6) *
-            causticFade
-          : 0;
-      c.light.userData.duwBaseIntensity = desired;
-      c.light.userData.duwTargetIntensity = desired;
-      // Follow player horizontally
-      c.light.position.x =
-        playerPos.x + Math.sin(c.offset + this.time * 0.2) * 20;
-      c.light.position.z =
-        playerPos.z + Math.cos(c.offset + this.time * 0.15) * 20;
-    }
 
     // God rays: billboard each plane toward camera, update uniforms
     if (depth < 80) {
