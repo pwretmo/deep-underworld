@@ -236,6 +236,7 @@ export class Terrain {
       this.scene.add(im);
       return im;
     });
+    for (const rm of this._rockPoolMeshes) rm.frustumCulled = false;
     // Free-slot stacks — pop to allocate, push to free.
     this._rockFreeLists = this._rockGeos.map(() =>
       Array.from({ length: MAX_ROCKS_PER_TYPE }, (_, i) => i).reverse(),

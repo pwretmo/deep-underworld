@@ -180,6 +180,9 @@ export class Flora {
     this.scene.add(this._orbPool);
     this.scene.add(this._tubePool);
     this.scene.add(this._tipPool);
+    this._orbPool.frustumCulled = false;
+    this._tubePool.frustumCulled = false;
+    this._tipPool.frustumCulled = false;
 
     // Scratch color for pool slot allocation
     this._tmpColor = new THREE.Color();
