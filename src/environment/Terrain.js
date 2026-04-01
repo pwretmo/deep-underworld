@@ -412,12 +412,14 @@ export class Terrain {
     return handle;
   }
 
-  _addRockVisualsFromPayload(parent, payload) {
+  _addRockVisualsFromPayload(parent, payload, cx, cz) {
     // Allocate rock instances from the global per-type pools instead of
     // creating a new InstancedMesh per chunk per rock type.  This reduces rock
     // draw calls from ~(chunks × 4) to exactly 4, one per rock geometry type.
     const batches = payload.rockBatches || [];
     const rockSlots = {};
+    const chunkOffsetX = cx * this.chunkSize;
+    const chunkOffsetZ = cz * this.chunkSize;
 
     for (const batch of batches) {
       const typeIdx = batch.type % this._rockGeos.length;
@@ -432,6 +434,10 @@ export class Terrain {
         if (slot == null) break; // pool exhausted — skip gracefully
 
         this._rockScratchMatrix.fromArray(batch.matrices, i * 16);
+        // Payload matrices are in chunk-local space; translate to world space
+        // by adding the chunk's world origin offset.
+        this._rockScratchMatrix.elements[12] += chunkOffsetX;
+        this._rockScratchMatrix.elements[14] += chunkOffsetZ;
         rm.setMatrixAt(slot, this._rockScratchMatrix);
 
         if (batch.colors && batch.colors.length >= (i + 1) * 3) {
@@ -703,7 +709,7 @@ export class Terrain {
       job.geometry = geometry;
       job.mesh = mesh;
     } else if (stageName === "rocks") {
-      this._addRockVisualsFromPayload(job.mesh, job.payload);
+      this._addRockVisualsFromPayload(job.mesh, job.payload, job.cx, job.cz);
     } else if (stageName === "terrainColliderPrepare") {
       // Cache collider data references so terrainColliderBuild can run in a later frame
       if (
