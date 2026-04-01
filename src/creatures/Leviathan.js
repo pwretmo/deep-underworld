@@ -20,6 +20,7 @@ export class Leviathan {
     this.passing = false;
     this.passTimer = 0;
 
+    this._lastLodTier = 'near';
     this._buildModel();
     this.group.position.copy(position);
     scene.add(this.group);
@@ -213,6 +214,16 @@ export class Leviathan {
     return { group: tierGroup, segments, jaw };
   }
 
+  _getVisibleTierName() {
+    if (!this.lod || !this.lod.levels) return 'near';
+    for (let i = 0; i < this.lod.levels.length; i++) {
+      if (this.lod.levels[i].object.visible) {
+        return i === 0 ? 'near' : i === 1 ? 'medium' : 'far';
+      }
+    }
+    return this._lastLodTier;
+  }
+
   update(dt, playerPos, distSq) {
     this.time += dt;
 
@@ -231,8 +242,8 @@ export class Leviathan {
     this.group.rotation.y = angle + Math.PI / 2;
 
     // Undulate body segments (active LOD tier only)
-    const dist = Math.sqrt(distSq);
-    const activeTierName = dist < LOD_NEAR_DISTANCE ? 'near' : dist < LOD_MEDIUM_DISTANCE ? 'medium' : 'far';
+    const activeTierName = this._getVisibleTierName();
+    this._lastLodTier = activeTierName;
     const activeTier = this.tiers[activeTierName];
     if (!activeTier) return;
     for (let i = 1; i < activeTier.segments.length; i++) {

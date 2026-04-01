@@ -23,6 +23,7 @@ export class FacelessOne {
     this.tendrils = [];
     this.veinMeshes = [];
 
+    this._lastLodTier = 'near';
     this._buildModel();
     this.group.position.copy(position);
     scene.add(this.group);
@@ -265,6 +266,16 @@ export class FacelessOne {
     return { group: tierGroup, head, arms };
   }
 
+  _getVisibleTierName() {
+    if (!this.lod || !this.lod.levels) return 'near';
+    for (let i = 0; i < this.lod.levels.length; i++) {
+      if (this.lod.levels[i].object.visible) {
+        return i === 0 ? 'near' : i === 1 ? 'medium' : 'far';
+      }
+    }
+    return this._lastLodTier;
+  }
+
   update(dt, playerPos, distSq) {
     this.time += dt;
     this.turnTimer += dt;
@@ -291,8 +302,8 @@ export class FacelessOne {
     this.group.rotation.z = Math.sin(this.time * 0.3) * 0.03;
 
     // Head tilt/bob animation (active LOD tier only)
-    const dist = Math.sqrt(distSq);
-    const activeTierName = dist < LOD_NEAR_DISTANCE ? 'near' : dist < LOD_MEDIUM_DISTANCE ? 'medium' : 'far';
+    const activeTierName = this._getVisibleTierName();
+    this._lastLodTier = activeTierName;
     const activeTier = this.tiers[activeTierName];
     if (!activeTier) return;
     if (activeTier.head) {

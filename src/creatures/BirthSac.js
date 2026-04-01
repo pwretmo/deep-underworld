@@ -492,7 +492,8 @@ export class BirthSac {
 
     // Update sac shader uniforms (active tier only)
     if (tierName !== 'far') {
-      this._updateSacUniforms(this.tiers[tierName], t);
+      const tier = this.tiers[tierName];
+      if (tier) this._updateSacUniforms(tier, t);
     }
 
     // Near LOD: per-vertex deformation (GPU shader), embryo twitching, stalk tension, vein pulse

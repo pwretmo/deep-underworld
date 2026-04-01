@@ -555,7 +555,8 @@ export class Parasite {
 
     // Update shader uniforms on active sac material (skip far tier — no sac mat)
     if (tierName !== 'far') {
-      this._updateSacUniforms(this.tiers[tierName], t);
+      const tier = this.tiers[tierName];
+      if (tier) this._updateSacUniforms(tier, t);
     }
 
     // Near LOD: per-vertex deformation (shader), proboscis IK, tendrils, vein pulse
