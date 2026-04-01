@@ -5,6 +5,18 @@ import { qualityManager } from '../QualityManager.js';
 const TWO_PI = Math.PI * 2;
 const HALF_PI = Math.PI * 0.5;
 const RESPAWN_DISTANCE = 220;
+
+// ── Fast sin/cos lookup table (360-entry, built once) ─────────────────────────
+const SIN_TABLE_SIZE = 360;
+const SIN_INV_STEP = SIN_TABLE_SIZE / TWO_PI;
+const SIN_TABLE = new Float32Array(SIN_TABLE_SIZE);
+for (let i = 0; i < SIN_TABLE_SIZE; i++) SIN_TABLE[i] = Math.sin(i / SIN_INV_STEP);
+
+function fastSin(rad) {
+  const idx = ((Math.round(rad * SIN_INV_STEP) % SIN_TABLE_SIZE) + SIN_TABLE_SIZE) % SIN_TABLE_SIZE;
+  return SIN_TABLE[idx];
+}
+function fastCos(rad) { return fastSin(rad + HALF_PI); }
 const NEAR_DISTANCE = 30;
 const MEDIUM_DISTANCE = 80;
 const PLAYER_REACTION_DISTANCE = 30;
@@ -818,7 +830,7 @@ export class SpinalEel {
 
     const isNear = tierName === 'near';
     const isFar = tierName === 'far';
-    const swimPulse = 0.72 + (Math.sin(this.time * 3.4 + this._phaseOffset) * 0.5 + 0.5) * 0.55;
+    const swimPulse = 0.72 + (fastSin(this.time * 3.4 + this._phaseOffset) * 0.5 + 0.5) * 0.55;
     const coilStrength = this._coilState * (isNear ? 0.24 : isFar ? 0.12 : 0.16) * this._coilBias;
     const amplitude = (isNear ? 0.18 : isFar ? 0.085 : 0.13) * this._ampVariation * (0.85 + this._proximity * 0.55);
     const rotAmplitude = (isNear ? 0.24 : isFar ? 0.12 : 0.18) * (0.8 + this._proximity * 0.4);
@@ -844,25 +856,25 @@ export class SpinalEel {
     if (!tier) return;
 
     const isNear = tierName === 'near';
-    const breath = Math.sin(this.time * (1.1 + this._idleBias * 0.2) + this._breathingPhase) * 0.03;
+    const breath = fastSin(this.time * (1.1 + this._idleBias * 0.2) + this._breathingPhase) * 0.03;
     const jawTarget = distToPlayer < JAW_REACTION_DISTANCE
       ? THREE.MathUtils.clamp(1 - distToPlayer / JAW_REACTION_DISTANCE, 0, 1) * 0.85
-      : 0.14 + Math.sin(this.time * 1.7 + this._phaseOffset) * 0.06;
+      : 0.14 + fastSin(this.time * 1.7 + this._phaseOffset) * 0.06;
 
     this._jawAngle = THREE.MathUtils.lerp(this._jawAngle, jawTarget, dt * 4.5);
     this._skullTilt = THREE.MathUtils.lerp(this._skullTilt, jawTarget * 0.18 + breath * 0.8, dt * 3.8);
 
     tier.headPivot.rotation.z = -this._skullTilt;
-    tier.headPivot.rotation.y = Math.sin(this.time * 1.1 + this._phaseOffset) * 0.08 + this._coilState * 0.18 * this._coilBias;
+    tier.headPivot.rotation.y = fastSin(this.time * 1.1 + this._phaseOffset) * 0.08 + this._coilState * 0.18 * this._coilBias;
     tier.jawPivot.rotation.z = this._jawAngle;
-    tier.jawPivot.rotation.y = Math.sin(this.time * 2.0 + this._phaseOffset) * 0.06;
+    tier.jawPivot.rotation.y = fastSin(this.time * 2.0 + this._phaseOffset) * 0.06;
 
     for (let i = 0; i < tier.nodes.length; i++) {
       const node = tier.nodes[i];
       const progress = node.userData.progress;
       const phase = this.time * (4.1 * this._freqVariation) - progress * 9.8 + this._phaseOffset;
-      const wave = Math.sin(phase);
-      const crossWave = Math.cos(phase * 0.76 + this._coilBias * 0.7);
+      const wave = fastSin(phase);
+      const crossWave = fastCos(phase * 0.76 + this._coilBias * 0.7);
       const inertia = 1 - progress * 0.42;
       const baseX = -progress * tier.profile.length;
       const lateralAmp = (0.12 + progress * 0.62) * this._ampVariation * (0.75 + this._proximity * 0.45);
@@ -872,31 +884,31 @@ export class SpinalEel {
 
       node.position.set(
         baseX,
-        wave * lateralAmp + Math.sin(coilPhase) * coilEnvelope * 0.55,
-        crossWave * verticalAmp + Math.cos(coilPhase) * coilEnvelope * 0.72
+        wave * lateralAmp + fastSin(coilPhase) * coilEnvelope * 0.55,
+        crossWave * verticalAmp + fastCos(coilPhase) * coilEnvelope * 0.72
       );
       node.rotation.set(
         crossWave * (isNear ? 0.12 : 0.08) * inertia,
-        wave * (isNear ? 0.34 : 0.22) * inertia + Math.sin(coilPhase) * this._coilState * 0.18,
-        wave * 0.08 * (0.4 + progress) + Math.cos(coilPhase) * this._coilState * 0.1
+        wave * (isNear ? 0.34 : 0.22) * inertia + fastSin(coilPhase) * this._coilState * 0.18,
+        wave * 0.08 * (0.4 + progress) + fastCos(coilPhase) * this._coilState * 0.1
       );
 
-      const bulge = 1 + Math.sin(this.time * 3.25 - progress * 18 + this._phaseOffset) * (isNear ? 0.08 : 0.04) + (1 + breath) * 0.015;
+      const bulge = 1 + fastSin(this.time * 3.25 - progress * 18 + this._phaseOffset) * (isNear ? 0.08 : 0.04) + (1 + breath) * 0.015;
       node.scale.set(1, bulge, bulge * (1 + this._coilState * 0.08));
     }
 
     for (let i = 0; i < tier.fins.length; i++) {
       const fin = tier.fins[i];
-      fin.rotation.z = Math.sin(this.time * 7.2 + i * 0.75 + this._flutterOffset) * (isNear ? 0.18 : 0.09);
-      fin.rotation.x = Math.cos(this.time * 4.2 + i * 0.6) * 0.06;
-      fin.scale.y = 0.92 + Math.sin(this.time * 3.2 + i * 0.5) * (isNear ? 0.12 : 0.05);
+      fin.rotation.z = fastSin(this.time * 7.2 + i * 0.75 + this._flutterOffset) * (isNear ? 0.18 : 0.09);
+      fin.rotation.x = fastCos(this.time * 4.2 + i * 0.6) * 0.06;
+      fin.scale.y = 0.92 + fastSin(this.time * 3.2 + i * 0.5) * (isNear ? 0.12 : 0.05);
     }
 
     const tailPhase = this.time * (4.4 * this._freqVariation) + this._phaseOffset;
-    const powerStroke = Math.sin(tailPhase);
+    const powerStroke = fastSin(tailPhase);
     const asymmetricStroke = powerStroke > 0 ? powerStroke * 0.65 : powerStroke * 1.18;
     tier.tailFin.rotation.z = asymmetricStroke * 0.55 + this._coilState * 0.28;
-    tier.tailFin.rotation.x = Math.cos(tailPhase * 0.8) * 0.14;
+    tier.tailFin.rotation.x = fastCos(tailPhase * 0.8) * 0.14;
     tier.tailFin.scale.y = 1 + Math.abs(asymmetricStroke) * 0.12;
 
     for (let i = 0; i < tier.tailRays.length; i++) {
@@ -906,13 +918,13 @@ export class SpinalEel {
     }
 
     for (let i = 0; i < tier.ribs.length; i++) {
-      tier.ribs[i].rotation.x = Math.sin(this.time * 2.6 + i * 0.7) * 0.05;
-      tier.ribs[i].scale.y = 1 + Math.sin(this.time * 3.0 - i * 0.55) * 0.06;
+      tier.ribs[i].rotation.x = fastSin(this.time * 2.6 + i * 0.7) * 0.05;
+      tier.ribs[i].scale.y = 1 + fastSin(this.time * 3.0 - i * 0.55) * 0.06;
     }
 
     for (let i = 0; i < tier.dorsalProcesses.length; i++) {
-      tier.dorsalProcesses[i].scale.y = 1 + Math.sin(this.time * 3.8 - i * 0.7) * 0.12 * (isNear ? 1 : 0.45);
-      tier.dorsalProcesses[i].rotation.z = Math.sin(this.time * 4.2 - i * 0.45) * 0.08;
+      tier.dorsalProcesses[i].scale.y = 1 + fastSin(this.time * 3.8 - i * 0.7) * 0.12 * (isNear ? 1 : 0.45);
+      tier.dorsalProcesses[i].rotation.z = fastSin(this.time * 4.2 - i * 0.45) * 0.08;
     }
   }
 

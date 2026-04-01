@@ -23,6 +23,9 @@ const _webTemp = new THREE.Vector3();
 
 const TWO_PI = Math.PI * 2;
 const RESPAWN_DISTANCE = 200;
+const RESPAWN_DISTANCE_SQ = RESPAWN_DISTANCE * RESPAWN_DISTANCE;
+const PROXIMITY_RANGE = 40;
+const PROXIMITY_RANGE_SQ = PROXIMITY_RANGE * PROXIMITY_RANGE;
 const WEB_TUBULAR_SEGMENTS = 8;
 const WEB_RADIAL_SEGMENTS = 4;
 const WEB_RADIUS = 0.016;
@@ -877,9 +880,10 @@ export class Amalgam {
     // Breathing phase drives near-tier deformation and medium/far glow timing.
     this._breathPhase += dt * 1.2;
 
-    // Player proximity factor
-    const distToPlayer = Math.sqrt(distSq);
-    const targetProx = THREE.MathUtils.clamp(1 - distToPlayer / 40, 0, 1);
+    // Player proximity factor — uses squared distance to avoid sqrt
+    const targetProx = distSq < PROXIMITY_RANGE_SQ
+      ? THREE.MathUtils.clamp(1 - Math.sqrt(distSq) / PROXIMITY_RANGE, 0, 1)
+      : 0;
     this._proximityFactor +=
       (targetProx - this._proximityFactor) * Math.min(1, dt * 2);
 
@@ -1064,8 +1068,8 @@ export class Amalgam {
       }
     }
 
-    // Respawn if too far
-    if (distToPlayer > RESPAWN_DISTANCE) {
+    // Respawn if too far (squared comparison avoids sqrt)
+    if (distSq > RESPAWN_DISTANCE_SQ) {
       const a = Math.random() * TWO_PI;
       this.group.position.set(
         playerPos.x + Math.cos(a) * 80,

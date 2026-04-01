@@ -257,6 +257,9 @@ export class TendrilHunter {
     // Medium-tier tendril refs for sinusoidal sway
     this._mediumTendrilData = []; // [{group, phase}]
 
+    // Cached inverse world matrix — updated once per frame in update()
+    this._worldInverseMatrix = new THREE.Matrix4();
+
     this._buildModel();
     this.group.position.copy(position);
     scene.add(this.group);
@@ -617,6 +620,11 @@ export class TendrilHunter {
     const yaw = Math.atan2(this.direction.x, this.direction.z);
     this.group.rotation.y = THREE.MathUtils.lerp(this.group.rotation.y, yaw, dt * 3);
 
+    // Refresh world matrix after movement and cache its inverse for
+    // _animateNear() so worldToLocal no longer needs updateMatrixWorld.
+    this.group.updateMatrixWorld(true);
+    this._worldInverseMatrix.copy(this.group.matrixWorld).invert();
+
     // Respawn when too far from player; recompute distance after reposition
     // so the rest of this frame's state/animation reflects actual position.
     let distToPlayer = Math.sqrt(distSq);
@@ -628,6 +636,9 @@ export class TendrilHunter {
         playerPos.z + Math.sin(a) * 70
       );
       distToPlayer = this.group.position.distanceTo(playerPos);
+      // Re-cache world inverse after repositioning
+      this.group.updateMatrixWorld(true);
+      this._worldInverseMatrix.copy(this.group.matrixWorld).invert();
     }
 
     // ── Resolve active LOD tier ───────────────────────────────────────────────
@@ -708,11 +719,9 @@ export class TendrilHunter {
 
     // Player position in this.group's local space
     // (tierGroup / LOD have no transform, so group-local == tier-local)
-    // updateMatrixWorld ensures this frame's position/rotation changes are
-    // reflected before converting coordinates (avoids one-frame-stale IK targets).
-    this.group.updateMatrixWorld(true);
-    _v3B.copy(playerPos);
-    this.group.worldToLocal(_v3B);
+    // World inverse matrix is pre-computed in update() after movement,
+    // so we skip the expensive updateMatrixWorld(true) call here.
+    _v3B.copy(playerPos).applyMatrix4(this._worldInverseMatrix);
 
     // ── Independent mandible articulation ─────────────────────────────────────
     if (this._leftMandible && this._rightMandible) {

@@ -496,14 +496,16 @@ export class ChainDragger {
 
       // Distance constraint solver — enforce LINK_SPACING * scale rest length
       const restLen = LINK_SPACING * scale;
+      const restLenSq = restLen * restLen;
       for (let iter = 0; iter < SOLVE_ITERS; iter++) {
         // Root–first free particle: only move the free end (root is pinned)
         {
           const i1 = 3; // particle index 1 in world-space pos array (1 particle × 3 floats)
           const dx = pos[i1] - rx, dy = pos[i1+1] - ry, dz = pos[i1+2] - rz;
-          const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
-          if (dist > 1e-6) {
-            const corr = (dist - restLen) / dist;
+          const distSq = dx*dx + dy*dy + dz*dz;
+          if (distSq > 1e-12) {
+            // Linearised constraint: avoids sqrt for near-rest-length chains
+            const corr = (distSq - restLenSq) / (distSq + restLenSq);
             pos[i1]   -= dx * corr;
             pos[i1+1] -= dy * corr;
             pos[i1+2] -= dz * corr;
@@ -515,9 +517,10 @@ export class ChainDragger {
           const dx = pos[i1]   - pos[i0];
           const dy = pos[i1+1] - pos[i0+1];
           const dz = pos[i1+2] - pos[i0+2];
-          const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
-          if (dist < 1e-6) continue;
-          const corr = (dist - restLen) / dist * CONSTRAINT_RELAX;
+          const distSq = dx*dx + dy*dy + dz*dz;
+          if (distSq < 1e-12) continue;
+          // Linearised constraint: avoids sqrt for near-rest-length chains
+          const corr = (distSq - restLenSq) / (distSq + restLenSq) * CONSTRAINT_RELAX;
           pos[i0]   += dx * corr;
           pos[i0+1] += dy * corr;
           pos[i0+2] += dz * corr;
