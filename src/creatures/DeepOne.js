@@ -255,6 +255,7 @@ function _applyDeepOneTentacleShader(mat, app, motionScale, sharedUniforms) {
       .add(radZ.mul(curl)),
   );
 
+  mat.userData.shaderUniforms = { ...(mat.userData.shaderUniforms || {}), ...sharedUniforms };
   mat.needsUpdate = true;
 }
 
