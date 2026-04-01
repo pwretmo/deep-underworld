@@ -1081,17 +1081,15 @@ export class Game {
         _effectiveSpawnBudget,
       );
 
-      const nearestCreatureDist = this.creatures.getNearestCreatureDistance(
-        this.player.position,
-      );
+      const frameStats = this.creatures.getFrameStats();
+      this._lastFrameStats = frameStats;
+      const nearestCreatureDist = frameStats.nearestDist;
+      const creaturesByType = frameStats.groups;
 
       // Depth tracking
       if (depth > this.maxDepth) this.maxDepth = depth;
 
       // Update HUD
-      const creaturesByType = this.creatures.getCreaturesByType(
-        this.player.position,
-      );
       this.hud.update(depth, this.flashlightOn, this.camera);
       this.hud.updateLocator(
         creaturesByType,
@@ -1714,9 +1712,7 @@ export class Game {
 
     // ─── Creature showcase framing (issue #103) ───────────────────────────
     if (!s.showcase.active && !rec.active) {
-      const nearDist = this.creatures.getNearestCreatureDistance(
-        this.player.position,
-      );
+      const nearDist = this._lastFrameStats?.nearestDist ?? Infinity;
       if (nearDist < 18 && nearDist > 2) {
         s.showcase.active = true;
         s.showcase.timer = 0;
