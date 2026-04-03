@@ -9,7 +9,7 @@ export class PhysicsWorld {
   }
 
   async init() {
-    await RAPIER.init({});
+    await RAPIER.init();
     // Zero gravity — the game handles movement via velocity + drag
     this.world = new RAPIER.World({ x: 0, y: 0, z: 0 });
 
