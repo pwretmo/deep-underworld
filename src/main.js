@@ -4,6 +4,7 @@ const game = new Game(await Game.resolveRendererOptions());
 await game.init();
 
 // Expose game instance globally for automated testing (UX Tester / Chrome DevTools)
+// @ts-expect-error custom property for automated testing
 window.game = game;
 
 document.getElementById('loading').classList.add('hidden');

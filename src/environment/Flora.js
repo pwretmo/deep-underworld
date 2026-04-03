@@ -187,7 +187,7 @@ export class Flora {
     // Scratch color for pool slot allocation
     this._tmpColor = new THREE.Color();
 
-    window.addEventListener("qualitychange", (e) => {
+    window.addEventListener("qualitychange", (/** @type {CustomEvent} */ e) => {
       this._floraDensityScale = e.detail.settings.floraDensityScale;
       // Mark all chunks for rebuild on next move
       if (this.lastChunkX !== null) {

@@ -473,7 +473,7 @@ if (typeof self !== "undefined") {
         cx: data.cx,
         cz: data.cz,
         payload,
-      }, collectTerrainTransferList(payload));
+      }, /** @type {StructuredSerializeOptions} */ ({ transfer: collectTerrainTransferList(payload) }));
       return;
     }
 

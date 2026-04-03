@@ -135,7 +135,7 @@ export class Player {
 
     document.addEventListener("pointerlockchange", () => {
       this.locked = document.pointerLockElement === this.domElement;
-      if (this.onLockChange) this.onLockChange(this.locked);
+      if (/** @type {any} */ (this).onLockChange) /** @type {any} */ (this).onLockChange(this.locked);
     });
   }
 

@@ -43,6 +43,7 @@ export class AudioManager {
    */
   start() {
     if (this.started) return;
+    // @ts-expect-error webkitAudioContext is a vendor prefix not in lib.dom.d.ts
     const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
     this.ctx = new AudioContextCtor();
     this.masterGain = this.ctx.createGain();
