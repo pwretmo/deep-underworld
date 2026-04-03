@@ -6,6 +6,10 @@ import { createTerrainPayload as createCurrentTerrainPayload } from "../src/envi
 import { PhysicsWorld } from "../src/physics/PhysicsWorld.js";
 import { fbm2D, noise2D } from "../src/utils/noise.js";
 
+// Budget thresholds (~3× observed baseline, verified against current output)
+const P95_ACTIVE_FRAME_BUDGET_MS = 4.0;
+const MAX_ACTIVE_FRAME_BUDGET_MS = 8.0;
+
 const CHUNK_FINALIZATION_STAGES = [
   "geometry",
   "rocks",
@@ -1198,6 +1202,29 @@ async function main() {
 
   console.log("");
   printReport(legacyRuns, currentRuns);
+
+  // Assertions
+  const current = aggregateMode(currentRuns);
+  console.log("");
+  let failed = false;
+
+  if (current.p95ActiveFrameMs > P95_ACTIVE_FRAME_BUDGET_MS) {
+    console.log(`FAIL: p95 active-frame cost ${formatMs(current.p95ActiveFrameMs)} > budget ${formatMs(P95_ACTIVE_FRAME_BUDGET_MS)}`);
+    failed = true;
+  } else {
+    console.log(`PASS: p95 active-frame cost ${formatMs(current.p95ActiveFrameMs)} <= budget ${formatMs(P95_ACTIVE_FRAME_BUDGET_MS)}`);
+  }
+
+  if (current.maxActiveFrameMs > MAX_ACTIVE_FRAME_BUDGET_MS) {
+    console.log(`FAIL: max active-frame spike ${formatMs(current.maxActiveFrameMs)} > budget ${formatMs(MAX_ACTIVE_FRAME_BUDGET_MS)}`);
+    failed = true;
+  } else {
+    console.log(`PASS: max active-frame spike ${formatMs(current.maxActiveFrameMs)} <= budget ${formatMs(MAX_ACTIVE_FRAME_BUDGET_MS)}`);
+  }
+
+  if (failed) {
+    process.exitCode = 1;
+  }
 }
 
 main().catch((error) => {

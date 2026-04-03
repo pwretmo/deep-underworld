@@ -6,6 +6,9 @@ const DT = 1 / 60;
 const WARMUP_FRAMES = 90;
 const MEASURE_FRAMES = 180;
 const BENCHMARK_SEEDS = [101, 202, 303, 404, 505, 606];
+
+// Budget thresholds (~1.5× observed baseline at 32 creatures)
+const P95_BUDGET_MS = 3.0;
 const TOTAL_CREATURE_COUNTS = [4, 8, 16, 32];
 
 const TWO_PI = Math.PI * 2;
@@ -1268,6 +1271,17 @@ function main() {
   console.log(
     `| P95 slope (${first.totalCreatureCount}->${last.totalCreatureCount}) | ${formatMs(p95SlopeLegacy)} / creature | ${formatMs(p95SlopeCurrent)} / creature | ${formatPercent(reductionPercent(p95SlopeLegacy, p95SlopeCurrent))} lower |`,
   );
+
+  // Assertions
+  const worstCase = aggregateResults[aggregateResults.length - 1];
+  const actualP95 = worstCase.current.p95FrameMs;
+  console.log("");
+  if (actualP95 > P95_BUDGET_MS) {
+    console.log(`FAIL: p95 per-frame cost ${formatMs(actualP95)} > budget ${formatMs(P95_BUDGET_MS)} (at ${worstCase.totalCreatureCount} creatures)`);
+    process.exitCode = 1;
+  } else {
+    console.log(`PASS: p95 per-frame cost ${formatMs(actualP95)} <= budget ${formatMs(P95_BUDGET_MS)} (at ${worstCase.totalCreatureCount} creatures)`);
+  }
 }
 
 main();
