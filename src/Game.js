@@ -12,6 +12,7 @@ import { AbyssEncounter } from "./encounters/AbyssEncounter.js";
 import { qualityManager } from "./QualityManager.js";
 import { PhysicsWorld } from "./physics/PhysicsWorld.js";
 import { LightingPolicy } from "./lighting/LightingPolicy.js";
+import { DEBUG, runInvariants } from "./utils/debug.js";
 
 const DEFAULT_RENDERER_OPTIONS = Object.freeze({
   antialias: true,
@@ -240,6 +241,8 @@ export class Game {
     // Draw-call diagnostics (enabled with ?debug URL param)
     this._debugMode = false;
     this._lastDrawCallLog = 0;
+    // Frame budget warning state (active when ?debug)
+    this._debugSlowFrameStreak = 0;
     // Preload warmup and event binding are deferred to async init() because
     // those paths touch renderer-dependent systems that require renderer.init().
     // _initEnvironmentColors() and _animate() are deferred to async init()
@@ -1209,6 +1212,36 @@ export class Game {
         exposure: this.renderer.toneMappingExposure,
       });
       if (this._stats) this._stats.update();
+
+      // --- Dev-mode frame budget warnings (zero cost in production) ---
+      if (DEBUG) {
+        const _frameElapsed = performance.now() - _frameStart;
+
+        // Warn if total frame time > 33 ms for 5+ consecutive frames
+        if (_frameElapsed > 33) {
+          this._debugSlowFrameStreak++;
+          if (this._debugSlowFrameStreak >= 5) {
+            console.warn(
+              `[debug] Frame budget exceeded: ${_frameElapsed.toFixed(1)}ms ` +
+              `(${this._debugSlowFrameStreak} consecutive slow frames)`,
+            );
+          }
+        } else {
+          this._debugSlowFrameStreak = 0;
+        }
+
+        // Warn if active point lights exceed tier max
+        const _tierMax = qualityManager.settings.maxPointLights;
+        const _activeCount = this._pointLightBudget.activeLights.length;
+        if (_activeCount > _tierMax) {
+          console.warn(
+            `[debug] Point light count (${_activeCount}) exceeds ` +
+            `tier max (${_tierMax})`,
+          );
+        }
+
+        runInvariants();
+      }
 
       // Draw-call diagnostics — log once per second when ?debug is set.
       // renderer.info auto-resets at the start of each render call, so
