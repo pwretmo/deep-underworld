@@ -38,7 +38,7 @@ export class HUD {
     this.depthDisplay = document.getElementById('depth-display');
     this.depthZone = document.getElementById('depth-zone');
     this.warningText = document.getElementById('warning-text');
-    this.sonarCanvas = document.getElementById('sonar');
+    this.sonarCanvas = /** @type {HTMLCanvasElement} */ (document.getElementById('sonar'));
     this.sonarCtx = this.sonarCanvas.getContext('2d');
     this.warningTimer = 0;
     this.sonarPings = [];
@@ -72,7 +72,7 @@ export class HUD {
     this._bgLoadingVisible = false;
 
     this.creatureList.addEventListener('click', (e) => {
-      const entry = e.target.closest('.creature-entry');
+      const entry = /** @type {HTMLElement|null} */ (/** @type {Element} */ (e.target).closest('.creature-entry'));
       if (!entry || !entry.dataset.creatureType) return;
       this.selectedCreatureType = entry.dataset.creatureType;
       this.selectedCreatureIndex = this.creatureTypes.indexOf(this.selectedCreatureType);

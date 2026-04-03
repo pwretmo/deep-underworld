@@ -307,7 +307,7 @@ export class Terrain {
       this._enqueueFinalization(request.key, data.cx, data.cz, data.payload);
     };
 
-    window.addEventListener("qualitychange", (e) => {
+    window.addEventListener("qualitychange", (/** @type {CustomEvent} */ e) => {
       this.viewDistance = e.detail.settings.terrainViewDistance;
       if (this.lastChunkX !== null) {
         this._rebuildPendingAround(this.lastChunkX, this.lastChunkZ);

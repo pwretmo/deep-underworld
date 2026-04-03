@@ -19,6 +19,7 @@ const DEFAULT_RENDERER_OPTIONS = Object.freeze({
 });
 
 async function resolveRendererOptions() {
+  /** @type {Record<string, any>} */
   const rendererOptions = { ...DEFAULT_RENDERER_OPTIONS };
 
   if (typeof navigator === "undefined") {
@@ -31,10 +32,10 @@ async function resolveRendererOptions() {
   }
 
   try {
-    const adapter = await navigator.gpu.requestAdapter({
+    const adapter = await navigator.gpu.requestAdapter(/** @type {*} */ ({
       powerPreference: rendererOptions.powerPreference,
       featureLevel: "compatibility",
-    });
+    }));
 
     if (!adapter) {
       rendererOptions.forceWebGL = true;
@@ -170,7 +171,7 @@ export class Game {
     this.creatureManager = this.creatures;
 
     // Quality tier change listener
-    window.addEventListener("qualitychange", (e) => {
+    window.addEventListener("qualitychange", (/** @type {CustomEvent} */ e) => {
       const s = e.detail.settings;
       const tier = e.detail.tier;
       this.renderer.shadowMap.enabled = s.shadowMapEnabled;
@@ -396,7 +397,7 @@ export class Game {
       }
     });
 
-    this.player.onLockChange = (locked) => {
+    /** @type {any} */ (this.player).onLockChange = (locked) => {
       if (locked) {
         if (this.pendingStart && !this.gameOver) {
           this._beginGameplay();
@@ -698,7 +699,7 @@ export class Game {
     }
   }
 
-  async _warmOpeningFrames({ onProgress } = {}) {
+  async _warmOpeningFrames({ onProgress } = /** @type {any} */ ({})) {
     const requiredResponsiveFrames = 6;
     let responsiveFrames = 0;
     for (let i = 0; i < 180; i++) {

@@ -320,7 +320,7 @@ export class Ocean {
     scene.background = new THREE.Color(0x006994);
 
     // React to quality tier changes for shadow map size and castShadow
-    window.addEventListener("qualitychange", (e) => {
+    window.addEventListener("qualitychange", (/** @type {CustomEvent} */ e) => {
       const newTier = e.detail.tier;
       const size = e.detail.settings.shadowMapSize || 1024;
       this.sunLight.castShadow = newTier === "high" || newTier === "ultra";
@@ -330,7 +330,7 @@ export class Ocean {
         this.sunLight.shadow.map = null;
       }
       this._rebuildHeightfield(newTier);
-      this._rebuildParticles(e.detail.settings);
+      this._rebuildParticles(/** @type {CustomEvent} */ (e).detail.settings);
       this._rebuildWaterSurface();
     });
   }

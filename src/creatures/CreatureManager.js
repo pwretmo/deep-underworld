@@ -40,14 +40,14 @@ let DESPAWN_DISTANCE_SQ = DESPAWN_DISTANCE * DESPAWN_DISTANCE;
 let CULL_DISTANCE_SQ = CULL_DISTANCE * CULL_DISTANCE;
 const QUEUE_DRAIN_PER_FRAME = 1;
 
-window.addEventListener('qualitychange', (e) => {
+window.addEventListener('qualitychange', (/** @type {CustomEvent} */ e) => {
   const s = e.detail.settings;
   DESPAWN_DISTANCE = s.creatureDespawnDistance;
   CULL_DISTANCE = s.creatureCullDistance;
   MAX_CREATURES = s.maxCreatures;
   DESPAWN_DISTANCE_SQ = DESPAWN_DISTANCE * DESPAWN_DISTANCE;
   CULL_DISTANCE_SQ = CULL_DISTANCE * CULL_DISTANCE;
-  CREATURE_VISIBILITY_DEPTH_BUDGETS = VISIBILITY_BUDGETS_BY_TIER[e.detail.tier] || VISIBILITY_BUDGETS_BY_TIER.high;
+  CREATURE_VISIBILITY_DEPTH_BUDGETS = VISIBILITY_BUDGETS_BY_TIER[/** @type {CustomEvent} */ (e).detail.tier] || VISIBILITY_BUDGETS_BY_TIER.high;
 });
 
 function _distSq(a, b) {

@@ -43,6 +43,7 @@ export class AudioManager {
    */
   start() {
     if (this.started) return;
+    // @ts-ignore — webkitAudioContext is a legacy vendor-prefixed API
     const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
     this.ctx = new AudioContextCtor();
     this.masterGain = this.ctx.createGain();

@@ -11,15 +11,18 @@
     "generate:preload-lookup": "node scripts/generate-preload-lookup-artifact.mjs",
     "prebuild": "npm run generate:preload-lookup",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck": "npx tsc --noEmit"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.19.3",
     "three": "^0.183.2"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "chrome-devtools-mcp": "^0.20.3",
     "eslint": "^10.1.0",
+    "globals": "^17.4.0",
     "lighthouse": "^13.0.3",
     "stats-gl": "^4.1.0",
     "typescript": "^6.0.2",

@@ -161,7 +161,7 @@ export class PreloadCoordinator {
     return this._descentAssist.active;
   }
 
-  async primeStartBaseline({ onProgress } = {}) {
+  async primeStartBaseline({ onProgress } = /** @type {any} */ ({})) {
     const token = { cancelled: false };
 
     // Yield before any heavy synchronous work so the browser can paint the
