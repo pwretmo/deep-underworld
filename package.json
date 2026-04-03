@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "lint": "eslint src/",
     "profile:creature-deformation": "node scripts/profile-creature-deformation.mjs",
     "profile:environment-animation": "node scripts/profile-environment-animation.mjs",
     "profile:terrain-chunk-apply": "node scripts/profile-terrain-chunk-apply.mjs",
