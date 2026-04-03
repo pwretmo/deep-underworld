@@ -69,12 +69,39 @@ Every bug fix must identify and address the **root cause**, not symptoms. Before
 
 If a proper fix is complex, break it into incremental steps — but the end state must preserve 100% of existing functionality. A partial improvement that moves toward the proper fix is acceptable; a shortcut that removes functionality is not.
 
+### Error Messages Are Symptoms — Never Treat Them as Diagnoses
+
+**An error message tells you _what_ failed, not _why_.**
+
+Before proposing any fix, the agent must ask: **"Does this error make physical sense given the known hardware, configuration, and codebase?"** If the answer is no, the error is a downstream symptom of a deeper code bug — not a hardware or platform limitation.
+
+Examples of **prohibited** reasoning:
+
+| Error message                        | Hardware context      | Prohibited conclusion                     | Required approach                                                    |
+| ------------------------------------ | --------------------- | ----------------------------------------- | -------------------------------------------------------------------- |
+| `E_OUTOFMEMORY` creating pipeline   | RTX 4090 (24 GB VRAM) | "GPU can't handle it, fall back to WebGL" | Investigate why 1100+ pipelines are created — fix the pipeline explosion |
+| `WebGPU Device Lost`                 | Modern discrete GPU   | "WebGPU is unstable, use WebGL"           | Find what caused the device loss (resource leak, API misuse)         |
+| `Out of memory` on texture upload    | 16 GB RAM             | "Reduce texture resolution"               | Find the leak or duplication causing excessive memory use            |
+| `Maximum call stack size exceeded`   | Any                   | "Increase stack size"                     | Fix the infinite recursion or unbounded recursion depth              |
+
+### No Implementation Before Diagnosis
+
+**No agent may write, edit, or propose code changes until root-cause analysis is complete.**
+
+A bad diagnosis that stays verbal is recoverable. A bad diagnosis turned into code creates regressions that compound the damage. The workflow is:
+
+1. **Investigate** — gather evidence (logs, code paths, profiling, hardware specs)
+2. **Diagnose** — state the root cause explicitly and explain why it makes sense given the evidence
+3. **Propose** — describe the fix approach to the user
+4. **Wait** — do not implement until the user confirms the approach (or the agent is operating in a dispatch where the diagnosis has already been validated)
+5. **Implement** — only after steps 1–4 are complete
+
 ### Applying These Rules by Role
 
-- **Workers** (local and cloud): Must follow these rules when implementing any change. If a task description or suggested fix implies removing a feature, the worker must propose a proper alternative instead.
-- **Reviewers**: Must reject any PR that removes, disables, or downgrades functionality to fix a bug. This is a **blocking** review issue — it cannot be waived.
-- **UX Testers**: Suggested fixes in issue reports must comply with these rules. Never suggest removing a feature as a fix.
-- **Orchestrator**: When re-dispatching a worker with review comments, reinforce these rules if the rejected fix involved a feature removal.
+- **Workers** (local and cloud): Must follow these rules when implementing any change. If a task description or suggested fix implies removing a feature, the worker must propose a proper alternative instead. Must complete root-cause analysis and present a diagnosis before writing any code.
+- **Reviewers**: Must reject any PR that removes, disables, or downgrades functionality to fix a bug. Must reject any PR where the commit message or PR description cannot articulate the root cause. These are **blocking** review issues — they cannot be waived.
+- **UX Testers**: Suggested fixes in issue reports must comply with these rules. Never suggest removing a feature as a fix. Error messages in console logs must be investigated as symptoms, not forwarded as diagnoses.
+- **Orchestrator**: When re-dispatching a worker with review comments, reinforce these rules if the rejected fix involved a feature removal. When triaging a bug report, must not jump to implementation — must first complete the investigate → diagnose → propose → wait → implement sequence.
 
 ### Browser Hygiene — Mandatory
 
