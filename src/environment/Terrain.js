@@ -591,7 +591,7 @@ export class Terrain {
       const slotsForType = [];
       for (let i = 0; i < count; i++) {
         const slot = freeList.pop();
-        if (slot == null) break; // pool exhausted — skip gracefully
+        if (slot === null || slot === undefined) break; // pool exhausted — skip gracefully
 
         this._rockScratchMatrix.fromArray(batch.matrices, i * 16);
         // Payload matrices are in chunk-local space; translate to world space
@@ -672,7 +672,7 @@ export class Terrain {
 
     // If the geometry stage completed it was added to the BatchedMesh;
     // remove both the instance and the geometry slot now.
-    if (job.mesh?.userData?.batchedInstanceId != null) {
+    if (job.mesh?.userData?.batchedInstanceId !== null && job.mesh?.userData?.batchedInstanceId !== undefined) {
       this._terrainBatchedMesh.deleteInstance(
         job.mesh.userData.batchedInstanceId,
       );

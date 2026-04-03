@@ -302,7 +302,7 @@ export class Flora {
       const dummy = new THREE.Object3D();
       for (const d of payload.orbs) {
         const slot = this._orbFreeSlots.pop();
-        if (slot == null) break; // pool exhausted — skip gracefully
+        if (slot === null || slot === undefined) break; // pool exhausted — skip gracefully
         dummy.position.set(d.x + offsetX, d.y, d.z + offsetZ);
         dummy.scale.setScalar(d.size);
         dummy.updateMatrix();
@@ -335,7 +335,7 @@ export class Flora {
       const dummy = new THREE.Object3D();
       for (const d of payload.tubes) {
         const slot = this._tubeFreeSlots.pop();
-        if (slot == null) break;
+        if (slot === null || slot === undefined) break;
         dummy.position.set(d.x + offsetX, d.y, d.z + offsetZ);
         dummy.scale.set(1, d.height, 1);
         dummy.rotation.set(d.rx, 0, d.rz);
@@ -353,7 +353,7 @@ export class Flora {
       const dummy = new THREE.Object3D();
       for (const d of payload.tubeTips) {
         const slot = this._tipFreeSlots.pop();
-        if (slot == null) break;
+        if (slot === null || slot === undefined) break;
         dummy.position.set(d.x + offsetX, d.y, d.z + offsetZ);
         dummy.scale.setScalar(1);
         dummy.updateMatrix();
