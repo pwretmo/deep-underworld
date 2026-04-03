@@ -5,6 +5,9 @@ export default defineConfig({
   server: {
     open: false,
   },
+  test: {
+    include: ['src/**/*.test.js'],
+  },
   build: {
     outDir: 'dist',
     sourcemap: true,
