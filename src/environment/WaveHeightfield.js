@@ -155,9 +155,7 @@ export class WaveHeightfield {
       heightBuf.element(idx).assign(h);
 
       // Analytical partial derivatives for normal computation
-      const dHdx = cos(
-        worldX.mul(WAVE_X_SCALE).add(u.time.mul(WAVE_X_SPEED)),
-      )
+      const dHdx = cos(worldX.mul(WAVE_X_SCALE).add(u.time.mul(WAVE_X_SPEED)))
         .mul(WAVE_X_SCALE * WAVE_X_AMP)
         .add(
           cos(
@@ -183,9 +181,11 @@ export class WaveHeightfield {
         );
 
       // Store normal as (dHdx, 1.0, dHdz, 0.0) — consumers normalize as needed
-      normalBuf.element(idx).assign(
-        vec3(dHdx.negate(), float(1.0), dHdz.negate()).normalize().toVec4(),
-      );
+      normalBuf
+        .element(idx)
+        .assign(
+          vec3(dHdx.negate(), float(1.0), dHdz.negate()).normalize().toVec4(),
+        );
     });
 
     return computeFn().compute(this._totalCells);
