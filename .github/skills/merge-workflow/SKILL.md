@@ -62,7 +62,10 @@ Parameters:
   pullNumber: <number>
   merge_method: "squash"
   commit_title: "<PR title>"
+  commit_message: "<PR body>"
 ```
+
+**Why `commit_message` is required:** GitHub's auto-close for squash merges checks the **commit message**, not the original PR body. If you omit `commit_message`, any `Fixes #…` / `Closes #…` keywords in the PR body will be silently dropped and linked issues will not auto-close.
 
 ## Post-Merge Verification
 
@@ -110,6 +113,9 @@ git worktree prune
 
 # Delete the local branch (force required — squash merge leaves tip off main)
 git branch -D agent/<slug>
+
+# Delete the remote branch (GitHub auto-delete may handle this, but be explicit)
+git push origin --delete agent/<slug>
 ```
 
 If the worktree directory doesn't exist (already cleaned), just prune and move on.
@@ -125,7 +131,7 @@ For each approved PR:
   5. git pull origin main
   6. npm run build
   7. IF FAIL → stop, report
-  8. IF local branch → remove worktree, prune, delete branch
+  8. IF local branch → remove worktree, prune, delete local + remote branch
   9. Report success, continue to next PR
 ```
 
