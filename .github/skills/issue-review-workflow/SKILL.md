@@ -160,6 +160,27 @@ Review for technical correctness and implementation readiness:
 
 Default behavior: answer open technical questions with the best-supported recommendation you can defend. Do not leave answerable questions vague.
 
+#### Regression Coverage Checkpoint
+
+Before finishing the engineer pass, ask: **"If this feature is implemented and a later PR breaks it, what test would catch that?"**
+
+Categorize the feature by regression risk type and recommend coverage accordingly:
+
+| Risk type | Examples | Recommended coverage |
+|---|---|---|
+| **Numeric tuning** | Lighting zones, physics constants, timing budgets | Golden-value snapshot tests that assert specific numeric outputs against known-good baselines |
+| **Behavioral logic** | AI state machines, collision rules, spawn placement | Behavior / state-transition tests that verify expected outputs for representative inputs |
+| **Performance-sensitive** | Particle counts, chunk streaming, frame budgets | Profiling script assertions that enforce measurable performance thresholds |
+| **Visual output** | Shaders, post-processing, HUD layout | Note for UX tester verification (screenshot comparison or manual checklist) |
+
+Apply the checkpoint as follows:
+
+1. **Categorize** — determine which risk type(s) the issue falls into. An issue may span multiple types.
+2. **Document** — add the recommended regression coverage directly to the issue body (in an `## Regression Coverage` section) or as a sub-issue when the coverage plan is substantial.
+3. **Flag when unclear** — if no obvious regression strategy exists for a meaningful part of the feature, add a `## Regression Coverage` section that explicitly states: _"No automated regression strategy identified — requires human review."_ This ensures unresolved coverage gaps are visible, not silently skipped.
+
+Issues leaving the review workflow must have regression coverage either documented or explicitly flagged.
+
 Engineer pass outputs may include:
 
 - Recommended solution and rationale
@@ -168,6 +189,7 @@ Engineer pass outputs may include:
 - Research-backed best practices with citations
 - Rejected alternatives with brief reasons
 - Concrete defaults where the issue previously left implementation-critical questions open
+- Regression coverage recommendation or flag for human review
 
 ### Pass 3: Technical Writer
 
