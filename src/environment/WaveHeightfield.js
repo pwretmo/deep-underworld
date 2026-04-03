@@ -10,6 +10,7 @@ import {
   int,
   min,
   mix,
+  mod,
   sin,
   storage,
   uniform,
@@ -124,7 +125,7 @@ export class WaveHeightfield {
       const gs = u.gridSize.toFloat();
 
       // 2D grid indices from flat index
-      const ix = idx.modInt(int(u.gridSize)).toFloat();
+      const ix = mod(int(idx), int(u.gridSize)).toFloat();
       const iz = idx.div(int(u.gridSize)).toFloat();
 
       // Map grid cell to world XZ centered on player
