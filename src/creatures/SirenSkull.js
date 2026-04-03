@@ -1,5 +1,5 @@
 import * as THREE from "three/webgpu";
-import { abs, attribute, cos, length, materialEmissive, positionLocal, sin, sub, uniform, uv, varying, vec3 } from "three/tsl";
+import { abs, attribute, length, materialEmissive, positionLocal, sin, sub, uniform, uv, varying, vec3 } from "three/tsl";
 import { toStandardMaterial } from "./lodUtils.js";
 
 const SIREN_LOD_NEAR_DISTANCE = 30;

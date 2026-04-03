@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { abs, clamp, dot, float as tslFloat, materialEmissive, materialOpacity, normalLocal, normalView, positionLocal, positionView, pow, sin, sub, uniform, uv, varying, vec3 } from 'three/tsl';
+import { abs, clamp, dot, materialEmissive, materialOpacity, normalLocal, normalView, positionLocal, positionView, pow, sin, sub, uniform, uv, varying, vec3 } from 'three/tsl';
 import { qualityManager } from '../QualityManager.js';
 
 const TWO_PI = Math.PI * 2;

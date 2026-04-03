@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { abs, clamp, dot, materialEmissive, normalLocal, normalView, positionLocal, positionView, pow, sin, smoothstep, sub, uniform, vec3 } from 'three/tsl';
+import { abs, dot, materialEmissive, normalLocal, normalView, positionLocal, positionView, pow, sin, smoothstep, sub, uniform, vec3 } from 'three/tsl';
 import { qualityManager } from '../QualityManager.js';
 
 let detailMaps = null;
@@ -575,7 +575,7 @@ export class Anglerfish {
       }
     }
 
-    let targetSpeed = this.baseSpeed;
+    let targetSpeed;
 
     if (this.state === 'patrol') {
       this.patrolAngle += dt * (0.22 + this.patrolVariance * 0.14);

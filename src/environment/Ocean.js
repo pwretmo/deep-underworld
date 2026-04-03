@@ -2,7 +2,6 @@ import * as THREE from "three/webgpu";
 import {
   abs,
   clamp,
-  compute,
   cos,
   dot,
   exp,
@@ -26,7 +25,6 @@ import {
   pow,
   sin,
   smoothstep,
-  step,
   storage,
   texture,
   uniform,

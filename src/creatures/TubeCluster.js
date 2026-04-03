@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { attribute, clamp as tslClamp, cos, dot, float as tslFloat, materialEmissive, max as tslMax, mix as tslMix, normalView, positionLocal, positionView, pow, sin, sub, uniform, uv, vec2, vec3, vec4 } from 'three/tsl';
+import { attribute, clamp as tslClamp, cos, dot, float as tslFloat, materialEmissive, max as tslMax, mix as tslMix, normalView, positionLocal, positionView, pow, sin, sub, uniform, uv, vec2, vec3 } from 'three/tsl';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { LOD_NEAR_DISTANCE, LOD_MEDIUM_DISTANCE, toStandardMaterial } from './lodUtils.js';
 import { qualityManager } from '../QualityManager.js';

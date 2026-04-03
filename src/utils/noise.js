@@ -19,16 +19,8 @@ function seed(s) {
   if (s > 0 && s < 1) s *= 65536;
   s = Math.floor(s);
   if (s < 256) s |= s << 8;
-  const p = new Uint8Array(256);
   for (let i = 0; i < 256; i++) {
-    let v;
-    if (i & 1) {
-      v = p[i] ^ (s & 255);
-    } else {
-      v = p[i] ^ ((s >> 8) & 255);
-    }
-    // Simple hash
-    v = ((i * 1664525 + 1013904223 + s) >>> 0) & 255;
+    const v = ((i * 1664525 + 1013904223 + s) >>> 0) & 255;
     perm[i] = perm[i + 256] = v;
     gradP[i] = gradP[i + 256] = grad3[v % 12];
   }

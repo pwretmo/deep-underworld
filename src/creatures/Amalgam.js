@@ -563,7 +563,7 @@ export class Amalgam {
       skullGroup.add(skull);
 
       // Jaw (lower half-sphere, hinged)
-      let jaw = null;
+      let jaw;
       if (profile.hasJawAnim || !isFar) {
         const jawGeo = new THREE.SphereGeometry(
           r * 0.75,

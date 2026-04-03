@@ -655,7 +655,6 @@ export class AudioManager {
 
   playEncounterDetected() {
     if (!this.ctx) return;
-    const now = this.ctx.currentTime;
     this._duckBuses({ music: 0.58, ambience: 0.7, threat: 1, ui: 1 }, 1.1, 0.02, 1.4);
 
     this._playSubDrop({ startFreq: 86, endFreq: 24, duration: 3.1, gain: 0.05 });

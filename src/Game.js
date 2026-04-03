@@ -1027,7 +1027,7 @@ export class Game {
     }
   }
 
-  _showCreatureTease(creaturesProgress) {
+  _showCreatureTease(_creaturesProgress) {
     const teaseMap = {
       jellyfish: "Bioluminescent pulses detected...",
       anglerfish: "Something lurks in the dark...",
