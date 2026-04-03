@@ -61,22 +61,22 @@ These are prompts you type into the VS Code Copilot chat. The orchestrator will 
 
 #### Ship it (full workflow)
 
-Use `#prompt:ship-it` to run the entire pipeline — implement, review, fix, and merge — in one shot:
+Use `/ship-it` to run the entire pipeline — implement, review, fix, and merge — in one shot:
 
-- *`#prompt:ship-it` Add bioluminescent particles that trail behind the player*
-- *`#prompt:ship-it` Fix the camera clipping through terrain*
+- *`/ship-it` Add bioluminescent particles that trail behind the player*
+- *`/ship-it` Fix the camera clipping through terrain*
 
 #### Ship an epic (multi-issue workflow)
 
-Use `#prompt:ship-epic` to process an entire epic's sub-issues in dependency order:
+Use `/ship-epic` to process an entire epic's sub-issues in dependency order:
 
-- *`#prompt:ship-epic` 53*
+- *`/ship-epic` 53*
 
 #### Review an issue or epic before coding
 
-Use `#prompt:review-issue` to tighten an issue tree for implementation by a coding agent:
+Use `/review-issue` to tighten an issue tree for implementation by a coding agent:
 
-- *`#prompt:review-issue` 53*
+- *`/review-issue` 53*
 - *"Review issue #93, answer the open technical questions, and split it if needed."*
 
 #### UX test the game
@@ -87,7 +87,7 @@ Use `#prompt:review-issue` to tighten an issue tree for implementation by a codi
 
 #### Pre-flight check for UX testing
 
-Use `#prompt:ux-tester-readiness` to verify infrastructure, game runtime, and agent dependencies before dispatching the UX Tester.
+Use `/ux-tester-readiness` to verify infrastructure, game runtime, and agent dependencies before dispatching the UX Tester.
 
 ### How It Works
 
@@ -128,7 +128,7 @@ Skills provide domain-specific procedural knowledge that agents reference during
 
 ### Prompt Files
 
-Reusable prompt templates live in `.github/prompts/`. Reference them in chat with `#prompt:<name>`.
+Reusable prompt templates live in `.github/prompts/`. Reference them in chat with `/<name>`.
 
 | Prompt | File | Description |
 | --- | --- | --- |
