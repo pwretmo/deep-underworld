@@ -15,7 +15,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "perf": "node scripts/profile-creature-deformation.mjs && node scripts/profile-environment-animation.mjs && node scripts/profile-terrain-chunk-apply.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.19.3",

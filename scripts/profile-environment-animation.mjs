@@ -9,6 +9,10 @@ const CHUNK_SIZE = 80;
 const FLORA_DENSITY_SCALE = 1.0;
 const REPRESENTATIVE_SCENE_SEEDS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
+// Budget thresholds (~1.5× observed baseline)
+const CURRENT_PER_FRAME_BUDGET_MS = 0.1;
+const MAX_UNIFORM_UPDATES_PER_FRAME = 2;
+
 const DT = 1 / 60;
 const LEGACY_WARMUP_FRAMES = 240;
 const LEGACY_MEASURE_FRAMES = 2400;
@@ -402,4 +406,35 @@ const reportLines = [
 
 for (const line of reportLines) {
   console.log(line);
+}
+
+// Count uniform updates per step
+let uniformUpdateCount = 0;
+const countingState = {
+  time: 0,
+  kelpTimeUniform: { set value(_v) { uniformUpdateCount++; } },
+  waterTimeUniform: { set value(_v) { uniformUpdateCount++; } },
+};
+stepCurrentCombined(countingState);
+
+// Assertions
+console.log("");
+let failed = false;
+
+if (uniformUpdateCount > MAX_UNIFORM_UPDATES_PER_FRAME) {
+  console.log(`FAIL: uniform updates per frame ${uniformUpdateCount} > budget ${MAX_UNIFORM_UPDATES_PER_FRAME}`);
+  failed = true;
+} else {
+  console.log(`PASS: uniform updates per frame ${uniformUpdateCount} <= budget ${MAX_UNIFORM_UPDATES_PER_FRAME}`);
+}
+
+if (currentMsPerFrame > CURRENT_PER_FRAME_BUDGET_MS) {
+  console.log(`FAIL: per-frame cost ${formatMs(currentMsPerFrame)} > budget ${formatMs(CURRENT_PER_FRAME_BUDGET_MS)}`);
+  failed = true;
+} else {
+  console.log(`PASS: per-frame cost ${formatMs(currentMsPerFrame)} <= budget ${formatMs(CURRENT_PER_FRAME_BUDGET_MS)}`);
+}
+
+if (failed) {
+  process.exitCode = 1;
 }
