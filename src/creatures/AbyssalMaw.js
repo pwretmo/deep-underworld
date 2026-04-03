@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { abs, atan, dot, length, materialEmissive, mix, normalLocal, normalView, normalize, positionLocal, positionView, pow, sin, smoothstep, step, sub, uniform, uv, varying, vec2, vec3 } from 'three/tsl';
+import { abs, atan, dot, length, materialEmissive, mix, normalLocal, normalView, normalize, positionLocal, positionView, pow, sin, smoothstep, step, sub, uniform, varying, vec2, vec3 } from 'three/tsl';
 import { LOD_NEAR_DISTANCE, LOD_MEDIUM_DISTANCE, toStandardMaterial } from './lodUtils.js';
 
 // ── Pre-allocated temps (zero per-frame allocations) ────────────────────────

@@ -231,7 +231,7 @@ export class BoneWorm {
     const isFar = tierName === 'far';
     const tierGroup = new THREE.Group();
     const segmentRefs = [];
-    let jaw = null;
+    let jaw;
 
     // ── Materials ──────────────────────────────────────────────────────────
     const boneNormal = profile.hasMicroDetail ? _createBoneNormalTexture() : null;

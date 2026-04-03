@@ -154,7 +154,7 @@ const noised3D = Fn(([inputPosition]) => {
   return vec4(v, d.x, d.y, d.z);
 });
 
-function fbm3D(inputPosition) {
+function _fbm3D(inputPosition) {
   return noise3D(inputPosition)
     .add(noise3D(inputPosition.mul(2.0)).mul(0.5))
     .add(noise3D(inputPosition.mul(4.0)).mul(0.25))

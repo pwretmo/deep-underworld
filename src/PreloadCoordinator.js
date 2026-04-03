@@ -1,4 +1,3 @@
-import * as THREE from "three";
 import { PRELOAD_LOOKUP_ARTIFACT } from "./generated/preloadLookupArtifact.js";
 
 const SCHEMA_VERSION = 1;

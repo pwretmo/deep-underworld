@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { abs, cos, dot, float as tslFloat, materialEmissive, max as tslMax, mix as tslMix, normalView, positionLocal, positionView, pow, sin, smoothstep as tslSmoothstep, sub, texture as tslTexture, uniform, uv, varying, vec2, vec3 } from 'three/tsl';
+import { abs, dot, float as tslFloat, materialEmissive, max as tslMax, mix as tslMix, normalView, positionLocal, positionView, pow, sin, smoothstep as tslSmoothstep, sub, texture as tslTexture, uniform, uv, varying, vec2, vec3 } from 'three/tsl';
 
 // ─── Dark jellyfish that absorbs light — inverse bioluminescence with void tendrils ───
 // Photorealistic 3-tier LOD creature with per-vertex bell contraction,

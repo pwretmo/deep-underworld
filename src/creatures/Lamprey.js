@@ -429,7 +429,7 @@ export class Lamprey {
     // ── Weight & inertia: tail trails head with fluid-drag ──
     const dx = this.group.position.x - this._prevPos.x;
     const dy = this.group.position.y - this._prevPos.y;
-    const dz = this.group.position.z - this._prevPos.z;
+    const _dz = this.group.position.z - this._prevPos.z;
     this._prevPos.copy(this.group.position);
 
     const trailStrength = 0.15;

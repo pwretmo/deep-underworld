@@ -102,7 +102,7 @@ export class AbyssEncounter {
 
   // --- State handlers ---
 
-  _updateIdle(depth, player, scene, lightingPolicy, hud) {
+  _updateIdle(depth, player, scene, lightingPolicy, _hud) {
     if (depth >= TRIGGER_DEPTH) {
       this._transition(State.TRIGGERED);
       // Capture base profile at trigger time
@@ -483,7 +483,7 @@ export class AbyssEncounter {
 
   // --- Animation ---
 
-  _animateEntity(delta) {
+  _animateEntity(_delta) {
     if (!this.entity) return;
 
     // Slow undulating rotation to convey living mass
