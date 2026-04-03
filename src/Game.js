@@ -26,6 +26,7 @@ async function resolveRendererOptions() {
   }
 
   if (!navigator.gpu?.requestAdapter) {
+    // @ts-expect-error forceWebGL is a Three.js WebGPURenderer option not in base types
     rendererOptions.forceWebGL = true;
     return rendererOptions;
   }
@@ -33,14 +34,17 @@ async function resolveRendererOptions() {
   try {
     const adapter = await navigator.gpu.requestAdapter({
       powerPreference: rendererOptions.powerPreference,
+      // @ts-expect-error featureLevel is a WebGPU extension not yet in lib.dom.d.ts
       featureLevel: "compatibility",
     });
 
     if (!adapter) {
+      // @ts-expect-error forceWebGL is a Three.js WebGPURenderer option not in base types
       rendererOptions.forceWebGL = true;
       return rendererOptions;
     }
   } catch (_) {
+    // @ts-expect-error forceWebGL is a Three.js WebGPURenderer option not in base types
     rendererOptions.forceWebGL = true;
     return rendererOptions;
   }
@@ -52,9 +56,11 @@ async function resolveRendererOptions() {
   try {
     const probeCanvas = document.createElement("canvas");
     if (!probeCanvas.getContext("webgpu")) {
+      // @ts-expect-error forceWebGL is a Three.js WebGPURenderer option not in base types
       rendererOptions.forceWebGL = true;
     }
   } catch (_) {
+    // @ts-expect-error forceWebGL is a Three.js WebGPURenderer option not in base types
     rendererOptions.forceWebGL = true;
   }
 
@@ -170,7 +176,7 @@ export class Game {
     this.creatureManager = this.creatures;
 
     // Quality tier change listener
-    window.addEventListener("qualitychange", (e) => {
+    window.addEventListener("qualitychange", (/** @type {CustomEvent} */ e) => {
       const s = e.detail.settings;
       const tier = e.detail.tier;
       this.renderer.shadowMap.enabled = s.shadowMapEnabled;
@@ -396,6 +402,7 @@ export class Game {
       }
     });
 
+    // @ts-expect-error onLockChange is a dynamic callback assigned at runtime
     this.player.onLockChange = (locked) => {
       if (locked) {
         if (this.pendingStart && !this.gameOver) {
@@ -698,7 +705,7 @@ export class Game {
     }
   }
 
-  async _warmOpeningFrames({ onProgress } = {}) {
+  async _warmOpeningFrames({ onProgress } = /** @type {{ onProgress?: Function }} */ ({})) {
     const requiredResponsiveFrames = 6;
     let responsiveFrames = 0;
     for (let i = 0; i < 180; i++) {

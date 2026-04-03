@@ -11,7 +11,8 @@
     "generate:preload-lookup": "node scripts/generate-preload-lookup-artifact.mjs",
     "prebuild": "npm run generate:preload-lookup",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.19.3",

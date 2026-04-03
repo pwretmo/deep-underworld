@@ -637,7 +637,7 @@ export class UnderwaterEffect {
     this._rebuildScaleLadder();
     this._applyComposerScale(true);
 
-    window.addEventListener("qualitychange", (e) => {
+    window.addEventListener("qualitychange", (/** @type {CustomEvent} */ e) => {
       this._qualityMaxScale = e.detail.settings.postProcessScale;
       this._setupBloom(e.detail.tier);
       this._setupGodrays(e.detail.tier);

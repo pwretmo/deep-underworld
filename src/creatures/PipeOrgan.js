@@ -769,7 +769,7 @@ export class PipeOrgan {
     }
 
     // Respawn when player has moved too far away
-    if (dist > 200) {
+    if (distSq > 40000) {
       const a = Math.random() * Math.PI * 2;
       this.group.position.set(
         playerPos.x + Math.cos(a) * 80, playerPos.y, playerPos.z + Math.sin(a) * 80
